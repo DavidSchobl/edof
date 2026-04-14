@@ -306,9 +306,9 @@ Available commands: `add_page`, `remove_page`, `add_textbox`, `add_image`, `add_
 A full desktop document editor ships with the repository:
 
 ```bash
-pip install edof[pyqt6]
-python edof_editor.py
-python edof_editor.py myfile.edof
+pip install edof[pyqt6]   # or edof[all]
+edof-editor               # open editor
+edof-editor myfile.edof   # open file directly
 ```
 
 **Canvas features:**
@@ -348,25 +348,25 @@ Fill templates and export from the command line without opening the editor:
 
 ```bash
 # Inspect a template
-python edof_cli.py info      template.edof
-python edof_cli.py objects   template.edof
-python edof_cli.py validate  template.edof
+edof-cli info      template.edof
+edof-cli objects   template.edof
+edof-cli validate  template.edof
 
 # Export with variables
-python edof_cli.py export template.edof output.png \
+edof-cli export template.edof output.png \
     --set name="Jan Novák" \
     --set date="2025-01-01" \
     --dpi 300
 
 # JSON variables
-python edof_cli.py export template.edof output.png \
+edof-cli export template.edof output.png \
     --json-vars '{"name":"Jan","score":"98"}'
 
 # All pages  (use {page} or {n} in filename)
-python edof_cli.py export template.edof page_{page}.png --all-pages
+edof-cli export template.edof page_{page}.png --all-pages
 
 # PDF
-python edof_cli.py export template.edof output.pdf
+edof-cli export template.edof output.pdf
 ```
 
 | Flag | Short | Description |
@@ -381,75 +381,8 @@ python edof_cli.py export template.edof output.pdf
 
 ---
 
-## Running Tests
 
-```bash
-pip install edof[dev]
-pytest
-pytest --cov=edof --cov-report=html   # with coverage report
-```
 
----
-
-## Publishing a New Release
-
-```bash
-pip install build twine
-
-# Bump version in pyproject.toml, then:
-python -m build
-twine check dist/*
-twine upload dist/*
-
-# Or via git tag (triggers GitHub Actions CI/CD):
-git tag v3.0.1
-git push origin v3.0.1
-```
-
----
-
-## Project Structure
-
-```
-edof-python/
-├── edof/                      # library package
-│   ├── format/
-│   │   ├── document.py        # Document, Page, ResourceStore
-│   │   ├── objects.py         # TextBox, ImageBox, Shape, QRCode, Group
-│   │   ├── styles.py          # TextStyle, StrokeStyle, FillStyle, ShadowStyle
-│   │   ├── variables.py       # VariableStore, VariableDef
-│   │   └── serializer.py      # .edof ZIP save/load
-│   ├── engine/
-│   │   ├── renderer.py        # Pillow-based page renderer
-│   │   ├── text_engine.py     # font discovery, measurement, auto-shrink/fill
-│   │   ├── transform.py       # Transform, unit helpers
-│   │   └── color.py           # color space conversion
-│   ├── export/
-│   │   ├── bitmap.py          # PNG/JPEG/TIFF/BMP export
-│   │   ├── pdf.py             # PDF via reportlab
-│   │   └── printer.py        # cross-platform printing
-│   ├── gui/
-│   │   ├── tkinter_canvas.py  # Tkinter widget
-│   │   └── pyqt6_widget.py    # PyQt6 widget
-│   ├── api/
-│   │   └── commands.py        # command dispatch + undo/redo
-│   └── utils/
-│       ├── compat.py          # backward-compat migration
-│       └── qr.py              # standalone QR helpers
-├── editor_lang/
-│   └── en.json                # English UI strings (add XX.json for other languages)
-├── tests/
-│   ├── test_document.py
-│   └── test_transform.py
-├── edof_editor.py             # desktop editor (PyQt6)
-├── edof_cli.py                # command-line tool
-├── pyproject.toml
-├── README.md
-├── CHANGELOG.md
-└── LICENSE
-```
-
----
 
 ## License
 
