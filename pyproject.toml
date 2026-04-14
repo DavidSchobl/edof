@@ -68,7 +68,7 @@ where = ["."]
 include = ["edof*"]
 
 [tool.setuptools.package-data]
-edof = ["py.typed"]
+edof = ["py.typed", "editor_lang/*.json"]
 
 [tool.black]
 line-length    = 100
@@ -89,3 +89,7 @@ addopts      = "-v --tb=short"
 
 [tool.coverage.run]
 source = ["edof"]
+
+[project.scripts]
+edof-editor = "edof._apps.editor:main"
+edof-cli    = "edof._apps.cli:main"

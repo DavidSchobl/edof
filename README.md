@@ -306,9 +306,9 @@ Available commands: `add_page`, `remove_page`, `add_textbox`, `add_image`, `add_
 A full desktop document editor ships with the repository:
 
 ```bash
-pip install edof[pyqt6]
-python edof_editor.py
-python edof_editor.py myfile.edof
+pip install edof[pyqt6]   # or edof[all]
+edof-editor               # open editor
+edof-editor myfile.edof   # open file directly
 ```
 
 **Canvas features:**
@@ -348,25 +348,25 @@ Fill templates and export from the command line without opening the editor:
 
 ```bash
 # Inspect a template
-python edof_cli.py info      template.edof
-python edof_cli.py objects   template.edof
-python edof_cli.py validate  template.edof
+edof-cli info      template.edof
+edof-cli objects   template.edof
+edof-cli validate  template.edof
 
 # Export with variables
-python edof_cli.py export template.edof output.png \
+edof-cli export template.edof output.png \
     --set name="Jan Novák" \
     --set date="2025-01-01" \
     --dpi 300
 
 # JSON variables
-python edof_cli.py export template.edof output.png \
+edof-cli export template.edof output.png \
     --json-vars '{"name":"Jan","score":"98"}'
 
 # All pages  (use {page} or {n} in filename)
-python edof_cli.py export template.edof page_{page}.png --all-pages
+edof-cli export template.edof page_{page}.png --all-pages
 
 # PDF
-python edof_cli.py export template.edof output.pdf
+edof-cli export template.edof output.pdf
 ```
 
 | Flag | Short | Description |
@@ -381,15 +381,12 @@ python edof_cli.py export template.edof output.pdf
 
 ---
 
-## Running Tests
 
-```bash
-pip install edof[dev]
-pytest
-pytest --cov=edof --cov-report=html   # with coverage report
-```
 
+<<<<<<< HEAD
 ---
+=======
+>>>>>>> 9472aa4 (feat: add console scripts, editor_lang, fix README)
 
 ## License
 

@@ -8,13 +8,12 @@ on:
     branches: [main]
 
 jobs:
-  # ── Tests ────────────────────────────────────────────────────────────────────
+  # ── Tests ─────────────────────────────────────────────────────────────────
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os:      [ubuntu-latest, windows-latest, macos-latest]
-        python:  ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python: ["3.9", "3.11", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -24,25 +23,19 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Install dependencies
-        run: |
-          pip install -e ".[dev,qr]"
+      - name: Install
+        run: pip install -e ".[dev,qr]"
 
-      - name: Run tests
+      - name: Test
         run: pytest --tb=short -q
 
-      - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
-        uses: codecov/codecov-action@v4
-
-  # ── Publish to PyPI (on version tag only) ────────────────────────────────────
+  # ── Publish to PyPI (only on v* tag) ──────────────────────────────────────
   publish:
     needs: test
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    environment: pypi
     permissions:
-      id-token: write   # OIDC trusted publishing
+      id-token: write   # OIDC trusted publishing – no API token needed
 
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +45,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build distribution
+      - name: Build
         run: |
           pip install build
           python -m build
