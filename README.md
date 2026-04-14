@@ -383,10 +383,6 @@ edof-cli export template.edof output.pdf
 
 
 
-<<<<<<< HEAD
----
-=======
->>>>>>> 9472aa4 (feat: add console scripts, editor_lang, fix README)
 
 ## License
 
