@@ -55,11 +55,11 @@ dev     = [
 ]
 
 [project.urls]
-Homepage      = "https://github.com/yourusername/edof"
-Documentation = "https://github.com/yourusername/edof#readme"
-Repository    = "https://github.com/yourusername/edof"
-"Bug Tracker" = "https://github.com/yourusername/edof/issues"
-Changelog     = "https://github.com/yourusername/edof/blob/main/CHANGELOG.md"
+Homepage      = "https://github.com/DavidSchobl/edof"
+Documentation = "https://github.com/DavidSchobl/edof#readme"
+Repository    = "https://github.com/DavidSchobl/edof"
+"Bug Tracker" = "https://github.com/DavidSchobl/edof/issues"
+Changelog     = "https://github.com/DavidSchobl/edof/blob/main/CHANGELOG.md"
 
 # ── Tool configuration ────────────────────────────────────────────────────────
 
@@ -72,7 +72,7 @@ edof = ["py.typed"]
 
 [tool.black]
 line-length    = 100
-target-version = ["py311"]
+target-version = ["py39","py310","py311","py312","py313"]
 
 [tool.ruff]
 line-length = 100
