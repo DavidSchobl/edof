@@ -1,0 +1,5 @@
+include LICENSE
+include README.md
+include CHANGELOG.md
+include edof/py.typed
+recursive-include edof *.py
