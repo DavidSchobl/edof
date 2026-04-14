@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%20|%203.10%20|%203.11%20|%203.12%20|%203.13-blue)](https://pypi.org/project/edof/)
 [![Tests](https://github.com/DavidSchobl/edof/actions/workflows/publish.yml/badge.svg)](https://github.com/DavidSchobl/edof/actions)
-[![Python](https://img.shields.io/pypi/pyversions/edof.svg)](https://pypi.org/project/edof/)
+[![PyPI](https://img.shields.io/badge/PyPI-coming%20soon-lightgrey)](https://pypi.org/project/edof/)
 
 **edof** is a Python library for programmatic document creation, template filling and high-quality export.  
 Documents are stored as `.edof` files – a versioned ZIP archive with a JSON document tree and all embedded resources (fonts, images).
@@ -365,6 +365,16 @@ pip install edof[all]
 edof-editor               # open empty editor
 edof-editor template.edof # open file directly
 ```
+
+> **Windows – command not found?**  
+> The `Scripts\` folder may not be in your PATH. Use this instead:
+> ```bash
+> python -m edof._apps.editor
+> python -m edof._apps.editor template.edof
+> ```
+> To fix permanently: run `python -c "import sysconfig; print(sysconfig.get_path('scripts'))"`,
+> copy the printed path and add it to your system PATH
+> (Start → Edit environment variables → Path → New → paste → OK → restart terminal).
 
 ### Canvas
 
