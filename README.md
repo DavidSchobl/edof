@@ -8,6 +8,61 @@
 **edof** is a Python library for programmatic document creation, template filling and high-quality export.  
 Documents are stored as `.edof` files – a versioned ZIP archive with a JSON document tree and all embedded resources (fonts, images).
 
+---
+
+## Why edof exists
+
+Python already has libraries for generating PDFs (`reportlab`, `fpdf2`), working with Word documents (`python-docx`), or rendering images (`Pillow`). None of them do everything needed for a real document automation workflow in a single coherent package.
+
+| What you need | Typical workaround |
+|---|---|
+| Design a template visually, then fill it with data in code | Not possible — you design in code or in a separate tool (Word, InDesign) and export manually |
+| Bind a text box to a variable and auto-shrink the font when the text is long | Manual trial and error per export |
+| Embed fonts and images inside the template file itself | Manage file paths and assets separately |
+| Export the same template to PNG, TIFF and PDF | Three different libraries, three different APIs |
+| Reuse a template across hundreds of records in a loop | Re-create the document from scratch each time |
+| Version the template format so old files still open in newer code | No standard mechanism |
+| Include a visual editor so non-developers can adjust the layout | Build one yourself |
+
+**edof** was created to solve all of these at once:
+
+- A **reusable template file** (`.edof`) that stores the full document layout, all assets and variable definitions in one place
+- A **variable system** with types, defaults and required-field validation — bind any object to a variable and fill it at render time
+- **Auto-shrink and auto-fill** text modes so font sizes adapt automatically to content length
+- A **consistent export API** — same template, same call, output to PNG / TIFF / PDF / printer
+- A **versioned, forward-compatible file format** — templates created today open correctly in future versions
+- A **desktop editor** (`edof-editor`) so the template layout can be designed and previewed visually without writing code
+- A **CLI tool** (`edof-cli`) for batch processing templates from scripts, CI pipelines or shell scripts
+
+---
+
+## Comparison with other Python libraries
+
+| Feature | **edof** | reportlab | fpdf2 | python-docx | Pillow |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Programmatic document creation | ✅ | ✅ | ✅ | ✅ | ⚠️ |
+| Reusable template file format | ✅ | ❌ | ❌ | ⚠️ | ❌ |
+| Named variable binding per object | ✅ | ❌ | ❌ | ⚠️ | ❌ |
+| Variable type validation | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Auto-shrink text to fit box | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Auto-fill text to fill box | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Arbitrary object rotation | ✅ | ✅ | ✅ | ❌ | ✅ |
+| Embedded fonts in template | ✅ | ⚠️ | ⚠️ | ✅ | ❌ |
+| Embedded images in template | ✅ | ❌ | ❌ | ✅ | ❌ |
+| Export PNG / TIFF / BMP | ✅ | ❌ | ❌ | ❌ | ✅ |
+| Export PDF | ✅ | ✅ | ✅ | ⚠️ | ❌ |
+| QR code generation | ✅ | ❌ | ❌ | ❌ | ❌ |
+| ImageBox variable as URL | ✅ | ❌ | ❌ | ❌ | ❌ |
+| RGBA colors everywhere | ✅ | ⚠️ | ⚠️ | ❌ | ✅ |
+| Multiple color spaces (RGB/L/CMYK/…) | ✅ | ⚠️ | ❌ | ❌ | ✅ |
+| Visual desktop editor | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Command-line batch export | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Versioned forward-compatible format | ✅ | ❌ | ❌ | ✅ | ❌ |
+| Undo / redo command history | ✅ | ❌ | ❌ | ❌ | ❌ |
+| PyQt6 / Tkinter canvas widget | ✅ | ❌ | ❌ | ❌ | ❌ |
+
+> ✅ supported · ⚠️ partial / workaround needed · ❌ not supported
+
 ```python
 import edof
 
@@ -303,42 +358,90 @@ Available commands: `add_page`, `remove_page`, `add_textbox`, `add_image`, `add_
 
 ## EDOF Editor
 
-A full desktop document editor ships with the repository:
+Full desktop document editor included in the package.
 
 ```bash
-pip install edof[pyqt6]   # or edof[all]
-edof-editor               # open editor
-edof-editor myfile.edof   # open file directly
+pip install edof[all]
+edof-editor               # open empty editor
+edof-editor template.edof # open file directly
 ```
 
-**Canvas features:**
-- 8 resize handles (corners + edges) with correct rotated-object resize
-- Rotation handle — **Shift** = snap to 15°, **Alt** = free rotation
-- Double-click `TextBox` → WYSIWYG inline text editor (font size matches canvas zoom)
-- Double-click `QRCode` → inline data/URL editor
-- Double-click `ImageBox` → file picker to replace the source
-- Ghost outlines for hidden objects — still selectable
-- Middle-mouse pan · Scroll-wheel zoom
+### Canvas
 
-**Property panel** — type-aware:
-
-| Object | Properties shown |
+| Action | Result |
 |---|---|
-| TextBox | Content (live update), font, size, color + alpha, alignment, sizing mode radio buttons |
-| ImageBox | Fit mode, replace image |
-| Shape | Fill color + alpha, stroke color + alpha + width, corner radius |
-| Line | X1/Y1/X2/Y2 endpoints, stroke |
-| QRCode | Data/URL (live update), error correction, FG/BG color + alpha |
+| Click object | Select |
+| Drag object | Move |
+| Drag handle (8 directions) | Resize – opposite corner stays fixed, works on rotated objects |
+| Drag orange ⊙ handle | Rotate freely |
+| Shift + rotate | Snap to 15° increments |
+| Alt + rotate | Free rotation (no snap) |
+| Double-click TextBox | Inline text editor with live canvas update |
+| Double-click QRCode | Inline data / URL editor |
+| Double-click ImageBox | File picker to replace the image source |
+| Right-click | Context menu (lock, show/hide, duplicate, delete, flip, layers) |
+| Middle mouse drag | Pan canvas |
+| Scroll wheel | Zoom in / out |
+| Arrow keys | Nudge selected object by 0.5 mm |
+| Delete | Remove selected object |
 
-**Other editor features:**
-- Object list panel (layer order, type, name, variable, visibility, lock)
-- Custom RGBA color dialog (`#RRGGBBAA` hex + sliders)
-- Layer ordering: bring to front / forward / backward / send to back
-- Variables dialog with live re-render on apply
-- Print preview (`QPrintPreviewDialog`) with correct page rendering
-- Export PNG / JPEG / TIFF / PDF
-- 60-step undo/redo
-- Internationalisation — add `editor_lang/XX.json` for any language (base: `en.json`)
+Hidden objects are shown as a dashed red outline so they remain selectable.  
+During drag the page does not re-render (smooth interaction); full render happens on mouse release.
+
+### Object properties
+
+Each object type has its own property panel on the right side:
+
+| Type | What you can set |
+|---|---|
+| **TextBox** | Text content (live update), font family + size, bold / italic / underline / strikethrough, color with alpha, horizontal + vertical alignment, line height, word wrap, sizing mode |
+| **ImageBox** | Fit mode (contain / cover / fill / stretch / none), replace image file |
+| **Shape** | Fill color + alpha, stroke color + alpha + width, corner radius |
+| **Line** | Point 1 (X1, Y1) and Point 2 (X2, Y2) in mm, stroke color + alpha |
+| **QRCode** | Data / URL (live update), error correction (L/M/Q/H), FG and BG color with alpha, border modules |
+
+All objects share: position (X, Y), size (W, H), rotation, opacity %, layer, name, variable binding, tags, locked, editable, visible.
+
+### Sizing modes (TextBox only)
+
+| Mode | Behaviour |
+|---|---|
+| **Fixed** | Font size is exact — text may overflow |
+| **Auto-shrink ↓** | `font_size` is the maximum; shrinks automatically when text doesn't fit; never enlarges |
+| **Auto-fill ↕** | Finds the largest font size that fills the box; grows and shrinks |
+
+### Layer ordering
+
+Four buttons in the Transform panel + right-click menu:
+**Bring to Front** · **Bring Forward** · **Send Backward** · **Send to Back**
+
+### Object list panel
+
+Left side shows all objects on the current page with type icon, name, variable binding, visibility and lock status. Click any row to select the object on canvas.
+
+### Variables
+
+**Document → Variables…** opens a dialog to view, fill and add template variables with live re-render on apply.
+
+### Color picker
+
+Custom RGBA dialog with hex input (`#RRGGBBAA`), individual R / G / B / A sliders and a live preview swatch.
+
+### Print
+
+**File → Print** opens a system print preview dialog (`QPrintPreviewDialog`) with a real page preview. Works with any printer installed on the system.
+
+### Export
+
+**File → Export PNG…** — single page, PNG / JPEG / TIFF, configurable DPI (default 300)  
+**File → Export All…** — all pages to a folder as `page_1.png`, `page_2.png`, …  
+**File → Export PDF…** — requires `pip install edof[pdf]`
+
+### Other
+
+- **60-step undo / redo** (Ctrl+Z / Ctrl+Y)
+- **Page settings** — width, height, DPI, color space, bit depth per page
+- **Internationalisation** — `edof/editor_lang/en.json` contains all UI strings; copy and translate to add a new language
 
 ---
 
