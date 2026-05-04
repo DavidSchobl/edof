@@ -1,510 +1,491 @@
-# edof – Easy Document Format 3.0
+# edof – Easy Document Format
 
 [![PyPI version](https://img.shields.io/pypi/v/edof.svg)](https://pypi.org/project/edof/)
 [![Python](https://img.shields.io/pypi/pyversions/edof.svg)](https://pypi.org/project/edof/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**edof** is a Python library for programmatic document creation, template filling and high-quality export.  
-Documents are stored as `.edof` files – a versioned ZIP archive with a JSON document tree and all embedded resources (fonts, images).
+A Python library for programmatic document creation, template filling, and high-quality export. Documents are described in code or in a small ZIP-based file format, then rendered to PNG, JPEG, TIFF, BMP, PDF, or SVG. A PyQt6 desktop editor is included for visual editing.
 
----
+The library prioritizes a few specific things: vector PDF output without large native dependencies, rich-text and table rendering that survives high-DPI export, a template-filling workflow with typed variables, and an optional encryption layer for documents that need it.
 
-## Why edof exists
+## Install
 
-Python already has libraries for generating PDFs (`reportlab`, `fpdf2`), working with Word documents (`python-docx`), or rendering images (`Pillow`). None of them do everything needed for a real document automation workflow in a single coherent package.
+```bash
+pip install edof                # core only — Pillow + edof
+pip install edof[crypto]        # + AES-256 document encryption
+pip install edof[pdf]           # + PDF import (pymupdf), table detection (pdfplumber),
+                                #   raster PDF fallback (reportlab)
+pip install edof[qr]            # + QR code generation
+pip install edof[pyqt6]         # + desktop editor
+pip install edof[all]           # everything above
+```
 
-| What you need | Typical workaround |
-|---|---|
-| Design a template visually, then fill it with data in code | Not possible — you design in code or in a separate tool (Word, InDesign) and export manually |
-| Bind a text box to a variable and auto-shrink the font when the text is long | Manual trial and error per export |
-| Embed fonts and images inside the template file itself | Manage file paths and assets separately |
-| Export the same template to PNG, TIFF and PDF | Three different libraries, three different APIs |
-| Reuse a template across hundreds of records in a loop | Re-create the document from scratch each time |
-| Version the template format so old files still open in newer code | No standard mechanism |
-| Include a visual editor so non-developers can adjust the layout | Build one yourself |
+Console scripts: `edof-cli` (terminal tool), `edof-editor` (PyQt6 GUI).
 
-**edof** was created to solve all of these at once:
-
-- A **reusable template file** (`.edof`) that stores the full document layout, all assets and variable definitions in one place
-- A **variable system** with types, defaults and required-field validation — bind any object to a variable and fill it at render time
-- **Auto-shrink and auto-fill** text modes so font sizes adapt automatically to content length
-- A **consistent export API** — same template, same call, output to PNG / TIFF / PDF / printer
-- A **versioned, forward-compatible file format** — templates created today open correctly in future versions
-- A **desktop editor** (`edof-editor`) so the template layout can be designed and previewed visually without writing code
-- A **CLI tool** (`edof-cli`) for batch processing templates from scripts, CI pipelines or shell scripts
-
----
-
-## Comparison with other Python libraries
-
-| Feature | **edof** | reportlab | fpdf2 | python-docx | Pillow |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Programmatic document creation | ✅ | ✅ | ✅ | ✅ | ⚠️ |
-| Reusable template file format | ✅ | ❌ | ❌ | ⚠️ | ❌ |
-| Named variable binding per object | ✅ | ❌ | ❌ | ⚠️ | ❌ |
-| Variable type validation | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Auto-shrink text to fit box | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Auto-fill text to fill box | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Arbitrary object rotation | ✅ | ✅ | ✅ | ❌ | ✅ |
-| Embedded fonts in template | ✅ | ⚠️ | ⚠️ | ✅ | ❌ |
-| Embedded images in template | ✅ | ❌ | ❌ | ✅ | ❌ |
-| Export PNG / TIFF / BMP | ✅ | ❌ | ❌ | ❌ | ✅ |
-| Export PDF | ✅ | ✅ | ✅ | ⚠️ | ❌ |
-| QR code generation | ✅ | ❌ | ❌ | ❌ | ❌ |
-| ImageBox variable as URL | ✅ | ❌ | ❌ | ❌ | ❌ |
-| RGBA colors everywhere | ✅ | ⚠️ | ⚠️ | ❌ | ✅ |
-| Multiple color spaces (RGB/L/CMYK/…) | ✅ | ⚠️ | ❌ | ❌ | ✅ |
-| Visual desktop editor | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Command-line batch export | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Versioned forward-compatible format | ✅ | ❌ | ❌ | ✅ | ❌ |
-| Undo / redo command history | ✅ | ❌ | ❌ | ❌ | ❌ |
-| PyQt6 / Tkinter canvas widget | ✅ | ❌ | ❌ | ❌ | ❌ |
-
-> ✅ supported · ⚠️ partial / workaround needed · ❌ not supported
+## Quick start
 
 ```python
 import edof
+from edof import TextRun
 
-doc  = edof.new(width=210, height=297, title="My Certificate")
+doc  = edof.new(width=210, height=297, title="Certificate")
 page = doc.add_page(dpi=300)
 
-tb = page.add_textbox(10, 20, 190, 30, "")
-tb.variable       = "recipient"       # bound to a template variable
-tb.style.font_size   = 48
-tb.style.auto_shrink = True           # shrinks if text doesn't fit, never enlarges
-tb.style.alignment   = "center"
+# Plain text
+page.add_textbox(15, 30, 180, 12, "Awarded to").style.font_size = 14
 
-doc.define_variable("recipient", required=True)
-doc.fill_variables({"recipient": "Jan Novák"})
+# Rich text (mixed styles in a single line)
+name = page.add_textbox(15, 50, 180, 25)
+name.runs = [
+    TextRun(text="Jan ", font_size=36),
+    TextRun(text="Novák", font_size=36, bold=True, color=(150, 50, 0)),
+]
+name.style.alignment = "center"
+
 doc.save("certificate.edof")
+doc.export_pdf("certificate.pdf")        # vector PDF, no reportlab needed
 doc.export_bitmap("certificate.png", dpi=300)
+doc.export_svg("certificate.svg")
 ```
 
----
+## Feature overview
 
-## Installation
+### Document model
 
-```bash
-# Core library (Pillow only)
-pip install edof
+A `Document` contains pages; each `Page` contains objects. All measurements are in millimetres so layouts are resolution-independent.
 
-# With PDF export
-pip install edof[pdf]
+**Object types** (`edof.format.objects`):
 
-# With QR code generation
-pip install edof[qr]
+| Type | Purpose | Notable fields |
+|---|---|---|
+| `TextBox` | Single- or multi-line text with optional rich-text runs | `text`, `runs`, `style`, `padding`, `border`, `fill` |
+| `ImageBox` | Embedded raster image | `resource_id`, `fit_mode` (contain/cover/fill/stretch) |
+| `Shape` | Vector primitive | `shape_type` (rect/ellipse/line/polygon/arrow/path), `path_data`, `corner_radius`, `fill`, `stroke` |
+| `QRCode` | QR code with selectable error correction | `data`, `error_correction`, `fg_color`, `bg_color`, `border_modules` |
+| `Table` | Formatted table with per-cell styling | `cells`, `col_widths`, `row_heights`, `table_border` |
+| `Group` | Container with optional clip | `children` |
 
-# With PyQt6 editor / widget
-pip install edof[pyqt6]
+Common fields on every object: `transform` (position/size/rotation/flip), `opacity`, `layer`, `visible`, `visible_if`, `blend_mode`, `lock_level`, `lock_text`, `tags`, `shadow`.
 
-# Everything
-pip install edof[all]
+### Rich text
 
-# Development
-pip install edof[dev]
+A `TextBox` can hold a list of `TextRun` segments instead of (or in addition to) plain text. Each run can override `font_family`, `font_size`, `bold`, `italic`, `underline`, `strikethrough`, `color`, and `background` (highlight). The layout engine packs runs into lines respecting these per-segment styles, and supports auto-shrink/auto-fill globally across all runs.
+
+```python
+tb.runs = [
+    TextRun(text="Mixed: "),
+    TextRun(text="bold ",   bold=True),
+    TextRun(text="big ",    font_size=24),
+    TextRun(text="and ",    color=(220, 0, 0)),
+    TextRun(text="underlined", underline=True),
+]
 ```
 
-**Python 3.9 – 3.13** supported.
+### Tables
 
----
+`Table` is a separate object type (not a group of textboxes). Each `TableCell` carries its own `TextStyle` (or `runs[]`), `bg_color`, `padding`, and four independent `CellBorder` instances (top/right/bottom/left, each with its own color, width, and on/off). Column widths and row heights can be specified explicitly or auto-distributed. `colspan` and `rowspan` are supported.
 
-## Quick Start
+```python
+from edof import Table, TableCell, make_table
 
-### Create a document
+t = make_table([["Name", "Score"], ["Alice", "98"], ["Bob", "87"]],
+               header=True, alternating=True)
+page.add_object(t)
+```
+
+### Vector graphics
+
+Shapes render as resolution-independent vectors in PDF and SVG output. The `path` shape type accepts either a list of SVG-style commands (`M`, `L`, `H`, `V`, `C`, `Q`, `Z`) or an SVG path string:
+
+```python
+from edof import Shape
+
+# From SVG path string
+sh = Shape.from_svg_path("M 10 10 L 50 10 C 70 30 90 30 110 10 Z")
+
+# Direct command list
+sh.path_data = [["M", 10, 10], ["L", 50, 10], ["C", 70, 30, 90, 30, 110, 10], ["Z"]]
+```
+
+Standard rectangles support corner radius. Ellipses, lines, polygons, and arrows are also vector primitives.
+
+### Gradients
+
+`FillStyle.gradient` accepts a `Gradient` with multiple stops, in linear or radial mode:
+
+```python
+from edof import Gradient
+
+shape.fill.gradient = Gradient(
+    type="linear", angle=45,
+    stops=[(0.0, (255,   0,   0, 255)),
+           (0.5, (255, 255,   0, 255)),
+           (1.0, (  0,   0, 255, 255))],
+)
+shape.fill.color = None   # gradient takes precedence
+```
+
+### Variables and templates
+
+Documents can define typed variables that get substituted at render time. Supported types: `text`, `number`, `date`, `bool`, `url`, `image`, `qr`. Object text uses `{name}` placeholders; `ImageBox` and `QRCode` can bind directly to a variable.
+
+```python
+doc.define_variable("recipient", required=True)
+doc.define_variable("score",     type="number", default=0)
+
+page.add_textbox(10, 10, 100, 12, "Awarded to {recipient}")
+
+doc.fill_variables({"recipient": "Jan Novák", "score": 95})
+doc.export_pdf("filled.pdf")
+```
+
+### Repeating sections
+
+`page.repeat_objects(template_objs, data_list, gap=2.0)` duplicates a template for each row of a data list, substitutes `{column_name}` placeholders, and auto-paginates onto new pages when the page is full:
+
+```python
+header_tb = page.add_textbox(10, 10, 180, 8, "Sales Report")
+row_tpl   = page.add_textbox(10, 20, 180, 6, "{name}: {amount} CZK")
+
+page.objects.remove(row_tpl)   # we'll insert copies instead
+new_pages = page.repeat_objects([row_tpl],
+    [{"name": "Alice", "amount": 1500},
+     {"name": "Bob",   "amount": 2300},
+     # ... 200 more rows ...
+    ], gap=1.0)
+```
+
+### Conditional visibility
+
+`obj.visible_if` is a small expression evaluated at render time against the document's variables. Boolean operators, comparisons, arithmetic, and string equality are supported. No function calls, attribute access, or imports are allowed (safe AST evaluator).
+
+```python
+discount_label = page.add_textbox(10, 200, 180, 8, "DISCOUNT: -{discount} CZK")
+discount_label.visible_if = "discount > 0"
+```
+
+### Blend modes
+
+Per-object compositing modes: `normal`, `multiply`, `screen`, `darken`, `lighten`, `overlay`. Implemented for the Pillow renderer.
+
+### Per-object locks (independent of encryption)
+
+```python
+heading.lock_level = "design"   # only design+ permission can modify
+heading.lock_text  = True       # text is read-only even with admin (until cleared)
+```
+
+These flags work in plain documents too — they're a soft template-protection mechanism. The editor disables corresponding actions when an object is locked.
+
+### Export formats
+
+| Format | Method | Vector? | Notes |
+|---|---|---|---|
+| PNG / JPEG / TIFF / BMP | `doc.export_bitmap(path)` | raster | Configurable DPI, color space (RGB/RGBA/L/CMYK/1), bit depth (8/16) |
+| PDF — vector (default) | `doc.export_pdf(path)` | yes | Pure-Python writer; searchable text; Standard 14 PDF fonts; WinAnsiEncoding incl. Czech diacritics |
+| PDF — raster fallback | `doc.export_pdf(path, vector=False)` | no | Uses reportlab if installed; embeds rendered pages as images |
+| SVG (per page) | `doc.export_svg(path, page=0)` | yes | `<text>` elements (searchable in browsers), gradients as `<linearGradient>/<radialGradient>`, images base64-embedded |
+| Multi-page bitmaps | `doc.export_all_pages("page_{n}.png")` | raster | Filename pattern with `{n}` |
+
+### PDF comparison
+
+The vector PDF writer is a pure-Python implementation; it does not require reportlab. For a typical document, the resulting file is significantly smaller than rasterized output, and the text is selectable.
+
+| Metric | Vector PDF | Raster PDF (reportlab) |
+|---|---|---|
+| Implementation | Pure Python (built-in) | reportlab — large native dep |
+| Text | Vector ops (selectable, copyable) | Bitmap |
+| File size (typical A4 page with text + shapes + table) | ~5 KB | ~80–135 KB |
+| Czech / Latin-1 diacritics | WinAnsiEncoding mapping built-in | Depends on reportlab font setup |
+| Resolution-dependent? | No | Yes — pick a DPI when exporting |
+| Searchable in PDF readers | Yes | No |
+| Copy-paste from PDF | Yes | No |
+
+The integration test in this repo produces a vector PDF that is roughly 25× smaller than the equivalent raster PDF for the same A4 page. The exact ratio depends on content; pages dominated by photographic images will not see this kind of compression because raster image data is the limiting factor.
+
+The vector writer currently supports the Standard 14 PDF fonts (Helvetica, Times, Courier with bold/italic) plus an alias mapping for common system fonts (Arial → Helvetica, Times New Roman → Times-Roman, etc.). TTF embedding for arbitrary fonts is not yet implemented in the vector writer; if you need a specific custom font in PDF output, use `vector=False` to fall back to the raster pipeline (which embeds the font via Pillow's text rendering).
+
+### PDF import
+
+`edof.import_pdf("file.pdf")` reads an existing PDF and produces an editable EDOF Document. It uses pymupdf for text/image/path extraction, reconstructs paragraph blocks via clustering (same font, similar X-alignment, vertical gap within line spacing), detects headings by font size relative to median, and extracts embedded fonts where possible.
+
+```python
+doc = edof.import_pdf("template.pdf",
+                      detect_tables=True,        # uses pdfplumber if installed
+                      merge_paragraphs=True,
+                      heading_threshold=1.4,
+                      indent_threshold_mm=3.0)
+doc.save("template.edof")
+```
+
+This is best-effort and will not perfectly reconstruct every PDF. Common limitations:
+- Subsetted fonts in the source PDF are remapped to the closest local full font where possible; if no match is found, the subset is embedded but adding new characters in that font is not possible.
+- Type3 vector glyph fonts may not extract cleanly.
+- Complex column layouts may need manual cleanup after import.
+
+Migration warnings are appended to `doc.errors`.
+
+### Legacy EDOF 2 import
+
+EDOF 2 was an internal pre-release format that was never publicly distributed. EDOF 4 detects EDOF 2 archives automatically and migrates them on `edof.load(path)`. The migration handles the old ARGB color encoding, font weight ranges, the auto-shrink convention (`max_font_size_pt > font_point_size`), and embedded images. The migration is one-way; the result cannot be saved back to EDOF 2.
+
+If the legacy archive used the old XOR-obfuscated password (which provided no real protection), the editor offers to upgrade to real AES-256 encryption.
+
+### Save back to v3 format
+
+```python
+doc.export_3x("for_old_library.edof")
+```
+
+Produces a v3-compatible `.edof` with v4-only features flattened: `Table` becomes a Group, rich-text runs collapse to plain text, paths are sampled to polygons, gradients become a single average color, `visible_if` is evaluated once and baked into `.visible`. The original document is not modified.
+
+### Encryption (optional, opt-in)
+
+Documents are plain ZIP archives by default. When you call `doc.set_password(level, pwd)`, the document switches to encrypted mode on the next save. Requires `pip install edof[crypto]`.
+
+**Algorithm:** AES-256-GCM for content, PBKDF2-SHA256 (600 000 iterations) for password-to-key derivation, 16-byte salt per slot, 12-byte nonce per ciphertext, 16-byte GCM tag for tamper detection.
+
+**Permission levels** (hierarchical — higher implies all lower):
+
+| Level | Allows |
+|---|---|
+| `view`   | Render, print, export. No modifications. |
+| `fill`   | view + change variable values (template filling). |
+| `edit`   | fill + change object `.text` and rich-text run text. |
+| `design` | edit + change styles, fonts, colors, layout, structure (add/remove objects and pages). |
+| `admin`  | design + manage passwords, recovery key, override per-object locks. |
+
+Each level can have its own password. Whichever password the user types determines what they can do. A 24-character recovery key is generated automatically when the first password is set; it grants `admin` access and is shown exactly once.
+
+**Encryption modes:**
+- `full` — entire content + resources encrypted as a single AES-GCM blob inside the ZIP. The manifest reveals only that the file is encrypted, the KDF parameters, and the slot count. Title, page count, and all metadata are hidden.
+- `partial` — only sensitive fields are encrypted (object text, rich-text runs, image data, QR data, table cell text, variable values). Structure remains visible: page count, page sizes, fonts, alignment, colors, layout, and the document title. Useful when you want to share a layout template publicly while keeping the actual content private. In partial mode, opening without a password gives a redacted view (`█` placeholder) where the layout is visible but the content is not.
+- `none` — default; plain ZIP, no encryption.
 
 ```python
 import edof
+from edof.crypto import EDIT, DESIGN, ADMIN
 
-doc  = edof.new(width=210, height=297)   # A4 in mm, 300 dpi default
+doc = edof.new(title="Confidential")
 page = doc.add_page()
+page.add_textbox(10, 10, 100, 12, "TOP SECRET")
 
-# Text box
-tb = page.add_textbox(x=10, y=10, width=190, height=30, text="Hello!")
-tb.style.font_size  = 36
-tb.style.alignment  = "center"
-tb.style.bold       = True
+# Set up multi-level passwords (write down the recovery key!)
+recovery = doc.set_password("admin", "ownerSecret")
+doc.set_password("design", "designerPwd")
+doc.set_password("edit",   "editorPwd")
+doc.set_password("fill",   "templateFiller")
+print("RECOVERY KEY:", recovery)        # 24 chars, shown once
 
-# Image
-rid = doc.add_resource_from_file("logo.png")
-page.add_image(rid, x=10, y=50, width=80, height=50, fit_mode="contain")
+doc.encryption_mode = "full"             # default after first password
+doc.save("secret.edof")
 
-# Shape
-sh = page.add_shape("rect", x=10, y=110, width=190, height=1)
-sh.fill.color = (0, 0, 0, 255)
+# Loading
+doc = edof.load("secret.edof", password="editorPwd")
+print(doc.permission_level)              # Permission.EDIT
+doc.can(DESIGN)                          # False
+doc.require(EDIT)                        # OK
+# doc.require(DESIGN)                    # raises PermissionError
 
-# QR code  (requires pip install edof[qr])
-page.add_qrcode("https://github.com/DavidSchobl/edof", x=160, y=120, size=30)
+# Recovery
+doc = edof.load("secret.edof", recovery_key=recovery)   # → admin
 
-doc.save("doc.edof")
-doc.export_bitmap("doc.png", dpi=300)   # PNG
-doc.export_pdf("doc.pdf")               # PDF (requires edof[pdf])
+# Rotation (no payload re-encryption — just rewraps the slot)
+doc.change_password("edit", "editorPwd", "newEditorPwd")
+
+# Removal (requires admin)
+doc.remove_password("fill")
+doc.clear_all_protection()               # → encryption_mode = "none"
 ```
 
----
-
-## Templates & Batch Fill
-
-Objects can be bound to named **variables**. At render time the variable value replaces the object's content.
+**Per-object locks** add a finer-grained layer on top of doc-level encryption (and work without encryption too):
 
 ```python
-doc = edof.new()
-page = doc.add_page()
-
-# Define variables with types and defaults
-doc.define_variable("name",  type="text",   default="—",          required=True)
-doc.define_variable("score", type="number", default="0")
-doc.define_variable("logo",  type="image",  default="default.png") # file path or URL
-
-# Bind objects to variables
-tb_name = page.add_textbox(10, 10, 100, 20, "")
-tb_name.variable      = "name"
-tb_name.style.auto_shrink = True    # font shrinks if name is long
-
-img = page.add_image(None, 150, 10, 40, 40)
-img.variable = "logo"               # value = file path or HTTP URL
-
-# Fill once
-doc.fill_variables({"name": "Alice", "score": "98", "logo": "alice.png"})
-doc.export_bitmap("alice.png")
-
-# Batch loop
-for row in [("Bob", "87", "bob.png"), ("Carol", "95", "carol.png")]:
-    doc.fill_variables({"name": row[0], "score": row[1], "logo": row[2]})
-    doc.export_bitmap(f"{row[0]}.png")
+heading.lock_level = "design"   # only design+ can modify, regardless of doc-level perms
+heading.lock_text  = True       # text never editable until lock_text is cleared (admin-only)
 ```
 
-### Missing variables are non-destructive
-If a variable has no value set, the object shows its `obj.text` fallback — useful for previewing a template in the editor without filling all fields first.
+**What encryption protects against**: reading content without the password; tampering with the encrypted bytes (GCM auth tag detects any modification); brute-forcing weak passwords (PBKDF2 with 600k iterations is intentionally slow).
 
----
+**What it does not protect against**: a user with the password running their own decryption code (they have the password); side-channel attacks on the host running the library; loss of all passwords AND the recovery key — the document is then mathematically unrecoverable. Write down the recovery key.
 
-## Object Types
+## Editor
 
-### TextBox
+A PyQt6 desktop editor (`edof-editor`) ships with the library. It is a working editor, not a demo: it produces files that the API can load and round-trip without loss.
+
+**Editing**
+- Direct manipulation: select, move, resize, rotate, multi-select via Ctrl+click and lasso
+- Properties panel adapts to the selected object type
+- Object list panel with drag-to-reorder layers, eye/lock toggles
+- 60-step undo/redo
+- Snap-to-grid (Ctrl+G), magnetic alignment guides during drag
+- Inline text editing with WYSIWYG sizing across zoom levels and Windows DPI scaling
+- Find & Replace dialog (Ctrl+F) — regex and case-sensitive options
+- Gradient editor with visual stop list
+
+**Templates**
+- File → New from Template…: Blank A4 portrait/landscape, Business Card, Certificate, Invoice with table
+
+**File operations**
+- File → Open: detects encrypted, EDOF 2, and EDOF 3 files automatically; prompts for password if needed
+- File → Save / Save As / Save as v3 (downgrade)
+- File → Import PDF: reconstructs editable document from a PDF
+- File → Export PNG / Export SVG / Export PDF
+- File → Batch from CSV: fill variables for each CSV row, export per-row PNG/PDF
+- File → Print
+
+**Document protection**
+- Document → Unlock for editing… (Ctrl+Shift+L): password / recovery-key prompt; after unlock, a dialog lists exactly what the granted permission level can and cannot do
+- Document → Protection…: full management UI for setting / changing / removing passwords, switching between full and partial encryption, and showing the recovery key
+- Status bar continuously shows current protection state: 🔓 Plain / 🔒 Locked / 🔓 Unlocked: \<level\>
+- Toolbar and menu actions are disabled when the current permission level forbids them; pressing a disabled-equivalent shortcut shows a clear "needs *level* password" dialog
+
+**Other**
+- Cursor position in mm in the status bar
+- Page panel for multi-page docs
+- Translatable UI: `editor_lang/en.json`; add `XX.json` for other languages
+
+## Programmatic helpers
+
+A few high-level convenience methods on `Page` make typical layouts shorter:
 
 ```python
-tb = page.add_textbox(x, y, width, height, text="")
-
-# Sizing modes (mutually exclusive):
-tb.style.auto_shrink = True     # font_size = maximum; shrinks to fit; never enlarges
-tb.style.auto_fill   = True     # fills the box (grows and shrinks up to max_font_size)
-# both False = fixed font size
-
-tb.style.font_family   = "Arial"
-tb.style.font_size     = 18.0       # pt
-tb.style.min_font_size = 4.0        # floor for auto-shrink/fill
-tb.style.max_font_size = 200.0      # ceiling for auto-fill
-tb.style.bold          = True
-tb.style.italic        = True
-tb.style.underline     = True
-tb.style.strikethrough = True
-tb.style.color         = (0, 0, 0)      # RGB
-tb.style.alignment     = "center"       # left|center|right|justify
-tb.style.vertical_align= "middle"       # top|middle|bottom
-tb.style.line_height   = 1.2
-tb.style.wrap          = True
-tb.style.overflow_hidden = True
+page.add_card(x, y, w, h, title, body, accent_color)
+page.add_metric(x, y, w, h, label, value, subtitle, value_color)
+page.add_table(x, y, w, rows, header=True, alternating=True)
+page.add_kv_list(x, y, w, items, key_width_frac=0.4)
+page.add_textbox_auto(x, y, w, text, min_height=10, **style)   # height computed from content
 ```
 
-### ImageBox
+Layout helpers (cursor-based composition):
 
 ```python
-img = page.add_image(resource_id, x, y, width, height,
-                     fit_mode="contain")   # contain|cover|fill|stretch|none
-# fit_mode="contain" – letterboxed, preserves aspect ratio
-# fit_mode="cover"   – cropped, fills the box
-# fit_mode="fill"    – alias for cover
-# fit_mode="stretch" – distorts to fill exactly
+with page.row(y=10, gap=2, height=8) as r:
+    r.add_textbox(80, "Name:")
+    r.add_textbox(120, "{client_name}")
 
-rid = doc.add_resource_from_file("photo.jpg")
-# or: rid = doc.add_resource(bytes_data, "photo.jpg", "image/jpeg")
+with page.column(x=15, gap=3, width=180) as c:
+    c.add_textbox_auto("Long paragraph that grows to fit...")
+    c.add_textbox(8, "Footer")
 ```
 
-### Shape
+Standalone:
 
 ```python
-sh = page.add_shape("rect", x, y, width, height)
-# Types: "rect" | "ellipse" | "polygon" | "arrow"
-
-sh.fill.color          = (100, 149, 237, 255)   # RGBA
-sh.stroke.color        = (50, 80, 180, 255)
-sh.stroke.width        = 1.5    # pt
-sh.corner_radius       = 4.0    # mm (for rect)
+height_mm = edof.measure_text_height("Some text", style, width_mm=100, dpi=300)
 ```
 
-### Line
-
-```python
-sh = page.add_shape("line", 0, 0, 1, 1)
-sh.points = [[x1_mm, y1_mm], [x2_mm, y2_mm]]  # two absolute page coordinates
-sh.stroke.color = (0, 0, 0, 255)
-sh.stroke.width = 2.0   # pt
-```
-
-### QR Code
-
-```python
-qr = page.add_qrcode(data="https://example.com", x=10, y=10,
-                     size=40, error_correction="M")
-# error_correction: "L" | "M" | "Q" | "H"
-qr.fg_color = (0, 0, 0, 255)        # RGBA – any color works
-qr.bg_color = (255, 255, 255, 255)
-qr.variable = "url"   # dynamic data from variable
-```
-
----
-
-## Transform API
-
-Every object supports a full transform chain:
-
-```python
-obj.move_to(20, 30)                    # absolute position (mm)
-obj.move(10, 5)                        # relative translate
-obj.rotate_to(45)                      # absolute rotation (°, clockwise)
-obj.rotate(15)                         # add 15° to current rotation
-obj.resize_uniform(1.5)               # scale both axes, keep centre
-obj.resize(100, 40)                   # set absolute width × height (mm)
-obj.resize(100, 40, anchor="center")  # resize keeping centre fixed
-obj.flip_h()
-obj.flip_v()
-
-# Chainable
-obj.move_to(10, 10).resize(80, 30).rotate_to(15)
-```
-
----
-
-## Color Spaces & Bit Depth
-
-```python
-page = doc.add_page(color_space="L",  bit_depth=8)   # grayscale
-page = doc.add_page(color_space="1")                  # black & white
-page = doc.add_page(color_space="RGB", bit_depth=16)  # 16-bit
-
-# Override on export
-doc.export_bitmap("gray.tiff", color_space="L",  format="TIFF")
-doc.export_bitmap("bw.png",    color_space="1")
-```
-
-Supported values: `"RGB"`, `"RGBA"`, `"L"` (grayscale), `"1"` (B&W), `"CMYK"`.
-
----
-
-## File Format
-
-`.edof` is a plain ZIP archive — inspectable with any ZIP tool:
-
-```
-document.edof
-├── manifest.json        ← version header, quick metadata
-├── document.json        ← full document tree (no binary blobs)
-└── resources/
-    ├── <uuid>           ← embedded image / font (raw bytes)
-    └── …
-```
-
-### Version compatibility
-
-| File version vs library | Behaviour |
-|---|---|
-| Same | Full compatibility |
-| File older | Loaded and migrated automatically, non-fatal notice in `doc.errors` |
-| File newer | `EdofNewerVersionWarning` emitted; content loaded best-effort |
-| File too old (major < 1) | `EdofVersionError` raised |
-
-```python
-import warnings
-from edof.exceptions import EdofNewerVersionWarning
-
-with warnings.catch_warnings(record=True) as w:
-    warnings.simplefilter("always")
-    doc = edof.load("newer.edof")
-
-print(doc.errors)      # non-fatal notices from load
-```
-
----
-
-## Command API
-
-```python
-from edof.api.commands import execute, CommandHistory
-
-doc = edof.new(); doc.add_page()
-
-oid = execute(doc, {"cmd": "add_textbox", "page": 0,
-                    "x": 10, "y": 10, "width": 80, "height": 20,
-                    "text": "Hello API"})
-
-execute(doc, {"cmd": "set_style", "object_id": oid, "page": 0,
-              "style": {"font_size": 24, "auto_shrink": True}})
-
-execute(doc, {"cmd": "export_bitmap", "page": 0,
-              "path": "out.png", "dpi": 300})
-
-# Undo / redo
-history = CommandHistory(max_undo=50)
-history.push(doc, "initial state")
-# … make changes …
-doc = history.undo(doc)   # returns restored Document or None
-doc = history.redo(doc)
-```
-
-Available commands: `add_page`, `remove_page`, `add_textbox`, `add_image`, `add_shape`, `add_qrcode`, `remove_object`, `set_text`, `set_variable`, `fill_variables`, `move_object`, `resize_object`, `rotate_object`, `set_style`, `set_visibility`, `set_layer`, `export_bitmap`, `export_pdf`, `save`, `validate`.
-
----
-
-## EDOF Editor
-
-Full desktop document editor included in the package.
+## CLI
 
 ```bash
-pip install edof[all]
-edof-editor               # open empty editor
-edof-editor template.edof # open file directly
+edof-cli info template.edof              # metadata, variables, fonts used
+edof-cli objects template.edof           # all objects with type and layer
+edof-cli validate template.edof          # structural sanity check
+edof-cli export template.edof out.png \
+    --set name=Jan --set score=98        # fill variables and export
+edof-cli batch template.edof data.csv \
+    -o "out_{n}.png"                     # one file per CSV row
+edof-cli import template.pdf -o template.edof
+edof-cli convert legacy.edof -o new.edof  # EDOF 2 → 4
+edof-cli export template.edof out.pdf --vector       # default
+edof-cli export template.edof out.pdf --raster       # via reportlab
+edof-cli export template.edof out.svg
 ```
 
-> **Windows – command not found?**  
-> The `Scripts\` folder may not be in your PATH. Use this instead:
-> ```bash
-> python -m edof._apps.editor
-> python -m edof._apps.editor template.edof
-> ```
-> To fix permanently: run `python -c "import sysconfig; print(sysconfig.get_path('scripts'))"`,
-> copy the printed path and add it to your system PATH
-> (Start → Edit environment variables → Path → New → paste → OK → restart terminal).
+## File format
 
-### Canvas
+`.edof` is a ZIP archive.
 
-| Action | Result |
-|---|---|
-| Click object | Select |
-| Drag object | Move |
-| Drag handle (8 directions) | Resize – opposite corner stays fixed, works on rotated objects |
-| Drag orange ⊙ handle | Rotate freely |
-| Shift + rotate | Snap to 15° increments |
-| Alt + rotate | Free rotation (no snap) |
-| Double-click TextBox | Inline text editor with live canvas update |
-| Double-click QRCode | Inline data / URL editor |
-| Double-click ImageBox | File picker to replace the image source |
-| Right-click | Context menu (lock, show/hide, duplicate, delete, flip, layers) |
-| Middle mouse drag | Pan canvas |
-| Scroll wheel | Zoom in / out |
-| Arrow keys | Nudge selected object by 0.5 mm |
-| Delete | Remove selected object |
-
-Hidden objects are shown as a dashed red outline so they remain selectable.  
-During drag the page does not re-render (smooth interaction); full render happens on mouse release.
-
-### Object properties
-
-Each object type has its own property panel on the right side:
-
-| Type | What you can set |
-|---|---|
-| **TextBox** | Text content (live update), font family + size, bold / italic / underline / strikethrough, color with alpha, horizontal + vertical alignment, line height, word wrap, sizing mode |
-| **ImageBox** | Fit mode (contain / cover / fill / stretch / none), replace image file |
-| **Shape** | Fill color + alpha, stroke color + alpha + width, corner radius |
-| **Line** | Point 1 (X1, Y1) and Point 2 (X2, Y2) in mm, stroke color + alpha |
-| **QRCode** | Data / URL (live update), error correction (L/M/Q/H), FG and BG color with alpha, border modules |
-
-All objects share: position (X, Y), size (W, H), rotation, opacity %, layer, name, variable binding, tags, locked, editable, visible.
-
-### Sizing modes (TextBox only)
-
-| Mode | Behaviour |
-|---|---|
-| **Fixed** | Font size is exact — text may overflow |
-| **Auto-shrink ↓** | `font_size` is the maximum; shrinks automatically when text doesn't fit; never enlarges |
-| **Auto-fill ↕** | Finds the largest font size that fills the box; grows and shrinks |
-
-### Layer ordering
-
-Four buttons in the Transform panel + right-click menu:
-**Bring to Front** · **Bring Forward** · **Send Backward** · **Send to Back**
-
-### Object list panel
-
-Left side shows all objects on the current page with type icon, name, variable binding, visibility and lock status. Click any row to select the object on canvas.
-
-### Variables
-
-**Document → Variables…** opens a dialog to view, fill and add template variables with live re-render on apply.
-
-### Color picker
-
-Custom RGBA dialog with hex input (`#RRGGBBAA`), individual R / G / B / A sliders and a live preview swatch.
-
-### Print
-
-**File → Print** opens a system print preview dialog (`QPrintPreviewDialog`) with a real page preview. Works with any printer installed on the system.
-
-### Export
-
-**File → Export PNG…** — single page, PNG / JPEG / TIFF, configurable DPI (default 300)  
-**File → Export All…** — all pages to a folder as `page_1.png`, `page_2.png`, …  
-**File → Export PDF…** — requires `pip install edof[pdf]`
-
-### Other
-
-- **60-step undo / redo** (Ctrl+Z / Ctrl+Y)
-- **Page settings** — width, height, DPI, color space, bit depth per page
-- **Internationalisation** — `edof/editor_lang/en.json` contains all UI strings; copy and translate to add a new language
-
----
-
-## EDOF CLI
-
-Fill templates and export from the command line without opening the editor:
-
-```bash
-# Inspect a template
-edof-cli info      template.edof
-edof-cli objects   template.edof
-edof-cli validate  template.edof
-
-# Export with variables
-edof-cli export template.edof output.png \
-    --set name="Jan Novák" \
-    --set date="2025-01-01" \
-    --dpi 300
-
-# JSON variables
-edof-cli export template.edof output.png \
-    --json-vars '{"name":"Jan","score":"98"}'
-
-# All pages  (use {page} or {n} in filename)
-edof-cli export template.edof page_{page}.png --all-pages
-
-# PDF
-edof-cli export template.edof output.pdf
+**Plain mode:**
+```
+template.edof
+├── manifest.json     — version header, title, page count
+├── document.json     — full document data
+└── resources/<id>    — one file per embedded resource (images, fonts)
 ```
 
-| Flag | Short | Description |
-|---|---|---|
-| `--set KEY=VALUE` | `-s` | Set one variable (repeatable) |
-| `--json-vars JSON` | `-j` | Set multiple variables as JSON |
-| `--page N` | `-p` | Page index (0-based, default 0) |
-| `--all-pages` | `-A` | Export all pages |
-| `--format` | `-f` | `png` `jpg` `tiff` `bmp` `pdf` |
-| `--dpi N` | `-d` | Resolution (default 300) |
-| `--color-space` | `-c` | `RGB` `RGBA` `L` `1` `CMYK` |
+**Encrypted modes:**
+```
+template.edof
+├── manifest.json           — version header + protection block (mode, KDF, slots)
+├── encrypted_payload.bin   — AES-256-GCM ciphertext
+├── document.json           — only in 'partial' mode (with sensitive fields redacted)
+└── resources/<id>          — only in 'partial' mode (non-sensitive resources)
+```
 
----
+The manifest's `protection.slots` field contains, for each password level:
+```json
+{
+  "permission": "edit",
+  "kdf": "pbkdf2-sha256",
+  "iterations": 600000,
+  "salt":        "<base64, 16 bytes>",
+  "wrapped_key": "<base64, 60 bytes — AES-GCM-encrypted content key>"
+}
+```
 
+Format version is bumped to 4.0.1. Older 4.0.0 files load unchanged. Files saved by 4.0.1 that use no 4.0.1-only features are bit-compatible with 4.0.0 readers.
 
+## Comparison with other libraries
 
+This is intentionally narrow rather than promotional. Different libraries are good at different things; pick the one that matches your problem.
+
+| | edof | reportlab | WeasyPrint | python-docx | Pillow alone |
+|---|---|---|---|---|---|
+| **Primary use case** | Templates, designed docs, editor | PDF generation from code | HTML/CSS → PDF | Word documents | Image processing |
+| **Document model** | Page + objects with mm coords | Drawing primitives, callbacks | HTML/CSS | DOCX object model | n/a |
+| **Built-in editor** | PyQt6 GUI (`edof-editor`) | No | No | No | No |
+| **File format** | ZIP-based `.edof`, JSON inside | n/a (writes PDFs only) | n/a | DOCX | n/a |
+| **Vector PDF output** | Built-in pure-Python writer | Yes (its primary purpose) | Yes (via Cairo) | No (requires conversion) | No |
+| **Templating with typed variables** | Yes | Manually in your code | Via Jinja or similar | Manually | n/a |
+| **Rich text with mixed styles in one line** | `TextRun` segments | Paragraph flowables | Yes (HTML inline) | Yes | n/a |
+| **Tables with per-cell styling** | Yes | Yes | Yes | Yes | n/a |
+| **PDF import / re-edit** | Best-effort via pymupdf | No | No | n/a | n/a |
+| **AES document encryption** | Optional, with permission levels | No | No | DOCX has its own (different model) | n/a |
+| **External dependencies (core)** | Pillow only | Several native libs | Cairo, Pango, large stack | lxml | None |
+
+A non-exhaustive note on what other libraries do better: reportlab has the most mature PDF generation engine and the broadest feature coverage for printed output; WeasyPrint is the right answer if your content lives in HTML/CSS already; python-docx is the standard for Word interoperability; Pillow remains the right tool for image manipulation. edof is the right answer when you want documents with a consistent visual layout, type-checked variable filling, an editor your users can use, and an output format that survives high-DPI export — without requiring users to write CSS or learn ReportLab's flowables API.
+
+## Side-by-side version installs
+
+If you want to keep multiple edof versions on the same machine for testing or downgrade safety, use isolated virtualenvs:
+
+```cmd
+mkdir D:\apps\Edof_V401\edof-python
+cd D:\apps\Edof_V401\edof-python
+:: extract this version's source here
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .[all]
+deactivate
+```
+
+A small `.bat` makes switching painless:
+
+```bat
+@echo off
+call D:\apps\Edof_V401\edof-python\.venv\Scripts\activate.bat
+cd /d D:\apps\Edof_V401\edof-python
+cmd /k prompt [edof v4.0.1] $P$G
+```
+
+Each version's venv is independent. Removing a version is `rmdir /s /q <folder>`; nothing else needs cleanup.
+
+## Compatibility
+
+- Python 3.9+
+- All exports work with Pillow alone; everything else is optional
+- Cross-platform (tested on Windows, Linux, macOS)
+
+## Status and roadmap
+
+Stable: document model, renderer, all export paths, variable system, editor, encryption, EDOF 2 / 3 / 4 round-trips, PDF import.
+
+Known limitations:
+- Vector PDF writer uses Standard 14 fonts only; arbitrary TTF embedding for vector mode is on the roadmap. For now, custom fonts work via the raster fallback (`vector=False`) or via Pillow during bitmap export.
+- HMAC document signatures (separate from encryption) are not yet implemented.
+- Per-page encryption (some pages encrypted, some not) is intentionally not supported — encryption is at the document level only.
 
 ## License
 
-MIT – see [LICENSE](LICENSE).
-
----
-
-## Links
-
-- **PyPI:** https://pypi.org/project/edof/
-- **GitHub:** https://github.com/DavidSchobl/edof
-- **Issues:** https://github.com/DavidSchobl/edof/issues
-- **Changelog:** [CHANGELOG.md](CHANGELOG.md)
+MIT. See `LICENSE`.

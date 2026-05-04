@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EDOF Editor 3.0 – PyQt6
+EDOF Editor – PyQt6
 Requires: pip install PyQt6 Pillow edof
 """
 import sys, os, math, copy, io as _io, json, threading
@@ -301,6 +301,14 @@ class EdofCanvas(QGraphicsView):
         super().__init__(parent)
         self._doc=None; self._page_idx=0; self._dpi=float(RDPI); self._zoom=1.0
         self._sel_id=None
+        # v4.0.1: multi-select and snap-to-grid
+        self._multi_sel_ids=set()       # set of additional selected object ids
+        self._snap_to_grid=False
+        self._snap_size_mm=5.0
+        self._show_align_guides=True
+        self._align_guide_lines=[]      # transient overlay lines during drag
+        self._lasso_start=None          # start point for lasso selection
+        self._lasso_rect_item=None
         self._drag_mode=None; self._drag_sp0=None; self._drag_tf0=None; self._drag_anchor=None
         self._pan_start=None; self._pan_scroll0=None
         self._preview_item=None; self._ghost_items=[]
@@ -515,15 +523,50 @@ class EdofCanvas(QGraphicsView):
                                        if handle not in ('ROT','P1','P2') else None)
                 return
             hit=self._hit_obj(sp)
+            ctrl=bool(event.modifiers()&Qt.KeyboardModifier.ControlModifier)
+            # v4.0.1: Ctrl+click toggles addition to multi-select set
+            if ctrl and hit:
+                if hit==self._sel_id:
+                    # Demote primary; promote first multi to primary
+                    if self._multi_sel_ids:
+                        self._sel_id=next(iter(self._multi_sel_ids))
+                        self._multi_sel_ids.discard(self._sel_id)
+                    else:
+                        self._sel_id=None
+                elif hit in self._multi_sel_ids:
+                    self._multi_sel_ids.discard(hit)
+                else:
+                    if self._sel_id and self._sel_id!=hit:
+                        self._multi_sel_ids.add(self._sel_id)
+                    self._sel_id=hit
+                self._refresh_overlay()
+                self.objectSelected.emit(self._sel_obj())
+                self._drag_mode=None
+                super().mousePressEvent(event); return
+
             if hit!=self._sel_id:
-                self._sel_id=hit; self._refresh_overlay()
+                self._sel_id=hit
+                if not ctrl: self._multi_sel_ids.clear()
+                self._refresh_overlay()
                 self.objectSelected.emit(self._sel_obj())
             if hit:
                 obj=self._sel_obj()
-                if obj and not obj.locked:
+                # v4.0.1: respect doc permissions and per-object lock_level
+                can_drag = (obj and not obj.locked
+                            and (not self._doc or obj.can_modify(self._doc)))
+                if can_drag:
                     self._drag_mode='move'; self._drag_sp0=sp
                     self._drag_tf0=copy.copy(obj.transform)
-            else: self._drag_mode=None
+                    # Capture starting transforms of all multi-selected objects
+                    self._multi_drag_tf0={}
+                    for mid in self._multi_sel_ids:
+                        mobj=self._find_obj(mid)
+                        if mobj and not mobj.locked:
+                            self._multi_drag_tf0[mid]=copy.copy(mobj.transform)
+            else:
+                self._drag_mode=None; self._multi_sel_ids.clear()
+                # v4.0.1: start lasso selection on empty click
+                self._lasso_start=sp
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self,event):
@@ -533,6 +576,17 @@ class EdofCanvas(QGraphicsView):
             self.verticalScrollBar().setValue(self._pan_scroll0[1]-d.y())
             event.accept(); return
         sp=self._sp(event)
+        # v4.0: cursor position in mm in status bar
+        try:
+            mw = self.window()
+            if hasattr(mw, "_status") and self.doc:
+                page = self.doc.pages[self._page_idx] if self._page_idx < len(self.doc.pages) else None
+                if page:
+                    mm_x = sp.x() / max(1, self._render_size.width())  * page.width
+                    mm_y = sp.y() / max(1, self._render_size.height()) * page.height
+                    mw._status.showMessage(f"X: {mm_x:.1f} mm   Y: {mm_y:.1f} mm")
+        except Exception:
+            pass
         if self._drag_mode and self._drag_sp0:
             mods=event.modifiers()
             shift=bool(mods&Qt.KeyboardModifier.ShiftModifier)
@@ -640,6 +694,44 @@ class EdofCanvas(QGraphicsView):
         cx=tf.x+tf.width/2; cy=tf.y+tf.height/2
         return rotate_point(ax,ay,cx,cy,tf.rotation)
 
+    def _snap_to_neighbors(self, obj, x, y, w, h, threshold_mm=1.5):
+        """v4.0.1: Snap object's edges and center to nearby objects' edges/centers.
+        Returns (snapped_x, snapped_y, snapped_flag).
+        """
+        pg=self._cur_page()
+        if not pg: return x, y, False
+        # Candidate snap lines from other objects (excluding self & multi-sel)
+        excluded={obj.id} | self._multi_sel_ids
+        x_lines=[]; y_lines=[]
+        for o in pg.objects:
+            if o.id in excluded: continue
+            if not getattr(o,'visible',True): continue
+            t=o.transform
+            x_lines.extend([t.x, t.x + t.width, t.x + t.width/2])
+            y_lines.extend([t.y, t.y + t.height, t.y + t.height/2])
+        # Page edges
+        x_lines.extend([0, pg.width, pg.width/2])
+        y_lines.extend([0, pg.height, pg.height/2])
+        # Object's own snap candidates: left, right, center
+        my_x_pts=[(x, 'L'), (x + w, 'R'), (x + w/2, 'C')]
+        my_y_pts=[(y, 'T'), (y + h, 'B'), (y + h/2, 'C')]
+        snap_x=x; snap_y=y; snapped=False
+        best_dx=threshold_mm
+        for mx, _ in my_x_pts:
+            for tx in x_lines:
+                d=abs(mx - tx)
+                if d < best_dx:
+                    best_dx=d
+                    snap_x=x + (tx - mx); snapped=True
+        best_dy=threshold_mm
+        for my, _ in my_y_pts:
+            for ty in y_lines:
+                d=abs(my - ty)
+                if d < best_dy:
+                    best_dy=d
+                    snap_y=y + (ty - my); snapped=True
+        return snap_x, snap_y, snapped
+
     def _apply_drag(self,sp,shift,alt):
         obj=self._sel_obj();
         if not obj: return
@@ -648,7 +740,24 @@ class EdofCanvas(QGraphicsView):
         if self._drag_mode=='move':
             dx=px_to_mm(sp.x()-self._drag_sp0.x(),self._dpi)
             dy=px_to_mm(sp.y()-self._drag_sp0.y(),self._dpi)
-            obj.transform.x=tf.x+dx; obj.transform.y=tf.y+dy
+            new_x=tf.x+dx; new_y=tf.y+dy
+            # v4.0.1: Snap-to-grid
+            if self._snap_to_grid and not alt:
+                s=self._snap_size_mm
+                new_x=round(new_x/s)*s
+                new_y=round(new_y/s)*s
+            # v4.0.1: Alignment guides — snap to other objects' edges/centers
+            if self._show_align_guides and not alt:
+                new_x, new_y, snapped = self._snap_to_neighbors(
+                    obj, new_x, new_y, tf.width, tf.height)
+            obj.transform.x=new_x; obj.transform.y=new_y
+            # v4.0.1: move multi-selected objects together
+            applied_dx=new_x-tf.x; applied_dy=new_y-tf.y
+            for mid, mtf0 in getattr(self, '_multi_drag_tf0', {}).items():
+                mobj=self._find_obj(mid)
+                if mobj:
+                    mobj.transform.x=mtf0.x+applied_dx
+                    mobj.transform.y=mtf0.y+applied_dy
 
         elif self._drag_mode=='rotate':
             cx_s=mm_to_px(tf.x+tf.width/2,self._dpi)
@@ -761,10 +870,17 @@ class EdofCanvas(QGraphicsView):
 
     def _do_delete(self):
         pg=self._cur_page()
-        if pg and self._sel_id:
-            pg.remove_object(self._sel_id); self._sel_id=None
-            self._overlay.update_for(None,self._dpi)
-            self.objectSelected.emit(None); self.objectChanged.emit(); self.schedule_render()
+        if not pg: return
+        # v4.0.1: delete all multi-selected objects too
+        ids_to_delete=[]
+        if self._sel_id: ids_to_delete.append(self._sel_id)
+        ids_to_delete.extend(self._multi_sel_ids)
+        if not ids_to_delete: return
+        for oid in ids_to_delete:
+            pg.remove_object(oid)
+        self._sel_id=None; self._multi_sel_ids.clear()
+        self._overlay.update_for(None,self._dpi)
+        self.objectSelected.emit(None); self.objectChanged.emit(); self.schedule_render()
 
     def _layer_op(self, op: str):
         """Layer ordering: front/back/up/down with proper swap logic."""
@@ -818,6 +934,21 @@ class EdofCanvas(QGraphicsView):
     def _sel_obj(self):
         pg=self._cur_page()
         return pg.get_object(self._sel_id) if pg and self._sel_id else None
+
+    def _find_obj(self, oid):
+        """v4.0.1: helper for multi-select."""
+        pg=self._cur_page()
+        return pg.get_object(oid) if pg and oid else None
+
+    def selected_objects(self):
+        """v4.0.1: return list of all selected objects (primary + multi)."""
+        out=[]
+        primary=self._sel_obj()
+        if primary: out.append(primary)
+        for oid in self._multi_sel_ids:
+            o=self._find_obj(oid)
+            if o: out.append(o)
+        return out
 
     def get_sel_id(self): return self._sel_id
     def set_sel_id(self,oid):
@@ -1306,7 +1437,7 @@ class EdofEditor(QMainWindow):
         self.doc=None; self.filepath=None
         self.history=CommandHistory(max_undo=60); self._modified=False
         self._build_ui(); self.setStyleSheet(QSS)
-        self.setWindowTitle(t('app_title')); self.resize(1440,880)
+        self.setWindowTitle(f"{t('app_title')} {edof.__version__}"); self.resize(1440,880)
         QTimer.singleShot(300,self._load_fonts)
         if filepath and os.path.isfile(filepath): self._open_file(filepath)
         else: self._new_doc()
@@ -1364,7 +1495,7 @@ class EdofEditor(QMainWindow):
         a("🔍+",lambda:self._zoom_step(1.25),"Ctrl+="); a("🔍-",lambda:self._zoom_step(1/1.25),"Ctrl+-")
         a("Fit",self._zoom_fit,"Ctrl+0"); tb.addSeparator()
         a("⧉",self._dup_obj,"Ctrl+D"); a("🗑",self._del_obj,"Delete"); tb.addSeparator()
-        a("PNG",self._export_png); a("PDF",self._export_pdf)
+        a("PNG",self._export_png); a("PDF",self._export_pdf); a("📊 CSV",self._batch_csv)
 
     def _build_menu(self):
         mb=self.menuBar()
@@ -1376,15 +1507,38 @@ class EdofEditor(QMainWindow):
             mn.addAction(ac)
         fm=m('menu_file')
         a(fm,'new',self._new_doc,"Ctrl+N"); a(fm,'open',self._open_dlg,"Ctrl+O")
+        # v4.0.1: New from template
+        new_tpl_act=QAction("New from Template…",self)
+        new_tpl_act.triggered.connect(self._new_from_template)
+        fm.addAction(new_tpl_act)
+        # v4.0.1: Import PDF
+        imp_act=QAction("Import PDF…",self)
+        imp_act.triggered.connect(self._import_pdf)
+        fm.addAction(imp_act)
         a(fm,sep=True,tk="",slot=None)
         a(fm,'save',self._save,"Ctrl+S"); a(fm,'save_as',self._save_as,"Ctrl+Shift+S")
+        # v4.0.1: Save as v3 (downgrade)
+        save_3x_act=QAction("Save as v3 (downgrade)…",self)
+        save_3x_act.triggered.connect(self._save_as_v3)
+        fm.addAction(save_3x_act)
         a(fm,sep=True,tk="",slot=None)
         a(fm,'export_png',self._export_png); a(fm,'export_all',self._export_all)
-        a(fm,'export_pdf',self._export_pdf); a(fm,sep=True,tk="",slot=None)
+        a(fm,'export_pdf',self._export_pdf)
+        # v4.0.1: SVG export
+        svg_act=QAction("Export SVG…",self)
+        svg_act.triggered.connect(self._export_svg)
+        fm.addAction(svg_act)
+        a(fm,'batch_csv',self._batch_csv); a(fm,sep=True,tk="",slot=None)
         a(fm,'print',self._print); a(fm,sep=True,tk="",slot=None); a(fm,'quit',self.close,"Ctrl+Q")
         em=m('menu_edit')
         a(em,'undo',self._undo,"Ctrl+Z"); a(em,'redo',self._redo,"Ctrl+Y")
         a(em,sep=True,tk="",slot=None); a(em,'duplicate',self._dup_obj,"Ctrl+D"); a(em,'delete',self._del_obj,"Delete")
+        a(em,sep=True,tk="",slot=None)
+        a(em,'find_replace',self._find_replace,"Ctrl+F")
+        # v4.0.1: gradient editor
+        grad_act=QAction("Gradient Editor…",self)
+        grad_act.triggered.connect(self._gradient_editor)
+        em.addAction(grad_act)
         im=m('menu_insert')
         a(im,'text_box',self._ins_textbox); a(im,'image',self._ins_image)
         a(im,'rectangle',lambda:self._ins_shape("rect")); a(im,'ellipse',lambda:self._ins_shape("ellipse"))
@@ -1394,10 +1548,33 @@ class EdofEditor(QMainWindow):
         a(pm,'del_page',self._del_page); a(pm,sep=True,tk="",slot=None); a(pm,'page_settings',self._page_settings)
         dm=m('menu_document')
         a(dm,'variables',self._show_vars); a(dm,'doc_info',self._doc_info); a(dm,'validate',self._validate)
+        # v4.0.1: encryption / protection
+        a(dm,sep=True,tk="",slot=None)
+        unlock_act=QAction("Unlock for editing…",self)
+        unlock_act.setShortcut(QKeySequence("Ctrl+Shift+L"))
+        unlock_act.triggered.connect(self._show_unlock_dialog)
+        dm.addAction(unlock_act)
+        protect_act=QAction("Protection…",self)
+        protect_act.triggered.connect(self._show_protection_dialog)
+        dm.addAction(protect_act)
+        relock_act=QAction("Re-lock (forget password)",self)
+        relock_act.triggered.connect(self._relock_doc)
+        dm.addAction(relock_act)
         vm=m('menu_view')
         a(vm,'zoom_in',lambda:self._zoom_step(1.25),"Ctrl+=")
         a(vm,'zoom_out',lambda:self._zoom_step(1/1.25),"Ctrl+-")
         a(vm,'fit_page',self._zoom_fit,"Ctrl+0")
+        a(vm,sep=True,tk="",slot=None)
+        # v4.0.1: snap-to-grid toggle
+        snap_act=QAction("Snap to Grid",self)
+        snap_act.setCheckable(True); snap_act.setShortcut(QKeySequence("Ctrl+G"))
+        snap_act.triggered.connect(lambda chk: setattr(self._canvas,'_snap_to_grid',chk))
+        vm.addAction(snap_act)
+        # v4.0.1: alignment guides toggle
+        align_act=QAction("Show Alignment Guides",self)
+        align_act.setCheckable(True); align_act.setChecked(True)
+        align_act.triggered.connect(lambda chk: setattr(self._canvas,'_show_align_guides',chk))
+        vm.addAction(align_act)
 
     # ── Slots ─────────────────────────────────────────────────────────────────
     def _on_sel(self,obj):
@@ -1427,13 +1604,133 @@ class EdofEditor(QMainWindow):
         if p: self._open_file(p)
 
     def _open_file(self,path):
+        # v4.0.1: Handle encrypted files (peek manifest, prompt for password)
         try:
-            self.doc=edof.load(path); self.filepath=path; self._modified=False
-            self.history.clear(); self.history.push(self.doc,"Opened")
-            self._canvas.set_document(self.doc,0); self._refresh_pages(); self._upd_title()
-            if self.doc.errors: QMessageBox.warning(self,"Notice","\n".join(self.doc.errors))
-            self._status.showMessage(t('status_opened',name=os.path.basename(path)))
-        except Exception as e: QMessageBox.critical(self,"Error",str(e))
+            from edof.format.serializer import EdofSerializer
+            from edof.crypto import EdofPasswordRequired, EdofWrongPassword
+            from edof.utils.legacy_v2 import is_v2_archive
+
+            password = None
+            recovery_key = None
+            had_xor_password = False
+
+            # Check for legacy EDOF 2 with XOR password
+            if is_v2_archive(path):
+                try:
+                    import zipfile, json
+                    with zipfile.ZipFile(path) as zf:
+                        v2_data = json.loads(zf.read("data.json"))
+                        if v2_data.get("edit_password_xor"):
+                            had_xor_password = True
+                except Exception: pass
+
+            # Peek manifest to check encryption
+            else:
+                try:
+                    manifest = EdofSerializer.peek(path)
+                    if manifest.get("protection", {}).get("mode") in ("partial", "full"):
+                        password, recovery_key = self._prompt_for_password()
+                        if password is None and recovery_key is None:
+                            return  # user cancelled
+                except Exception: pass
+
+            # Load (with retries on wrong password)
+            attempts = 0
+            while True:
+                attempts += 1
+                try:
+                    self.doc = edof.load(path, password=password,
+                                           recovery_key=recovery_key)
+                    break
+                except EdofPasswordRequired:
+                    password, recovery_key = self._prompt_for_password()
+                    if password is None and recovery_key is None: return
+                except EdofWrongPassword:
+                    if attempts > 3:
+                        QMessageBox.warning(self, "Failed",
+                            "Three wrong attempts. Please open the file again.")
+                        return
+                    QMessageBox.warning(self, "Wrong password",
+                        "The password or recovery key did not match. Try again.")
+                    password, recovery_key = self._prompt_for_password()
+                    if password is None and recovery_key is None: return
+
+            self.filepath = path; self._modified = False
+            self.history.clear(); self.history.push(self.doc, "Opened")
+            self._canvas.set_document(self.doc, 0)
+            self._refresh_pages(); self._upd_title()
+
+            # Offer to upgrade XOR-protected v2 to real encryption
+            if had_xor_password:
+                self._offer_v2_upgrade()
+
+            if self.doc.errors:
+                QMessageBox.information(self, "Notice", "\n".join(self.doc.errors))
+            self._update_protection_status()
+            self._status.showMessage(t('status_opened', name=os.path.basename(path)))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+    def _prompt_for_password(self):
+        """Show a password prompt; returns (password, recovery_key) or (None, None) on cancel."""
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                                     QLineEdit, QPushButton, QRadioButton,
+                                     QButtonGroup)
+        dlg = QDialog(self); dlg.setWindowTitle("Encrypted Document")
+        dlg.setStyleSheet(QSS); dlg.resize(420, 220)
+        v = QVBoxLayout(dlg)
+        v.addWidget(QLabel("<b>This document is encrypted.</b>"))
+        v.addWidget(QLabel("Enter a password or recovery key to open it:"))
+
+        rb_pwd = QRadioButton("Password"); rb_rk = QRadioButton("Recovery key")
+        rb_pwd.setChecked(True)
+        bg = QButtonGroup(dlg); bg.addButton(rb_pwd); bg.addButton(rb_rk)
+        h = QHBoxLayout(); h.addWidget(rb_pwd); h.addWidget(rb_rk); v.addLayout(h)
+
+        edit = QLineEdit(); edit.setEchoMode(QLineEdit.EchoMode.Password)
+        v.addWidget(edit)
+
+        def _toggle():
+            if rb_rk.isChecked():
+                edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                edit.setPlaceholderText("XXXX-XXXX-XXXX-XXXX-XXXX-XXXX")
+            else:
+                edit.setEchoMode(QLineEdit.EchoMode.Password)
+                edit.setPlaceholderText("")
+            edit.clear()
+        rb_pwd.toggled.connect(_toggle); rb_rk.toggled.connect(_toggle)
+
+        bb = QHBoxLayout()
+        ok = QPushButton("Open"); cancel = QPushButton("Cancel")
+        bb.addStretch(); bb.addWidget(ok); bb.addWidget(cancel); v.addLayout(bb)
+
+        result = [None, None]
+        def do_ok():
+            if rb_rk.isChecked():
+                result[1] = edit.text().strip()
+            else:
+                result[0] = edit.text()
+            dlg.accept()
+        ok.clicked.connect(do_ok)
+        edit.returnPressed.connect(do_ok)
+        cancel.clicked.connect(dlg.reject)
+        edit.setFocus()
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            return result[0], result[1]
+        return None, None
+
+    def _offer_v2_upgrade(self):
+        """After loading a legacy v2 archive that had XOR password, offer real AES."""
+        msg = (
+            "This document was loaded from a legacy EDOF 2 archive that had "
+            "an XOR-obfuscated password.\n\n"
+            "XOR provides no real protection — the password could be trivially "
+            "recovered by anyone with the file.\n\n"
+            "Would you like to set up real AES-256 encryption now?")
+        r = QMessageBox.question(self, "Upgrade protection?", msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if r == QMessageBox.StandardButton.Yes:
+            self._show_protection_dialog()
 
     def _save(self):
         if not self.doc: return
@@ -1459,10 +1756,31 @@ class EdofEditor(QMainWindow):
     def _upd_title(self):
         ti=(self.doc.title or "Untitled") if self.doc else "—"
         f=os.path.basename(self.filepath) if self.filepath else "Unsaved"
-        self.setWindowTitle(f"{t('app_title')} — {ti} [{f}]{'•' if self._modified else ''}")
+        self.setWindowTitle(f"{t('app_title')} {edof.__version__} — {ti} [{f}]{'•' if self._modified else ''}")
 
     def _push(self,d):
         if self.doc: self.history.push(self.doc,d); self._modified=True; self._upd_title()
+
+    def _check_perm(self, required: str, action_label: str = "edit") -> bool:
+        """v4.0.1: Verify the doc grants `required` permission for an action.
+
+        Shows a dialog if denied. Returns True if allowed.
+        """
+        if not self.doc: return False
+        if not self.doc.is_encrypted:
+            return True   # plain doc → always allowed
+        if self.doc.can(required):
+            return True
+        from edof.crypto import describe_permission
+        d = describe_permission(required)
+        cur = describe_permission(self.doc.permission_level)
+        QMessageBox.information(self, "Permission required",
+            f"This action ({action_label}) requires permission level:\n"
+            f"   {d['label']} or higher\n\n"
+            f"You are currently at:\n"
+            f"   {cur['label']}\n\n"
+            f"Use Document → Unlock for editing… to enter a higher-level password.")
+        return False
 
     def _undo(self):
         if not self.doc: return
@@ -1485,12 +1803,14 @@ class EdofEditor(QMainWindow):
     def _cpi(self): return max(0,self._pg_list.currentRow())
 
     def _ins_textbox(self):
+        if not self._check_perm("design", "Add TextBox"): return
         pg=self._cp()
         if not pg: return
         tb=pg.add_textbox(20,20,100,25,"Text"); tb.style.font_size=18
         self._canvas.set_sel_id(tb.id); self._canvas.schedule_render(); self._push("Add TextBox")
 
     def _ins_image(self):
+        if not self._check_perm("design", "Add Image"): return
         pg=self._cp()
         if not pg: return
         p,_=QFileDialog.getOpenFileName(self,t('image'),"","Images (*.png *.jpg *.jpeg *.bmp *.tiff *.gif *.webp);;All (*.*)")
@@ -1501,6 +1821,7 @@ class EdofEditor(QMainWindow):
         except Exception as e: QMessageBox.critical(self,"Error",str(e))
 
     def _ins_shape(self,stype):
+        if not self._check_perm("design", f"Add {stype}"): return
         pg=self._cp()
         if not pg: return
         sh=pg.add_shape(stype,30,30,70,45); sh.fill.color=(100,149,237,255); sh.stroke.color=(50,80,180,255)
@@ -1523,6 +1844,7 @@ class EdofEditor(QMainWindow):
         self._canvas.schedule_render(); self._push("Add QR")
 
     def _dup_obj(self):
+        if not self._check_perm("design", "Duplicate object"): return
         pg=self._cp(); sid=self._canvas.get_sel_id()
         if not pg or not sid: return
         obj=pg.get_object(sid)
@@ -1530,7 +1852,9 @@ class EdofEditor(QMainWindow):
         new=obj.copy(); new.transform.translate(8,8); pg.add_object(new)
         self._canvas.set_sel_id(new.id); self._canvas.schedule_render(); self._push("Duplicate")
 
-    def _del_obj(self): self._canvas._do_delete(); self._push("Delete")
+    def _del_obj(self):
+        if not self._check_perm("design", "Delete object"): return
+        self._canvas._do_delete(); self._push("Delete")
 
     # ── Pages ─────────────────────────────────────────────────────────────────
     def _add_page(self):
@@ -1591,6 +1915,95 @@ class EdofEditor(QMainWindow):
         if not p: return
         try: self.doc.export_pdf(p)
         except Exception as e: QMessageBox.critical(self,"PDF Error",f"pip install edof[pdf]\n\n{e}")
+
+    def _batch_csv(self):
+        """Item 26: CSV import for batch fill → export per row."""
+        if not self.doc: return
+        csv_path, _ = QFileDialog.getOpenFileName(
+            self, "Select CSV file", "", "CSV (*.csv);;All (*.*)")
+        if not csv_path: return
+        out_dir = QFileDialog.getExistingDirectory(self, "Output folder for exports")
+        if not out_dir: return
+
+        # Detect variables in template
+        var_names = self.doc.variables.names()
+        if not var_names:
+            QMessageBox.warning(self, "No variables",
+                "This template has no variables defined.\n"
+                "Bind objects to variables first.")
+            return
+
+        import csv
+        try:
+            with open(csv_path, newline='', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                rows   = list(reader)
+                headers= reader.fieldnames or []
+        except Exception as e:
+            QMessageBox.critical(self, "CSV Error", str(e)); return
+
+        if not rows:
+            QMessageBox.information(self, "Empty", "CSV has no data rows."); return
+
+        # Show mapping dialog
+        dlg = QDialog(self); dlg.setWindowTitle("CSV → Variables mapping")
+        dlg.setStyleSheet(QSS); dlg.resize(480, 320)
+        vb = QVBoxLayout(dlg); vb.setContentsMargins(12,12,12,12)
+        vb.addWidget(QLabel(f"CSV has {len(rows)} rows. Map CSV columns to template variables:"))
+
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        inner  = QWidget(); fl = QFormLayout(inner); scroll.setWidget(inner)
+        vb.addWidget(scroll, 1)
+
+        combos = {}
+        for var in var_names:
+            cb = QComboBox(); cb.addItem("(skip)")
+            cb.addItems(headers)
+            # Auto-match by name
+            if var in headers: cb.setCurrentText(var)
+            elif var.lower() in [h.lower() for h in headers]:
+                cb.setCurrentText(next(h for h in headers if h.lower()==var.lower()))
+            fl.addRow(f"Variable:  {var}", cb)
+            combos[var] = cb
+
+        # Filename pattern
+        le_pat = QLineEdit("{n:04d}.png"); le_pat.setPlaceholderText("{n}.png or {col_name}.png")
+        vb.addWidget(QLabel("Output filename pattern  (use {n} for row number, {column_name} for column value):"))
+        vb.addWidget(le_pat)
+
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                              QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); vb.addWidget(bb)
+        if dlg.exec() != QDialog.DialogCode.Accepted: return
+
+        mapping  = {var: cb.currentText() for var,cb in combos.items() if cb.currentText() != "(skip)"}
+        pattern  = le_pat.text().strip() or "{n:04d}.png"
+        ok_count = 0; errors = []
+
+        for n, row in enumerate(rows, 1):
+            try:
+                fill = {var: row.get(col, "") for var, col in mapping.items()}
+                self.doc.fill_variables(fill)
+                # Build filename
+                fname = pattern
+                try:
+                    fname = pattern.format(n=n, **{k: v for k,v in row.items()
+                                                    if k and k.isidentifier()})
+                except Exception:
+                    fname = f"{n:04d}.png"
+                out_path = os.path.join(out_dir, fname)
+                ext      = os.path.splitext(out_path)[1].lower().lstrip(".")
+                fmt      = ext.upper() if ext in ("png","jpg","jpeg","tiff","bmp") else "PNG"
+                self.doc.export_bitmap(out_path, page=self._cpi(), dpi=300, format=fmt)
+                ok_count += 1
+            except Exception as e:
+                errors.append(f"Row {n}: {e}")
+
+        msg = f"Exported {ok_count}/{len(rows)} rows to:\n{out_dir}"
+        if errors:
+            msg += "\n\nErrors:\n" + "\n".join(errors[:5])
+        QMessageBox.information(self, "Batch export done", msg)
+        self._status.showMessage(f"Batch export: {ok_count}/{len(rows)} rows")
 
     def _print(self):
         if not self.doc or not self.doc.pages: return
@@ -1753,11 +2166,627 @@ class EdofEditor(QMainWindow):
             self._upd_title(); dlg.accept()
         bb.accepted.connect(apply); bb.rejected.connect(dlg.reject); fl.addRow(bb); dlg.exec()
 
+    def _find_replace(self):
+        """v4.0: Find & Replace across all pages."""
+        if not self.doc: return
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
+                                     QLineEdit, QPushButton, QCheckBox, QLabel)
+        dlg = QDialog(self); dlg.setWindowTitle("Find & Replace")
+        dlg.setStyleSheet(QSS); dlg.resize(420, 200)
+        v = QVBoxLayout(dlg)
+        find_edit    = QLineEdit(); find_edit.setPlaceholderText("Find...")
+        replace_edit = QLineEdit(); replace_edit.setPlaceholderText("Replace with...")
+        case_cb  = QCheckBox("Match case")
+        regex_cb = QCheckBox("Regex")
+        v.addWidget(QLabel("Find:")); v.addWidget(find_edit)
+        v.addWidget(QLabel("Replace:")); v.addWidget(replace_edit)
+        h = QHBoxLayout(); h.addWidget(case_cb); h.addWidget(regex_cb); v.addLayout(h)
+        result_lbl = QLabel(""); v.addWidget(result_lbl)
+        btn_h = QHBoxLayout()
+        btn_find  = QPushButton("Find All")
+        btn_repl  = QPushButton("Replace All")
+        btn_close = QPushButton("Close")
+        btn_h.addWidget(btn_find); btn_h.addWidget(btn_repl); btn_h.addWidget(btn_close)
+        v.addLayout(btn_h)
+
+        def _iter_textboxes():
+            from edof.format.objects import TextBox, Group, Table
+            def _walk(objs):
+                for o in objs:
+                    if isinstance(o, TextBox): yield o
+                    elif isinstance(o, Group):
+                        yield from _walk(o.children)
+                    elif isinstance(o, Table):
+                        # Table cells aren't TextBoxes, but they have text
+                        pass
+            for p in self.doc.pages:
+                yield from _walk(p.objects)
+
+        def _do_find():
+            import re
+            q = find_edit.text()
+            if not q: return
+            count = 0
+            try:
+                if regex_cb.isChecked():
+                    flags = 0 if case_cb.isChecked() else re.IGNORECASE
+                    pat = re.compile(q, flags)
+                    for tb in _iter_textboxes():
+                        if pat.search(tb.text): count += 1
+                else:
+                    if case_cb.isChecked():
+                        for tb in _iter_textboxes():
+                            if q in tb.text: count += 1
+                    else:
+                        ql = q.lower()
+                        for tb in _iter_textboxes():
+                            if ql in tb.text.lower(): count += 1
+            except re.error as e:
+                result_lbl.setText(f"Regex error: {e}"); return
+            result_lbl.setText(f"Found in {count} text box(es)")
+
+        def _do_replace():
+            import re
+            q = find_edit.text()
+            r = replace_edit.text()
+            if not q: return
+            count = 0
+            try:
+                if regex_cb.isChecked():
+                    flags = 0 if case_cb.isChecked() else re.IGNORECASE
+                    pat = re.compile(q, flags)
+                    for tb in _iter_textboxes():
+                        new, n = pat.subn(r, tb.text)
+                        if n: tb.text = new; count += n
+                else:
+                    for tb in _iter_textboxes():
+                        if case_cb.isChecked():
+                            if q in tb.text:
+                                tb.text = tb.text.replace(q, r); count += 1
+                        else:
+                            # Case-insensitive replace
+                            import re as _re
+                            new, n = _re.subn(_re.escape(q), r, tb.text, flags=_re.IGNORECASE)
+                            if n: tb.text = new; count += n
+            except re.error as e:
+                result_lbl.setText(f"Regex error: {e}"); return
+            result_lbl.setText(f"Replaced {count} occurrence(s)")
+            self._render_canvas()
+
+        btn_find.clicked.connect(_do_find)
+        btn_repl.clicked.connect(_do_replace)
+        btn_close.clicked.connect(dlg.accept)
+        dlg.exec()
+
     def _validate(self):
         if not self.doc: return
         issues=self.doc.validate()
         if issues: QMessageBox.warning(self,t('dlg_validate'),"\n".join(f"• {i}" for i in issues))
         else: QMessageBox.information(self,t('dlg_validate'),"✓ Document is valid.")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # v4.0.1: Protection / Encryption dialogs
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _show_unlock_dialog(self):
+        """Prompt for password to unlock an encrypted document."""
+        if not self.doc: return
+        if not self.doc.is_encrypted:
+            QMessageBox.information(self, "Unlock",
+                "This document is not encrypted. No password needed.\n\n"
+                "You have full edit access (Administrator level).")
+            return
+
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                                     QLineEdit, QPushButton, QRadioButton,
+                                     QButtonGroup, QFrame)
+        from edof.crypto import EdofWrongPassword
+
+        dlg = QDialog(self); dlg.setWindowTitle("Unlock Document")
+        dlg.setStyleSheet(QSS); dlg.resize(440, 280)
+        v = QVBoxLayout(dlg)
+
+        v.addWidget(QLabel("<b>This document is encrypted.</b>"))
+        info = QLabel(
+            f"Available password levels:\n  • " +
+            "\n  • ".join(self.doc.password_levels) +
+            "\n\nEach password grants a different level of editing access.")
+        info.setWordWrap(True)
+        v.addWidget(info)
+
+        v.addWidget(QFrame())  # separator
+
+        # Toggle: password vs recovery key
+        rb_pwd = QRadioButton("Use password")
+        rb_rk  = QRadioButton("Use recovery key")
+        rb_pwd.setChecked(True)
+        bg = QButtonGroup(dlg); bg.addButton(rb_pwd); bg.addButton(rb_rk)
+        v.addWidget(rb_pwd); v.addWidget(rb_rk)
+
+        edit = QLineEdit()
+        edit.setEchoMode(QLineEdit.EchoMode.Password)
+        edit.setPlaceholderText("Password")
+        v.addWidget(edit)
+
+        def _toggle_mode():
+            if rb_rk.isChecked():
+                edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                edit.setPlaceholderText("XXXX-XXXX-XXXX-XXXX-XXXX-XXXX")
+            else:
+                edit.setEchoMode(QLineEdit.EchoMode.Password)
+                edit.setPlaceholderText("Password")
+            edit.clear()
+        rb_pwd.toggled.connect(_toggle_mode)
+        rb_rk.toggled.connect(_toggle_mode)
+
+        result_lbl = QLabel(""); result_lbl.setStyleSheet("color: #c14;")
+        v.addWidget(result_lbl)
+
+        bb = QHBoxLayout()
+        ok_btn = QPushButton("Unlock"); cancel_btn = QPushButton("Cancel")
+        bb.addStretch(); bb.addWidget(ok_btn); bb.addWidget(cancel_btn)
+        v.addLayout(bb)
+
+        def try_unlock():
+            try:
+                if rb_rk.isChecked():
+                    perm = self.doc.unlock(recovery_key=edit.text().strip())
+                else:
+                    perm = self.doc.unlock(password=edit.text())
+                # Reload UI with full content
+                self._canvas.set_document(self.doc, self._canvas._page_idx)
+                self._obj_panel.set_document(self.doc)
+                self._update_protection_status()
+                QMessageBox.information(self, "Unlocked",
+                    self._format_permission_dialog(perm))
+                dlg.accept()
+            except EdofWrongPassword:
+                result_lbl.setText("Wrong password / recovery key")
+                edit.clear()
+            except Exception as e:
+                result_lbl.setText(f"Error: {e}")
+
+        ok_btn.clicked.connect(try_unlock)
+        edit.returnPressed.connect(try_unlock)
+        cancel_btn.clicked.connect(dlg.reject)
+        edit.setFocus()
+        dlg.exec()
+
+    def _format_permission_dialog(self, perm) -> str:
+        """Format a 'what you can / can't do' message after unlock."""
+        from edof.crypto import describe_permission
+        d = describe_permission(perm)
+        msg = f"Unlocked at level: {d['label']}\n\n"
+        msg += "✓ You CAN:\n"
+        for a in d["allowed"]: msg += f"   • {a}\n"
+        if d["denied"]:
+            msg += "\n✗ You CANNOT:\n"
+            for a in d["denied"]: msg += f"   • {a}\n"
+        return msg
+
+    def _relock_doc(self):
+        if not self.doc or not self.doc.is_encrypted: return
+        self.doc.lock()
+        self._canvas.set_document(self.doc, self._canvas._page_idx)
+        self._update_protection_status()
+
+    def _update_protection_status(self):
+        """Update toolbar/status bar to reflect current permission level."""
+        if not self.doc: return
+        if not self.doc.is_encrypted:
+            self._status.showMessage("🔓 Plain document — full edit access")
+            return
+        if self.doc.is_locked:
+            self._status.showMessage("🔒 Document is locked — view only")
+        else:
+            from edof.crypto import describe_permission
+            d = describe_permission(self.doc.permission_level)
+            self._status.showMessage(f"🔓 Unlocked: {d['label']} "
+                                      f"({self.doc.permission_level.to_string()})")
+
+    def _show_protection_dialog(self):
+        """Manage encryption mode and passwords."""
+        if not self.doc: return
+        if not self.doc.can("admin") and self.doc.is_encrypted:
+            QMessageBox.warning(self, "Permission required",
+                "Managing protection requires the Administrator password.\n\n"
+                "Use Document → Unlock for editing… first.")
+            return
+
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
+                                     QFormLayout, QLabel, QLineEdit, QPushButton,
+                                     QComboBox, QGroupBox, QFrame)
+
+        dlg = QDialog(self); dlg.setWindowTitle("Document Protection")
+        dlg.setStyleSheet(QSS); dlg.resize(540, 540)
+        v = QVBoxLayout(dlg)
+
+        # Status block
+        if self.doc.is_encrypted:
+            status_html = (f"<b>Status:</b> 🔒 Encrypted ({self.doc.encryption_mode})<br>"
+                           f"<b>Passwords set:</b> {', '.join(self.doc.password_levels) or '(none)'}")
+        else:
+            status_html = ("<b>Status:</b> 🔓 Plain (no encryption)<br>"
+                           "<i>Add a password below to enable encryption.</i>")
+        status_lbl = QLabel(status_html); status_lbl.setWordWrap(True)
+        v.addWidget(status_lbl)
+        v.addWidget(QFrame())
+
+        # Encryption mode (if encrypted)
+        if self.doc.is_encrypted:
+            mode_box = QGroupBox("Encryption mode")
+            mb = QFormLayout(mode_box)
+            mode_cb = QComboBox(); mode_cb.addItems(["full", "partial"])
+            mode_cb.setCurrentText(self.doc.encryption_mode)
+            mb.addRow("Mode:", mode_cb)
+            mode_help = QLabel(
+                "<i><b>full</b>: nothing is visible without a password.<br>"
+                "<b>partial</b>: layout & structure visible, but text content is encrypted.</i>")
+            mode_help.setWordWrap(True)
+            mb.addRow(mode_help)
+            v.addWidget(mode_box)
+        else:
+            mode_cb = None
+
+        # Password slots
+        pwd_box = QGroupBox("Set / change passwords")
+        pwd_layout = QFormLayout(pwd_box)
+        pwd_inputs = {}
+        for level in ("fill", "edit", "design", "admin"):
+            le = QLineEdit()
+            le.setEchoMode(QLineEdit.EchoMode.Password)
+            le.setPlaceholderText("Leave empty to keep / unset")
+            pwd_inputs[level] = le
+            existing = "✓ set" if level in self.doc.password_levels else "(empty)"
+            pwd_layout.addRow(f"{level} ({existing}):", le)
+        v.addWidget(pwd_box)
+
+        # Help
+        v.addWidget(QLabel(
+            "<i>Levels:  fill=template, edit=text, design=full edit, admin=manage protection.</i>"))
+
+        # Recovery key section
+        if self.doc.is_encrypted:
+            rk_lbl = QLabel("<i>Recovery key was shown when you set the first password. "
+                            "If you lost it and want a new one, remove all passwords first.</i>")
+            rk_lbl.setWordWrap(True)
+            v.addWidget(rk_lbl)
+
+        # Action buttons
+        bb = QHBoxLayout()
+        clear_btn = QPushButton("Remove all protection")
+        clear_btn.setEnabled(self.doc.is_encrypted)
+        ok_btn = QPushButton("Apply"); cancel_btn = QPushButton("Cancel")
+        bb.addWidget(clear_btn); bb.addStretch()
+        bb.addWidget(ok_btn); bb.addWidget(cancel_btn)
+        v.addLayout(bb)
+
+        def _apply():
+            try:
+                # Track if this is the first protection being applied (to show recovery key)
+                first_setup = (not self.doc.is_encrypted)
+
+                # Set passwords
+                new_pwds = {lv: le.text() for lv, le in pwd_inputs.items() if le.text()}
+                if not new_pwds and not self.doc.is_encrypted:
+                    QMessageBox.information(self, "No change",
+                        "No passwords entered; document remains unprotected.")
+                    return
+
+                # Confirm if upgrading plain → encrypted
+                if first_setup and new_pwds:
+                    confirm = QMessageBox.question(self, "Enable encryption?",
+                        "This will encrypt the document with AES-256.\n\n"
+                        "WRITE DOWN your passwords AND the recovery key that "
+                        "will be shown — without them the document is "
+                        "permanently inaccessible.\n\nContinue?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                    if confirm != QMessageBox.StandardButton.Yes:
+                        return
+
+                recovery_key = None
+                for level, pwd in new_pwds.items():
+                    rk = self.doc.set_password(level, pwd)
+                    if rk: recovery_key = rk
+
+                # Set mode
+                if mode_cb:
+                    self.doc.encryption_mode = mode_cb.currentText()
+
+                # Show recovery key if generated
+                if recovery_key:
+                    self._show_recovery_key_dialog(recovery_key)
+
+                self._update_protection_status()
+                self._push("Protection")
+                dlg.accept()
+            except Exception as e:
+                QMessageBox.warning(self, "Error", str(e))
+
+        def _clear_all():
+            confirm = QMessageBox.question(self, "Remove all protection?",
+                "This will remove all passwords and decrypt the document.\n\n"
+                "After saving, the file will be readable by anyone.\n\nContinue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if confirm == QMessageBox.StandardButton.Yes:
+                try:
+                    self.doc.clear_all_protection()
+                    self._update_protection_status()
+                    self._push("Clear protection")
+                    dlg.accept()
+                except Exception as e:
+                    QMessageBox.warning(self, "Error", str(e))
+
+        ok_btn.clicked.connect(_apply)
+        clear_btn.clicked.connect(_clear_all)
+        cancel_btn.clicked.connect(dlg.reject)
+        dlg.exec()
+
+    def _show_recovery_key_dialog(self, recovery_key: str):
+        """Show the recovery key with strong emphasis on saving it."""
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                                     QLineEdit, QPushButton, QApplication)
+        dlg = QDialog(self); dlg.setWindowTitle("Recovery Key — SAVE THIS NOW")
+        dlg.setStyleSheet(QSS); dlg.resize(520, 280)
+        v = QVBoxLayout(dlg)
+
+        warn = QLabel(
+            "<h3 style='color:#c14;'>⚠ Save this recovery key NOW</h3>"
+            "<p>If you lose all your passwords, this is the <b>only</b> way "
+            "to recover the document. It will <b>not</b> be shown again. "
+            "Store it in a password manager or print it to paper.</p>")
+        warn.setWordWrap(True)
+        v.addWidget(warn)
+
+        key_edit = QLineEdit(recovery_key)
+        key_edit.setReadOnly(True)
+        key_edit.setStyleSheet(
+            "font-family: 'Courier New', monospace; font-size: 16pt; "
+            "background: #f8f8f0; padding: 8px;")
+        v.addWidget(key_edit)
+
+        bb = QHBoxLayout()
+        copy_btn = QPushButton("Copy to clipboard")
+        ok_btn = QPushButton("I have saved this key")
+        bb.addWidget(copy_btn); bb.addStretch(); bb.addWidget(ok_btn)
+        v.addLayout(bb)
+
+        confirmed = [False]
+        def do_copy():
+            QApplication.clipboard().setText(recovery_key)
+            copy_btn.setText("Copied ✓"); confirmed[0] = True
+        def do_ok():
+            if not confirmed[0]:
+                r = QMessageBox.question(dlg, "Confirm",
+                    "Have you really copied / written down the recovery key?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if r != QMessageBox.StandardButton.Yes: return
+            dlg.accept()
+        copy_btn.clicked.connect(do_copy)
+        ok_btn.clicked.connect(do_ok)
+        dlg.exec()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # v4.0.1: New file actions
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _save_as_v3(self):
+        """Save as a v3-compatible .edof file (lossy downgrade)."""
+        if not self.doc: return
+        path,_=QFileDialog.getSaveFileName(self, "Save as v3 (downgrade)",
+            "", "EDOF v3 files (*.edof)")
+        if not path: return
+        if not path.lower().endswith(".edof"): path+=".edof"
+        try:
+            self.doc.export_3x(path)
+            QMessageBox.information(self, "Saved as v3",
+                f"Document downgraded and saved to:\n{path}\n\n"
+                f"Note: Tables, rich text, paths, gradients, and conditional\n"
+                f"visibility have been flattened. The original document is\n"
+                f"unchanged.")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not save as v3:\n{e}")
+
+    def _import_pdf(self):
+        """Import a PDF as an editable EDOF document."""
+        if not self._confirm(): return
+        path,_=QFileDialog.getOpenFileName(self, "Import PDF",
+            "", "PDF files (*.pdf)")
+        if not path: return
+        try:
+            new_doc=edof.import_pdf(path, detect_tables=True)
+            self.doc=new_doc; self.filepath=None
+            self._canvas.set_document(new_doc, 0)
+            self._obj_panel.set_document(new_doc)
+            self.setWindowTitle(f"edof editor — Imported from {os.path.basename(path)}")
+            self._push("Import PDF")
+            n_errors=len(new_doc.errors)
+            msg=f"Imported {sum(len(p.objects) for p in new_doc.pages)} objects from PDF."
+            if n_errors:
+                msg+=f"\n\n{n_errors} migration warning(s):\n"
+                msg+="\n".join(f"• {e}" for e in new_doc.errors[:5])
+            QMessageBox.information(self, "Import successful", msg)
+        except Exception as e:
+            QMessageBox.warning(self, "Import error", f"Could not import PDF:\n{e}")
+
+    def _export_svg(self):
+        """Export current page as SVG."""
+        if not self.doc: return
+        path,_=QFileDialog.getSaveFileName(self, "Export SVG",
+            "", "SVG files (*.svg)")
+        if not path: return
+        if not path.lower().endswith(".svg"): path+=".svg"
+        try:
+            self.doc.export_svg(path, page=self._canvas._page_idx)
+            self._status.showMessage(f"SVG saved: {os.path.basename(path)}")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not export SVG:\n{e}")
+
+    # ── v4.0.1: Gradient editor ───────────────────────────────────────────────
+        """Open visual gradient editor for the selected object."""
+        obj=self._canvas._sel_obj()
+        if not obj or not hasattr(obj,'fill'):
+            QMessageBox.information(self,"Gradient Editor",
+                "Select a shape or text box first.")
+            return
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
+                                     QComboBox, QSpinBox, QDoubleSpinBox, QPushButton,
+                                     QListWidget, QListWidgetItem, QColorDialog, QLabel)
+        from edof.format.styles import Gradient
+        dlg=QDialog(self); dlg.setWindowTitle("Gradient Editor")
+        dlg.setStyleSheet(QSS); dlg.resize(420, 380)
+        v=QVBoxLayout(dlg)
+
+        # Init from existing gradient or create new
+        g=obj.fill.gradient or Gradient(type="linear", angle=0,
+            stops=[(0.0,(255,255,255,255)), (1.0,(0,0,0,255))])
+
+        f=QFormLayout()
+        type_cb=QComboBox(); type_cb.addItems(["linear","radial"])
+        type_cb.setCurrentText(g.type); f.addRow("Type:", type_cb)
+        angle_sb=QDoubleSpinBox(); angle_sb.setRange(0,360); angle_sb.setValue(g.angle)
+        f.addRow("Angle (linear, deg):", angle_sb)
+        radius_sb=QDoubleSpinBox(); radius_sb.setRange(0.05, 2.0); radius_sb.setSingleStep(0.05)
+        radius_sb.setValue(g.radius); f.addRow("Radius (radial, 0–1):", radius_sb)
+        v.addLayout(f)
+
+        v.addWidget(QLabel("Color stops (drag to reorder, double-click to recolor):"))
+        stops_lw=QListWidget()
+        for off, col in g.stops:
+            it=QListWidgetItem(f"@ {off:.2f}  rgb={col[:3]} a={col[3] if len(col)>=4 else 255}")
+            it.setData(Qt.ItemDataRole.UserRole,(off,col))
+            stops_lw.addItem(it)
+        v.addWidget(stops_lw)
+
+        def edit_stop(item):
+            off,col=item.data(Qt.ItemDataRole.UserRole)
+            qcol=QColorDialog.getColor(QColor(*col[:3]),self,"Stop color")
+            if qcol.isValid():
+                new=(qcol.red(),qcol.green(),qcol.blue(), col[3] if len(col)>=4 else 255)
+                item.setText(f"@ {off:.2f}  rgb={new[:3]} a={new[3]}")
+                item.setData(Qt.ItemDataRole.UserRole,(off,new))
+        stops_lw.itemDoubleClicked.connect(edit_stop)
+
+        bh=QHBoxLayout()
+        add_b=QPushButton("+ Stop"); del_b=QPushButton("− Stop")
+        bh.addWidget(add_b); bh.addWidget(del_b); v.addLayout(bh)
+        def add_stop():
+            it=QListWidgetItem("@ 0.50  rgb=(128, 128, 128) a=255")
+            it.setData(Qt.ItemDataRole.UserRole,(0.5,(128,128,128,255)))
+            stops_lw.addItem(it)
+        def del_stop():
+            for it in stops_lw.selectedItems(): stops_lw.takeItem(stops_lw.row(it))
+        add_b.clicked.connect(add_stop); del_b.clicked.connect(del_stop)
+
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                            QDialogButtonBox.StandardButton.Cancel)
+        v.addWidget(bb)
+        def apply():
+            stops=[]
+            for i in range(stops_lw.count()):
+                stops.append(stops_lw.item(i).data(Qt.ItemDataRole.UserRole))
+            new_g=Gradient(type=type_cb.currentText(), angle=angle_sb.value(),
+                            radius=radius_sb.value(), stops=stops)
+            obj.fill.gradient=new_g; obj.fill.color=None
+            self._canvas.schedule_render(); self._push("Gradient")
+            dlg.accept()
+        bb.accepted.connect(apply); bb.rejected.connect(dlg.reject)
+        dlg.exec()
+
+    # ── v4.0.1: Template gallery ──────────────────────────────────────────────
+
+    def _gradient_editor(self):
+        """Open visual gradient editor for the selected object."""
+        if not self._check_perm("design", "Gradient editor"): return
+        obj=self._canvas._sel_obj()
+        if not obj or not hasattr(obj,'fill'):
+            QMessageBox.information(self,"Gradient Editor",
+                "Select a shape or text box first.")
+            return
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
+                                     QComboBox, QSpinBox, QDoubleSpinBox, QPushButton,
+                                     QListWidget, QListWidgetItem, QColorDialog, QLabel)
+        from edof.format.styles import Gradient
+        dlg=QDialog(self); dlg.setWindowTitle("Gradient Editor")
+        dlg.setStyleSheet(QSS); dlg.resize(420, 380)
+        v=QVBoxLayout(dlg)
+
+        g=obj.fill.gradient or Gradient(type="linear", angle=0,
+            stops=[(0.0,(255,255,255,255)), (1.0,(0,0,0,255))])
+
+        f=QFormLayout()
+        type_cb=QComboBox(); type_cb.addItems(["linear","radial"])
+        type_cb.setCurrentText(g.type); f.addRow("Type:", type_cb)
+        angle_sb=QDoubleSpinBox(); angle_sb.setRange(0,360); angle_sb.setValue(g.angle)
+        f.addRow("Angle (linear, deg):", angle_sb)
+        radius_sb=QDoubleSpinBox(); radius_sb.setRange(0.05, 2.0); radius_sb.setSingleStep(0.05)
+        radius_sb.setValue(g.radius); f.addRow("Radius (radial, 0–1):", radius_sb)
+        v.addLayout(f)
+
+        v.addWidget(QLabel("Color stops (drag to reorder, double-click to recolor):"))
+        stops_lw=QListWidget()
+        for off, col in g.stops:
+            it=QListWidgetItem(f"@ {off:.2f}  rgb={col[:3]} a={col[3] if len(col)>=4 else 255}")
+            it.setData(Qt.ItemDataRole.UserRole,(off,col))
+            stops_lw.addItem(it)
+        v.addWidget(stops_lw)
+
+        def edit_stop(item):
+            off,col=item.data(Qt.ItemDataRole.UserRole)
+            qcol=QColorDialog.getColor(QColor(*col[:3]),self,"Stop color")
+            if qcol.isValid():
+                new=(qcol.red(),qcol.green(),qcol.blue(), col[3] if len(col)>=4 else 255)
+                item.setText(f"@ {off:.2f}  rgb={new[:3]} a={new[3]}")
+                item.setData(Qt.ItemDataRole.UserRole,(off,new))
+        stops_lw.itemDoubleClicked.connect(edit_stop)
+
+        bh=QHBoxLayout()
+        add_b=QPushButton("+ Stop"); del_b=QPushButton("− Stop")
+        bh.addWidget(add_b); bh.addWidget(del_b); v.addLayout(bh)
+        def add_stop():
+            it=QListWidgetItem("@ 0.50  rgb=(128, 128, 128) a=255")
+            it.setData(Qt.ItemDataRole.UserRole,(0.5,(128,128,128,255)))
+            stops_lw.addItem(it)
+        def del_stop():
+            for it in stops_lw.selectedItems(): stops_lw.takeItem(stops_lw.row(it))
+        add_b.clicked.connect(add_stop); del_b.clicked.connect(del_stop)
+
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                            QDialogButtonBox.StandardButton.Cancel)
+        v.addWidget(bb)
+        def apply():
+            stops=[]
+            for i in range(stops_lw.count()):
+                stops.append(stops_lw.item(i).data(Qt.ItemDataRole.UserRole))
+            new_g=Gradient(type=type_cb.currentText(), angle=angle_sb.value(),
+                            radius=radius_sb.value(), stops=stops)
+            obj.fill.gradient=new_g; obj.fill.color=None
+            self._canvas.schedule_render(); self._push("Gradient")
+            dlg.accept()
+        bb.accepted.connect(apply); bb.rejected.connect(dlg.reject)
+        dlg.exec()
+
+    def _new_from_template(self):
+        """Create a new document from a built-in template."""
+        from PyQt6.QtWidgets import QInputDialog
+        templates={
+            "Blank A4 Portrait":           lambda: edof.new(width=210, height=297),
+            "Blank A4 Landscape":          lambda: edof.new(width=297, height=210),
+            "Business Card (85×55)":       _tpl_business_card,
+            "Certificate (A4 Landscape)":  _tpl_certificate,
+            "Invoice (A4)":                _tpl_invoice,
+        }
+        name, ok = QInputDialog.getItem(self, "New from Template",
+            "Select a template:", list(templates.keys()), 0, False)
+        if not ok: return
+        if not self._confirm(): return
+        new_doc=templates[name]()
+        if not new_doc.pages: new_doc.add_page()
+        self.doc=new_doc; self.filepath=None
+        self._canvas.set_document(new_doc, 0)
+        self._obj_panel.set_document(new_doc)
+        self.setWindowTitle(f"edof editor — {name}")
+        self._push("New from template")
 
     def _load_fonts(self):
         try:
@@ -1770,6 +2799,107 @@ class EdofEditor(QMainWindow):
     def closeEvent(self,event):
         if self._confirm(): event.accept()
         else: event.ignore()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  v4.0.1  Built-in templates
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _tpl_business_card():
+    """Standard 85×55mm business card."""
+    from edof.format.styles import TextRun
+    doc=edof.new(width=85, height=55, title="Business Card")
+    page=doc.add_page(dpi=300)
+    name=page.add_textbox(5, 10, 75, 8, "Your Name")
+    name.style.font_size=14; name.style.bold=True; name.style.alignment="left"
+    title=page.add_textbox(5, 18, 75, 5, "Title / Position")
+    title.style.font_size=9; title.style.italic=True; title.style.color=(120,120,120)
+    page.add_textbox(5, 30, 75, 4, "phone@example.com").style.font_size=8
+    page.add_textbox(5, 35, 75, 4, "+420 000 000 000").style.font_size=8
+    page.add_textbox(5, 40, 75, 4, "www.example.com").style.font_size=8
+    return doc
+
+def _tpl_certificate():
+    """A4 landscape certificate template."""
+    from edof.format.styles import TextRun
+    doc=edof.new(width=297, height=210, title="Certificate")
+    page=doc.add_page(dpi=300)
+    # Outer border
+    border=page.add_shape("rect", 10, 10, 277, 190)
+    border.fill.color=None; border.stroke.color=(50,50,100,255); border.stroke.width=2
+    # Header
+    hdr=page.add_textbox(20, 30, 257, 20, "CERTIFICATE OF ACHIEVEMENT")
+    hdr.style.font_size=32; hdr.style.bold=True; hdr.style.alignment="center"
+    hdr.style.color=(50,50,100)
+    # Subtitle
+    sub=page.add_textbox(20, 60, 257, 10, "is hereby presented to")
+    sub.style.font_size=14; sub.style.italic=True; sub.style.alignment="center"
+    sub.style.color=(120,120,120)
+    # Recipient (variable)
+    rec=page.add_textbox(20, 80, 257, 25, "Recipient Name")
+    rec.style.font_size=36; rec.style.bold=True; rec.style.alignment="center"
+    rec.variable="recipient"
+    # Description
+    desc=page.add_textbox(20, 120, 257, 20,
+        "for outstanding achievement and dedication.")
+    desc.style.font_size=14; desc.style.alignment="center"
+    desc.style.wrap=True
+    # Date
+    page.add_textbox(20, 160, 100, 10, "Date").style.font_size=10
+    page.add_textbox(180, 160, 100, 10, "Signature").style.font_size=10
+    doc.define_variable("recipient", required=True)
+    return doc
+
+def _tpl_invoice():
+    """A4 invoice template with table."""
+    from edof.format.objects import Table, TableCell
+    doc=edof.new(width=210, height=297, title="Invoice")
+    page=doc.add_page(dpi=300)
+    # Header
+    hdr=page.add_textbox(15, 15, 100, 12, "INVOICE")
+    hdr.style.font_size=28; hdr.style.bold=True; hdr.style.color=(50,80,160)
+    # Number
+    num=page.add_textbox(120, 15, 75, 6, "#{invoice_number}")
+    num.style.font_size=12; num.style.alignment="right"
+    # Date
+    dt=page.add_textbox(120, 22, 75, 5, "Date: {date}")
+    dt.style.font_size=10; dt.style.alignment="right"
+    # From / To
+    page.add_textbox(15, 40, 90, 6, "From:").style.bold=True
+    page.add_textbox(15, 47, 90, 25, "Your Company\nStreet 123\n100 00 City").style.font_size=10
+    page.add_textbox(110, 40, 85, 6, "Bill to:").style.bold=True
+    page.add_textbox(110, 47, 85, 25, "{client_name}\n{client_address}").style.font_size=10
+    # Items table
+    tbl=Table()
+    tbl.transform.x=15; tbl.transform.y=85; tbl.transform.width=180; tbl.transform.height=80
+    tbl.col_widths=[80, 25, 30, 45]
+    tbl.cells=[
+        [TableCell(text="Description"), TableCell(text="Qty"),
+         TableCell(text="Unit Price"), TableCell(text="Total")],
+        [TableCell(text="Item 1"), TableCell(text="1"),
+         TableCell(text="0.00"), TableCell(text="0.00")],
+        [TableCell(text="Item 2"), TableCell(text="1"),
+         TableCell(text="0.00"), TableCell(text="0.00")],
+        [TableCell(text="Item 3"), TableCell(text="1"),
+         TableCell(text="0.00"), TableCell(text="0.00")],
+    ]
+    for c in tbl.cells[0]:
+        c.bg_color=(50,80,160,255); c.style.color=(255,255,255); c.style.bold=True
+    page.add_object(tbl)
+    # Total
+    total=page.add_textbox(110, 175, 85, 8, "TOTAL: {total} CZK")
+    total.style.font_size=14; total.style.bold=True; total.style.alignment="right"
+    # Footer
+    foot=page.add_textbox(15, 270, 180, 8, "Thank you for your business.")
+    foot.style.font_size=9; foot.style.italic=True; foot.style.alignment="center"
+    foot.style.color=(120,120,120)
+    # Variables
+    doc.define_variable("invoice_number", default="2026-001")
+    doc.define_variable("date", default="2026-01-01")
+    doc.define_variable("client_name", default="Client Name")
+    doc.define_variable("client_address", default="Client Address")
+    doc.define_variable("total", default="0.00")
+    return doc
 
 
 def main():

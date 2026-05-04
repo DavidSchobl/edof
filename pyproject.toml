@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "edof"
-version         = "3.0.2"
-description     = "Easy Document Format – programmatic document creation, editing and export"
+version         = "4.0.1"
+description     = "Easy Document Format – programmatic document creation, editing and export with vector PDF, rich text, tables and PDF import"
 readme          = "README.md"
 license         = { file = "LICENSE" }
 requires-python = ">=3.9"
-keywords        = ["document", "format", "pdf", "template", "edof", "print"]
+keywords        = ["document", "format", "pdf", "svg", "template", "edof", "print", "vector"]
 classifiers     = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -25,34 +25,26 @@ classifiers     = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-# ── Core dependencies (always installed) ──────────────────────────────────────
 dependencies = [
     "Pillow>=9.1",
 ]
 
 [project.optional-dependencies]
-# pip install edof[pdf]
-pdf     = ["reportlab>=4.0"]
-# pip install edof[qr]
-qr      = ["qrcode[pil]>=7.4"]
-# pip install edof[pyqt6]
-pyqt6   = ["PyQt6>=6.6"]
-# pip install edof[all]
-all     = [
-    "reportlab>=4.0",
-    "qrcode[pil]>=7.4",
-    "PyQt6>=6.6",
+# Vector PDF export is built-in (no extra deps).
+# 'pdf' extra now adds:
+#   - pymupdf for PDF import
+#   - pdfplumber for optional table detection in PDF import
+#   - reportlab for legacy raster PDF fallback (vector=False mode)
+pdf    = ["pymupdf>=1.23", "pdfplumber>=0.10", "reportlab>=4.0"]
+qr     = ["qrcode[pil]>=7.4"]
+pyqt6  = ["PyQt6>=6.6"]
+# v4.0.1: AES-256 encryption, multi-level passwords, recovery keys
+crypto = ["cryptography>=42.0"]
+all    = [
+    "pymupdf>=1.23", "pdfplumber>=0.10", "reportlab>=4.0",
+    "qrcode[pil]>=7.4", "PyQt6>=6.6", "cryptography>=42.0",
 ]
-# pip install edof[dev]
-dev     = [
-    "pytest>=7.0",
-    "pytest-cov",
-    "black",
-    "ruff",
-    "mypy",
-    "build",
-    "twine",
-]
+dev    = ["pytest>=7.0", "pytest-cov", "black", "ruff", "mypy", "build", "twine"]
 
 [project.urls]
 Homepage      = "https://github.com/DavidSchobl/edof"
@@ -61,10 +53,8 @@ Repository    = "https://github.com/DavidSchobl/edof"
 "Bug Tracker" = "https://github.com/DavidSchobl/edof/issues"
 Changelog     = "https://github.com/DavidSchobl/edof/blob/main/CHANGELOG.md"
 
-# ── Tool configuration ────────────────────────────────────────────────────────
-
 [tool.setuptools.packages.find]
-where = ["."]
+where   = ["."]
 include = ["edof*"]
 
 [tool.setuptools.package-data]
@@ -84,8 +74,8 @@ strict                 = false
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths    = ["tests"]
-addopts      = "-v --tb=short"
+testpaths = ["tests"]
+addopts   = "-v --tb=short"
 
 [tool.coverage.run]
 source = ["edof"]

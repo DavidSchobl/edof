@@ -57,6 +57,7 @@ class TextStyle:
     max_font_size:   float          = 200.0
     wrap:            bool           = True
     overflow_hidden: bool           = True
+    padding:         float          = 1.0   # mm – space between box edge and text
 
     def to_dict(self) -> dict:
         return {
@@ -78,6 +79,7 @@ class TextStyle:
             "max_font_size":  self.max_font_size,
             "wrap":           self.wrap,
             "overflow_hidden":self.overflow_hidden,
+            "padding":        self.padding,
         }
 
     @classmethod
@@ -124,18 +126,113 @@ class StrokeStyle:
         return obj
 
 
+
+# ── Gradient (v4.0) ───────────────────────────────────────────────────────────
+
+@dataclass
+class Gradient:
+    """Multi-stop gradient for FillStyle. v4.0 feature."""
+    type:   str   = "linear"     # "linear" | "radial"
+    angle:  float = 0.0          # degrees, for linear (0=left-to-right)
+    center: tuple = (0.5, 0.5)   # normalized (0-1), for radial
+    radius: float = 0.5          # normalized, for radial
+    stops:  list  = field(default_factory=list)
+    # stops format: [(offset_0_to_1, (r,g,b,a)), ...]
+
+    def to_dict(self) -> dict:
+        return {
+            "type":   self.type,
+            "angle":  self.angle,
+            "center": list(self.center),
+            "radius": self.radius,
+            "stops":  [[off, _rgba_to_hex(c)] for off, c in self.stops],
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Gradient":
+        g = cls()
+        g.type   = d.get("type", "linear")
+        g.angle  = float(d.get("angle", 0))
+        g.center = tuple(d.get("center", (0.5, 0.5)))
+        g.radius = float(d.get("radius", 0.5))
+        g.stops  = [(float(off), _hex_to_rgba(c) if isinstance(c, str) else c)
+                    for off, c in d.get("stops", [])]
+        return g
+
+
+# ── TextRun (v4.0 rich text) ──────────────────────────────────────────────────
+
+@dataclass
+class TextRun:
+    """A styled segment of text within a TextBox.runs list. v4.0 feature.
+
+    Any field set to None inherits from the parent TextStyle.
+    """
+    text:           str                 = ""
+    font_family:    Optional[str]       = None
+    font_size:      Optional[float]     = None
+    bold:           Optional[bool]      = None
+    italic:         Optional[bool]      = None
+    underline:      Optional[bool]      = None
+    strikethrough:  Optional[bool]      = None
+    color:          Optional[Color]     = None
+    background:     Optional[Color]     = None    # highlight color, RGBA
+
+    def resolve(self, parent: "TextStyle", scale: float = 1.0) -> dict:
+        """Return effective style dict for rendering this run.
+        scale multiplies font_size for auto-shrink/fill."""
+        return {
+            "font_family":   self.font_family    or parent.font_family,
+            "font_size":     (self.font_size if self.font_size is not None else parent.font_size) * scale,
+            "bold":          self.bold           if self.bold          is not None else parent.bold,
+            "italic":        self.italic         if self.italic        is not None else parent.italic,
+            "underline":     self.underline      if self.underline     is not None else parent.underline,
+            "strikethrough": self.strikethrough  if self.strikethrough is not None else parent.strikethrough,
+            "color":         self.color          if self.color         is not None else parent.color,
+            "background":    self.background,    # None means transparent
+        }
+
+    def to_dict(self) -> dict:
+        d = {"text": self.text}
+        if self.font_family   is not None: d["font_family"]   = self.font_family
+        if self.font_size     is not None: d["font_size"]     = self.font_size
+        if self.bold          is not None: d["bold"]          = self.bold
+        if self.italic        is not None: d["italic"]        = self.italic
+        if self.underline     is not None: d["underline"]     = self.underline
+        if self.strikethrough is not None: d["strikethrough"] = self.strikethrough
+        if self.color         is not None: d["color"]         = _rgba_to_hex(self.color)
+        if self.background    is not None: d["background"]    = _rgba_to_hex(self.background)
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TextRun":
+        r = cls(text=d.get("text", ""))
+        for k in ("font_family", "font_size", "bold", "italic",
+                  "underline", "strikethrough"):
+            if k in d: setattr(r, k, d[k])
+        for k in ("color", "background"):
+            if k in d:
+                v = d[k]
+                setattr(r, k, _hex_to_rgba(v) if isinstance(v, str) else v)
+        return r
+
+
 # ── FillStyle ─────────────────────────────────────────────────────────────────
 
 @dataclass
 class FillStyle:
-    color:   Optional[Color] = (255, 255, 255)
-    opacity: float           = 1.0              # 0.0–1.0
+    color:    Optional[Color]    = (255, 255, 255)
+    opacity:  float              = 1.0              # 0.0–1.0
+    gradient: Optional[Gradient] = None              # v4.0: if set, takes precedence over color
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "color":   _rgba_to_hex(self.color) if self.color else None,
             "opacity": self.opacity,
         }
+        if self.gradient is not None:
+            d["gradient"] = self.gradient.to_dict()
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "FillStyle":
@@ -143,6 +240,9 @@ class FillStyle:
         c = d.get("color")
         obj.color   = _hex_to_rgba(c) if isinstance(c, str) and c else None
         obj.opacity = float(d.get("opacity", 1.0))
+        g = d.get("gradient")
+        if isinstance(g, dict):
+            obj.gradient = Gradient.from_dict(g)
         return obj
 
 

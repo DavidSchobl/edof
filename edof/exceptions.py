@@ -76,3 +76,8 @@ def warn_missing(feature: str, install_extra: str = "") -> None:
         EdofMissingOptionalWarning,
         stacklevel=3,
     )
+
+
+class EdofMissingFontWarning(UserWarning):
+    """Emitted when a requested font family is not found on this system
+    and a fallback font is used instead."""

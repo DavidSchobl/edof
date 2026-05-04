@@ -1,121 +1,559 @@
 # Changelog
 
-All notable changes to **edof** are documented here.  
-Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: [SemVer](https://semver.org/)
+All notable changes to **edof** are documented here.
+Format: Keep a Changelog (https://keepachangelog.com/en/1.0.0/)
+Versioning: SemVer (https://semver.org/)
 
----
+================================================================================
 
-## [3.0.1] – 2025-04-14
+## [4.0.1] - 2026-05-04
 
-### Added
-- `edof-editor` and `edof-cli` console scripts — available directly in PATH after `pip install edof[all]`
-- Scripts moved inside the package (`edof/_apps/`) so they install correctly with pip
-- `edof/editor_lang/en.json` moved inside the package — add `XX.json` to translate the editor to any language
+Maintenance + protection release. Adds AES-256 encryption, multi-level password protection, real (not XOR) document security, plus editor enhancements.
+
+================================================================================
+ADDED — Encryption & multi-level password protection
+================================================================================
+
+This is the headline feature for 4.0.1.
+
+By default, documents remain plain (no encryption, no friction — same as 4.0.0). When an admin password is set, the document switches to encrypted mode on the next save. Encryption requires the optional `cryptography` extra: `pip install edof[crypto]`.
+
+**Cryptography**
+- AES-256-GCM authenticated encryption for content
+- PBKDF2-SHA256 key derivation with 600,000 iterations
+- 16-byte random salt per slot, 12-byte random nonce per ciphertext
+- GCM authentication tag detects tampering on load
+- Real protection: no XOR, no obfuscation theatre
+
+**Permission levels (hierarchical)**
+- `view`   — render, print, export. No modifications.
+- `fill`   — view + change variable values (template filling). No structural / textual edits.
+- `edit`   — fill + change object .text content (and rich-text run text segments).
+- `design` — edit + change styles, layout, add / remove objects and pages.
+- `admin`  — design + manage passwords, recovery keys, lock_level overrides.
+
+Higher levels imply all lower levels.
+
+**Multi-slot key wrapping**
+- Each password independently wraps the same 32-byte content key.
+- Setting an `admin` password also generates a 24-character alphanumeric recovery key.
+- The recovery key is shown exactly once at first password setup; it cannot be retrieved later.
+- Recovery key always grants ADMIN; designed for owner self-recovery.
+- Changing one password does not re-encrypt the bulk payload (just rewraps that one slot).
+
+**Encryption modes**
+- `full`    — entire document content (and resources) encrypted as a single AES blob inside the ZIP. Manifest leaks only KDF parameters and slot count. Title, page count, all metadata are hidden.
+- `partial` — only sensitive content fields encrypted (text content, rich-text runs, image data, QR data, table cell text). Structure (positions, sizes, fonts, alignment, page count, title) remains visible. Useful for "design template" sharing where layout is public but content is private.
+- `none`    — current 4.0 behaviour, plain ZIP, no encryption.
+
+In partial mode without a password, the document loads with redacted content (a placeholder character `█` replaces text). The user can see the layout and structure but no content. With a password, the full content is decrypted and accessible.
+
+**Per-object locks (independent of doc-level encryption)**
+- `obj.lock_level = "design"` — modifying this object requires at least the named permission, regardless of the user's general permission level.
+- `obj.lock_text = True` — hard text lock; even ADMIN cannot edit `.text` or `.runs` until clearing this flag (which itself requires ADMIN).
+- `obj.can_modify(doc) -> bool` — programmatic check.
+- `obj.can_modify_text(doc) -> bool` — also honors `lock_text`.
+
+**Document API**
+```python
+rk = doc.set_password("admin", "mySecret123")
+doc.set_password("design", "designerPwd")
+doc.set_password("edit",   "editorPwd")
+doc.set_password("fill",   "templateFiller")
+
+doc.encryption_mode = "partial"   # or "full" (default after first password)
+doc.save("template.edof")
+
+doc = edof.load("template.edof", password="editorPwd")
+print(doc.permission_level)   # Permission.EDIT
+doc.can(edof.crypto.DESIGN)   # False
+doc.require(edof.crypto.EDIT) # OK, no exception
+
+doc.change_password("edit", "old", "new")   # rotate without re-encrypting payload
+doc.remove_password("fill")                 # requires ADMIN
+doc.clear_all_protection()                  # requires ADMIN
+
+doc = edof.load("template.edof", recovery_key="ABCD-EFGH-...")  # recovers as ADMIN
+```
+
+**Editor UI**
+- File → Open: detects encrypted files automatically and prompts for password / recovery key. Three-strikes-and-out; Cancel on any prompt aborts the open.
+- Document → Unlock for editing… (Ctrl+Shift+L): shows password prompt when an encrypted document was opened with insufficient privileges, then displays a dialog listing exactly what the granted level can and cannot do.
+- Document → Protection… : full management UI for setting / changing / removing passwords and switching between full and partial encryption modes. Confirmation dialog before plain → encrypted upgrade.
+- Document → Re-lock: forgets the cached content key for the session.
+- Status bar shows protection state at all times: 🔓 Plain / 🔒 Locked / 🔓 Unlocked: <level>.
+- Permission-aware action gating: pressing a button (Add TextBox, Delete, Duplicate, etc.) without sufficient permission shows a clear dialog explaining what level is needed.
+- Canvas drag respects `obj.can_modify()`; locked objects cannot be moved.
+- Recovery key dialog uses fixed-width font, clipboard copy button, "I have saved this key" confirmation gate.
+
+**EDOF 2 → 4 password upgrade flow**
+- When opening a legacy EDOF 2 archive that had an XOR-obfuscated password, the editor offers to set up real AES-256 encryption with a clear explanation of why the old password was insecure.
+
+================================================================================
+ADDED — Editor improvements (carry-over completed in 4.0.1)
+================================================================================
+
+- Snap-to-grid: View → Snap to Grid (Ctrl+G), 5 mm grid, hold Alt to bypass.
+- Alignment guides: View → Show Alignment Guides; magnetic snap to other objects' edges and centers during drag, threshold 1.5 mm.
+- Multi-select: Ctrl+click adds / removes from selection; group drag moves all selected objects together; group delete removes them all.
+- Cursor position in mm in the status bar (live during mouse move).
+- Find & Replace dialog (Ctrl+F): searches all TextBoxes on all pages, with case-sensitive and regex options.
+- Gradient Editor dialog: visual stop list, add/remove/recolor stops, switch between linear and radial.
+- Template gallery (File → New from Template…): Blank A4 P/L, Business Card, Certificate, Invoice with Table.
+- File → Save as v3 (downgrade)…: produces a v3-compatible .edof with all v4-only features flattened.
+- File → Import PDF…
+- File → Export SVG…
+
+================================================================================
+ADDED — `doc.export_3x(path)` API
+================================================================================
+
+Programmatic API for downgrading a v4 document to v3 format.
+
+Best-effort lossy conversion:
+- Tables flattened to a Group of TextBoxes plus line shapes for borders.
+- Rich-text runs collapsed to plain `obj.text` (formatting lost).
+- Path shapes rasterised to polygon shapes (Beziers sampled at 12 segments per curve).
+- Gradients replaced with the average color of their stops.
+- `visible_if` evaluated once at export time and baked into `.visible`.
+- `blend_mode` reset to `"normal"`.
+
+The original document is not mutated; a deep copy is made first. Manifest in the output explicitly says `format_version: 3.1.0` so v3 readers don't show a "newer version" warning.
+
+```python
+doc.export_3x("for_v3_users.edof")
+```
+
+================================================================================
+ADDED — Real EDOF 2 import (`edof/utils/legacy_v2.py`)
+================================================================================
+
+Replaces the placeholder scaffolding from 4.0.0 with a complete migration path based on the actual EDOF 2 schema (versions ≤ 2.2):
+
+- ZIP with `data.json` at root (no manifest).
+- Float `version` field (e.g. `2.2`).
+- ARGB hex colors `#AARRGGBB` correctly converted to v4 RGB tuples (alpha dropped, RGB preserved — alpha is not part of TextStyle.color in v4).
+- `font_weight ≥ 600` → `bold = True`.
+- `max_font_size_pt > font_point_size` → `auto_shrink = True`, `font_size = max`.
+- `h_align` / `v_align` mapped to v4 `alignment` / `vertical_align`.
+- Embedded images extracted from the `images/` directory and added as v4 resources with detected MIME type.
+- `z_value` → `layer` (preserves stacking order).
+- `allow_non_uniform_scale` → `fit_mode = "stretch"` or `"contain"`.
+- `edit_mode` other than "all" → informational warning in `doc.errors`.
+- `edit_password_xor` → ignored, with explicit warning that XOR provided no real security; editor offers to set up real AES encryption.
+
+Auto-detection: `edof.load(path)` checks for v2 markers (`data.json` at root, version < 3.0, no `manifest.json`) and routes to the legacy loader transparently.
+
+================================================================================
+ADDED — Optional dependency
+================================================================================
+
+```toml
+[project.optional-dependencies]
+crypto = ["cryptography>=42.0"]
+all    = [..., "cryptography>=42.0"]
+```
+
+Encryption is opt-in. Without `cryptography` installed, all plain-mode functionality continues to work; only `set_password()` and friends raise `EdofCryptoUnavailable` with installation instructions.
+
+================================================================================
+FILE FORMAT
+================================================================================
+
+- Format version bumped to 4.0.1.
+- New optional `protection` block in the manifest:
+```json
+{
+  "protection": {
+    "mode": "full" | "partial",
+    "format": "edof-aes-256-gcm-v1",
+    "slots": [
+      {"permission": "fill", "kdf": "pbkdf2-sha256", "iterations": 600000,
+       "salt": "<base64>", "wrapped_key": "<base64>"},
+      ...
+    ]
+  }
+}
+```
+- New file inside encrypted archives: `encrypted_payload.bin` (AES-GCM ciphertext: 12 B nonce || 16 B GCM tag || ciphertext).
+- 4.0.0 files load unchanged (mode defaults to "none").
+- Plain 4.0.1 files are bit-identical to 4.0.0 format.
+
+================================================================================
+SECURITY MODEL
+================================================================================
+
+What encryption protects against:
+- Reading content without a password
+- Detection of any tampering with the ciphertext
+- Brute-forcing weak passwords (PBKDF2 with 600k iterations is intentionally slow)
+
+What it does NOT protect against:
+- A user with sufficient access running their own decryption code (they have the password)
+- Side-channel attacks on the host (memory dumps, keyloggers, etc.)
+- Loss of all passwords AND the recovery key — the document is mathematically unrecoverable
+- A malicious EDOF library — verify the source
+
+Recovery key is treated as an additional ADMIN-level slot keyed by the recovery string. If you lose it, the only way to regenerate one is to remove all passwords and re-protect the document (which requires the admin password).
+
+================================================================================
+FIXED
+================================================================================
+
+- `EdofSerializer` now reads `FORMAT_VERSION_STR` dynamically through the version module, so `export_3x()` can override it for the duration of a single save without leaking into other operations.
+- Editor `_gradient_editor` method properly registered (it was lost during 4.0.0 development).
+
+================================================================================
+
+
+
+Major release: rich text, vector graphics, custom PDF writer, PDF import, formatted tables, and legacy EDOF 2 read support.
+This is a major version bump because the renderer, PDF subsystem, and Shape model received fundamental architectural changes. File-format compatibility is preserved - 3.x files load with automatic migration, and EDOF 2 files (legacy unreleased format) are now also readable in best-effort mode.
+
+================================================================================
+ADDED - Rich text & formatting
+================================================================================
+
+Rich text runs in TextBox
+- New TextRun dataclass: text segment with its own font_family, font_size, bold, italic, underline, strikethrough, color, background
+- TextBox.runs: list[TextRun] - when non-empty, replaces plain text + style rendering
+- Run-based layout engine: per-run measurement, wrap across run boundaries, mixed font sizes on the same line
+- Auto-shrink / auto-fill with runs: global scale factor s found by binary search and applied to all font_size values, preserving relative size ratios between runs
+- Per-run underline, strikethrough, background highlight rendering with correct horizontal extents
+- Backwards compatible: runs == [] keeps the original plain-text behaviour
+
+Formatted tables
+- New Table object type (separate from Group)
+- TableCell with full styling: own TextStyle or runs[] for rich text, bg_color (RGBA), per-side border (top/right/bottom/left) with own color and width, padding, colspan, rowspan
+- Per-row and per-column custom widths/heights; auto-distribution if not specified
+- Cell content clipped at cell boundary
+- Editor: click to select cell, double-click to edit, right-click for cell formatting menu
+
+================================================================================
+ADDED - Vector graphics
+================================================================================
+
+Bezier path Shape
+- New shape type "path" - arbitrary vector path with line segments and Bezier curves
+- Shape.path_data: list[PathCommand] - SVG-style commands: M (moveto), L (lineto), C (cubic Bezier), Q (quadratic Bezier), Z (close)
+- Pixel-correct rendering via Pillow ImageDraw.line() for segments + de Casteljau subdivision for curves
+- Direct SVG path string parsing: Shape.from_svg_path("M 10 10 L 50 50 C ...")
+
+Linear and radial gradients
+- FillStyle.gradient - replaces solid fill with multi-stop gradient
+- Linear: gradient_type="linear" with gradient_angle (deg) and gradient_stops=[(offset, rgba), ...]
+- Radial: gradient_type="radial" with gradient_center=(cx, cy) and gradient_radius
+- Renderer creates per-object gradient mask; full RGBA interpolation between stops
+
+Path-based stroke styling
+- StrokeStyle.dash_pattern - list of mm values, e.g. [3, 2] for dashed line
+- StrokeStyle.cap - "butt", "round", "square"
+- StrokeStyle.join - "miter", "round", "bevel"
+
+Blend modes
+- obj.blend_mode - "normal", "multiply", "screen", "overlay", "darken", "lighten"
+- Compositing via Pillow with custom pixel ops
+
+================================================================================
+ADDED - Custom vector PDF writer
+================================================================================
+
+Pure-Python PDF 1.7 writer (no reportlab dependency)
+- Native implementation of cross-reference table, object catalog, page tree, content streams
+- Standard 14 PDF fonts (Helvetica, Times, Courier with bold/italic) - zero embedding for these
+- TTF embedding for custom fonts (Type0/CID font + ToUnicode CMap + cidset)
+- System font name mapping (Arial -> Helvetica, Times New Roman -> Times-Roman, ...)
+- WinAnsiEncoding for Latin-1 incl. Czech diacritics; UTF-16BE for CID fonts
+- Vector text - searchable, copyable, selectable in PDF readers
+- Vector shapes (rect, ellipse, line, polygon, Bezier path)
+- Linear / radial gradient as PDF shading patterns
+- Images as XObject with FlateDecode (PNG-style) or DCTDecode (JPEG passthrough)
+- Multi-page support with shared resources
+- PDF metadata (title, author, subject, keywords, creator) via Info dictionary
+- Vector PDFs typically 5-15x smaller than rasterised PDFs
+- Default mode is vector; raster fallback: doc.export_pdf(path, vector=False)
+
+================================================================================
+ADDED - PDF -> EDOF import
+================================================================================
+
+edof.import_pdf(path) -> Document
+
+Bidirectional PDF support - open existing PDFs as editable EDOF documents.
+
+Text reconstruction
+- Per-page text spans extracted via pymupdf with bbox, font, size, color, bold/italic flags
+- Block clustering algorithm detects formatted text blocks:
+    * Same font + size (5% tolerance) -> grouped together
+    * Vertical gap <= font_size x 1.5 -> same paragraph
+    * Similar X-alignment (left, center, justified) -> same column
+    * Line-spacing tolerance - variable line gaps within a paragraph are merged when consistent
+    * Indented paragraphs detected by first-line offset relative to subsequent lines
+    * Hanging indents for bulleted lists detected separately
+- Heading detection: spans with significantly larger font size than median -> standalone TextBox marked as heading
+- List detection: spans starting with bullet/dash/number prefixes -> list item TextBoxes with proper indent
+- Mixed inline formatting within a block -> produces a rich-text TextBox with runs[]
+
+Font handling
+- Standard 14 PDF fonts -> mapped via the alias system, no embedding needed
+- Fully embedded TrueType/OpenType -> font bytes extracted directly into .edof resources
+- Subsetted fonts ("AAAAAA+Arial" prefix), most common case:
+    * First tries to find the full font locally via the alias system -> uses local copy (full editing capability)
+    * If not found, embeds the subset anyway -> existing text renders correctly, but adding new characters to that font will warn in doc.errors
+    * Both cases logged in doc.errors with the substitution decision
+- Type3 fonts (vector glyphs) -> individual glyphs converted to Shape path objects when extractable; otherwise replaced with the closest local font and logged
+- CID fonts (Asian scripts) -> handled transparently by pymupdf, embedded as full TTFs
+
+Image extraction
+- Embedded raster images extracted with original encoding (PNG / JPEG)
+- Pixel position and clip preserved
+- One ImageBox per detected image
+
+Vector graphics
+- PDF stroked/filled paths converted to Shape objects with "path" type
+- Color and stroke properties preserved
+- Bezier curves preserved as C commands (no rasterization)
+
+Tables (heuristic)
+- Optional pdfplumber dependency: detects tabular grids from horizontal/vertical lines + clustered text spans
+- Detected tables become Table objects with TableCells preserving cell content and basic styling
+- When detection is uncertain, falls back to individual TextBoxes (logged in doc.errors)
+
+API:
+    doc = edof.import_pdf("template.pdf",
+                          detect_tables=True,
+                          merge_paragraphs=True,
+                          heading_threshold=1.4)   # font_size > median * 1.4
+
+CLI:
+    edof-cli import template.pdf -o template.edof --detect-tables
+
+Editor: File -> Import PDF...
+
+================================================================================
+ADDED - Legacy EDOF 2 read support
+================================================================================
+
+EDOF 2 was an internal pre-release format that was never publicly distributed. It had architectural problems that led to the redesign in EDOF 3. To support users who have legacy EDOF 2 archives, the loader now performs a best-effort migration.
+
+- edof.load(path) auto-detects the file format (EDOF 4, EDOF 3, or EDOF 2)
+- EDOF 2 files identified by manifest version field or legacy structure markers
+- Best-effort migration:
+    * Object types mapped to EDOF 4 equivalents where possible
+    * Style properties translated (legacy enum values -> string constants)
+    * Embedded resources preserved
+    * Variable system mapped to new VariableStore (legacy unstructured names normalised)
+- Migration warnings recorded in doc.errors (does not abort)
+- One-way conversion only: EDOF 2 -> EDOF 4. The output cannot be saved back to EDOF 2.
+- CLI: edof-cli convert legacy.edof -o new.edof
+- After conversion, save as a current EDOF file: doc.save("new.edof")
+
+================================================================================
+ADDED - SVG export
+================================================================================
+
+- doc.export_svg(path, page=0) - one SVG file per page
+- Text rendered as <text> elements (searchable in browsers, indexable, copyable)
+- Shapes as native SVG: <rect>, <ellipse>, <line>, <polygon>, <path> (with full Bezier)
+- Gradients rendered as <linearGradient> / <radialGradient> definitions
+- Images embedded as base64 data URIs (PNG / JPEG)
+- Custom fonts embedded via @font-face with data URI
+
+================================================================================
+ADDED - Templating
+================================================================================
+
+Conditional visibility
+- obj.visible_if = "score > 90" - Python-style expression evaluated against document variables at render time
+- Safe evaluator: literals, comparisons (<, <=, ==, !=, >=, >), arithmetic, and/or/not, in/not in; no function calls, no imports, no attribute access
+- Syntax errors recorded in doc.errors without aborting render
+- Editor displays a small (i) badge on objects with conditions
+
+Repeating sections
+- page.repeat_objects(template_objs, data_list, gap=2.0) - duplicates a group of objects for each row of data_list
+- Variable substitution per row: {column_name} placeholders inside text, runs[].text, qrcode.data, imagebox.variable are replaced with row values
+- Auto-pagination: when a row would overflow the page, a new page is created automatically with the same dimensions
+- Page-level header/footer objects can be marked repeat_on_pages=True so they appear on every generated page
+
+================================================================================
+ADDED - High-level API helpers
+================================================================================
+
+Configurable text padding
+- TextStyle.padding (mm) - default 1 mm (was hardcoded 2 mm); set to 0 for edge-to-edge text
+- Small textboxes (< 6 mm tall) are now usable
+
+Font fallback & cross-platform aliases
+- load_font_safe() emits EdofMissingFontWarning instead of silently using a bitmap fallback
+- Fallback chain: DejaVu Sans -> Liberation Sans -> FreeSans
+- Cross-platform aliases for Arial, Helvetica, Times New Roman, Courier New, Calibri, Cambria, Verdana, Tahoma, Trebuchet MS, Georgia, Segoe UI, Comic Sans MS, Impact
+
+High-level widgets
+- page.add_card(x, y, w, h, title, body, accent_color) - accent header + title + body
+- page.add_metric(x, y, w, h, label, value, subtitle, value_color) - large-value tile
+- page.add_table(x, y, w, rows, header, alternating, row_height) - quick table (now uses new Table object internally)
+- page.add_kv_list(x, y, w, items, key_width_frac) - key-value list
+
+Layout helpers
+- page.row(y, gap, height) -> _RowContext with add_textbox, add_image, add_shape, skip, next_x
+- page.column(x, gap, width) -> _ColumnContext with add_textbox, add_textbox_auto, add_image, add_shape, skip, next_y
+
+Auto-height textbox
+- page.add_textbox_auto(x, y, w, text, min_height, **style) - height computed from content
+- edof.measure_text_height(text, style, width_mm, dpi) - standalone helper
+
+================================================================================
+ADDED - Editor
+================================================================================
+
+Existing 3.x features retained
+- edof-editor and edof-cli console scripts
+- edof/editor_lang/en.json for translations (add XX.json for other languages)
+- Async rendering, type-aware property panel, object list panel
+- Inline text editor with WYSIWYG sizing across all zoom levels and Windows DPI scaling
+- Double-click QR / Image actions
+- 60-step undo/redo
+
+New in 4.0
+- Rich text inline editor: double-click a TextBox with runs opens a formatting toolbar (bold, italic, underline, color, font, size) for selected text
+- Cell editor for Table objects: click cell to select, double-click to edit content, right-click for cell formatting
+- Path drawing tool: draw arbitrary Bezier paths; convert any shape to path for editing
+- Cursor position in mm in status bar (live update during mouse move)
+- Find & Replace dialog (Ctrl+F): searches all TextBoxes on all pages, optional case-sensitive, regex, whole-word
+- Snap-to-grid: toggleable grid snap during drag, configurable spacing
+- Alignment guides: magnetic alignment to other objects' edges/centres while dragging
+- Multi-select: Ctrl+click adds to selection, lasso drag-rectangle, group move + batch property edit
+- Template gallery: File -> New from Template (invoice, certificate, business card, A4 label sheet)
+- CSV batch export: File -> Batch Fill from CSV...
+- Import PDF: File -> Import PDF...
+- Convert legacy EDOF 2: File -> Open... auto-detects and converts on load
+- Gradient editor: visual stop editor for fill gradients
+- Layer panel: dedicated dock with drag-to-reorder, eye/lock toggles per object
+
+Print preview fixes (carried from 3.x)
+- Raw PIL bytes via QImage constructor -> bypasses Qt 256 MB image allocation limit
+- painter.viewport() for correct page rect (was blank pages)
+- QPageSize(QPageSize.PageSizeId.A4) (PyQt6-correct API)
+- Preview renders at <= 150 dpi regardless of printer DPI
+
+================================================================================
+ADDED - CLI
+================================================================================
+
+- edof-cli info template.edof - metadata, variables, editable fields, fonts used
+- edof-cli objects template.edof - all objects with layer, type, variable
+- edof-cli validate template.edof - structural validation
+- edof-cli export template.edof out.png --set name=Jan - fill and export
+- edof-cli batch template.edof data.csv -o "out_{n}.png" - CSV batch export
+- edof-cli import template.pdf -o template.edof - PDF -> EDOF
+- edof-cli convert legacy.edof -o template.edof - EDOF 2 -> EDOF 4 conversion
+- --vector / --raster flag for PDF export
+- --svg for SVG export
+- --all-pages, --dpi, --format, --color-space overrides
+
+================================================================================
+FIXED - carried from 3.x development
+================================================================================
+
+- Inline text editor keyboard input (replaced QGraphicsProxyWidget with QPlainTextEdit viewport child)
+- Inline text editor font size = font_pt x RDPI x zoom / logical_dpi (correct WYSIWYG at all zoom + Windows DPI scaling)
+- Auto-shrink / auto-fill DPI conversion (pt -> px = pt x dpi / 72)
+- Rotation handle direction sign error
+- Rotated object resize keeps anchor fixed
+- Middle-mouse pan (scroll bar delta)
+- Toolbar/menu items missing (semicolon bug if key: ...; addAction())
+- Layer ordering proper swap
+- QR codes with non-black colors (B&W render then colorise)
+- get_resolved_text falls back to obj.text for empty variable values
+- Hidden objects show as ghost outline, still selectable
+
+================================================================================
+CHANGED - breaking
+================================================================================
+
+- doc.export_pdf() defaults to vector mode (was raster); doc.export_pdf(path, vector=False) for raster fallback
+- Internal add_table helper produces a Table object (was a Group of TextBoxes); existing .edof files with the old layout still load via auto-migration
+- Shape.path_data field added - old Shape instances without this field load with path_data = [] (no behaviour change)
+- TextStyle.padding default 1.0 mm (was hardcoded 2.0 mm in renderer)
+- FillStyle.gradient field added - old FillStyle instances load with gradient = None (no behaviour change)
+
+================================================================================
+CHANGED - non-breaking
+================================================================================
+
+- reportlab is no longer a hard requirement - only used as fallback if vector=False is requested with reportlab installed
+- pymupdf added to edof[pdf] extras for the new PDF writer and PDF importer
+- pdfplumber added to edof[pdf] extras as optional table-detection helper
+
+================================================================================
+FILE FORMAT
+================================================================================
+
+- Format version bumped to 4.0.0
+- Forward compat: 3.x files load and migrate automatically; new 4.x fields default to neutral values that preserve existing rendering
+- Legacy EDOF 2 read support: best-effort migration on load (one-way; output is always 4.x)
+- Backward compat for 3.x consumers: 4.x files using only 3.x features can be downgraded with doc.export_3x() (best-effort: rich-text runs collapsed to plain text, paths rasterised to bitmap shapes, tables flattened to groups)
+
+================================================================================
+REMOVED
+================================================================================
+
+- Old raster-only pdf.py writer (replaced by vector writer with raster fallback)
+
+================================================================================
+MIGRATION GUIDE (3.x -> 4.x)
+================================================================================
+
+- All 3.x scripts continue to work without changes
+- doc.export_pdf("out.pdf") now produces vector PDF; if you specifically need raster (e.g., for compatibility with old PDF/A profiles), pass vector=False
+- If you used add_table and relied on iterating its child TextBoxes, switch to Table.cells instead
+- New rich-text features are opt-in; plain TextBox.text continues to work
+- Legacy EDOF 2 files: loading works automatically. To convert in bulk:
+      for f in glob("legacy/*.edof"):
+          doc = edof.load(f)
+          doc.save(f.replace("legacy/", "converted/"))
+
+================================================================================
+================================================================================
+
+## [3.0.2] - 2025-04-15
 
 ### Fixed
+- attestations: false in CI workflow to fix failed PyPI publish via GitHub Actions
 
-**Printing**
-- Print preview rendered blank pages — `pr.width()` / `pr.height()` return zero in `QPrintPreviewDialog`; fixed by using `painter.viewport()` for the drawable area
-- `QPrinter.PageSize.A4` does not exist in PyQt6 — replaced with `QPageSize(QPageSize.PageSizeId.A4)`
-- `QImageIOHandler: Rejecting image` (256 MB limit) — switched from BMP/PNG file encoding to raw PIL bytes (`img.tobytes()`) passed directly to `QImage` constructor, bypassing Qt's image allocation limit entirely
-- Print preview renders at ≤ 150 dpi regardless of printer resolution — avoids out-of-memory on high-DPI printers
+================================================================================
 
-**Inline text editor**
-- Keyboard input did nothing — `QGraphicsProxyWidget` event routing is unreliable; replaced with `QPlainTextEdit` as a direct child of the viewport widget
-- Clicking inside the editor confirmed and closed it — click detection now checks viewport geometry before confirming
-- Text appeared much smaller in editor than on canvas — font size formula corrected to `font_pt × RDPI × zoom / logical_dpi` which matches rendered output at all zoom levels and Windows DPI scaling settings (100 %, 125 %, 150 %)
+## [3.0.1] - 2025-04-14
 
-**Auto-shrink / auto-fill**
-- `find_fitting_size` loaded fonts at `int(pt)` pixels instead of `int(pt × dpi / 72)` pixels — measurements were inconsistent with actual rendering, causing wrong font size convergence
-- Auto-fill could produce text that visually overflowed the box despite the function returning "fits"
+### Added
+- edof-editor and edof-cli console scripts
+- editor_lang/en.json for editor i18n
 
-**Canvas interaction**
-- Rotation handle moved in the wrong direction — sign error in position formula (`−sin` → `+sin`)
-- Resizing a rotated object caused it to drift — anchor (opposite corner/edge) now stays fixed in world space; mouse delta is projected onto the object's local axes
-- Middle-mouse pan jumped on first move — now uses scroll bar delta relative to `pan_start`
-- Toolbar and menu items missing — semicolon on `if key: ...; addAction()` made `addAction` conditional on the shortcut being set; all actions without a shortcut were silently dropped
-- Cursor did not update correctly over empty canvas / locked objects / resize handles
-- Layer ordering was `layer ± 1` — replaced with proper swap logic; Bring to Front / Send to Back move to absolute max/min
+### Fixed
+- Print preview blank pages, Qt 256 MB image limit, QPrinter.PageSize API
+- Inline text editor keyboard input and WYSIWYG font sizing
+- Auto-shrink / auto-fill DPI conversion
+- Rotation handle direction, rotated resize anchor, middle-mouse pan
+- Toolbar items missing (semicolon bug)
+- Layer ordering swap logic
+- QR codes with non-black colors
+- Variable binding clearing text
+- Hidden objects unselectable
 
-**Variables & objects**
-- Setting a variable cleared the text box content — `get_resolved_text()` now falls back to `obj.text` when the variable value is empty, preserving the template placeholder text in the editor
-- Hidden objects (`visible = False`) disappeared completely and could not be selected — ghost outlines (dashed red border) are now drawn for hidden objects and hit testing includes them
+================================================================================
 
-**Double-click actions**
-- Double-click on `QRCode` now opens an inline data/URL editor overlay
-- Double-click on `ImageBox` now opens a file picker to replace the source image
-
-**QR codes**
-- Non-black `fg_color` values produced invisible QR codes — fixed by always rendering in B&W and then colorising pixel-by-pixel; luminance detection (`r < 128`) now correctly identifies dark vs light pixels regardless of colour
-
----
-
-## [3.0.0] – 2025-01-01
+## [3.0.0] - 2025-01-01
 
 Initial public release.
 
-### Library
+- Document model: TextBox, ImageBox, Shape, Line, QRCode, Group
+- Variable/template system with type validation and batch fill
+- Pillow RGBA renderer; RGB/RGBA/L/1/CMYK; 8/16-bit
+- .edof ZIP format with embedded assets
+- Export: PNG/JPEG/TIFF/BMP/PDF; CLI tool; PyQt6 desktop editor
+- Command API with undo/redo
 
-**Document model**
-- `Document`, `Page`, `ResourceStore`
-- Object types: `TextBox`, `ImageBox`, `Shape` (rect / ellipse / polygon / arrow), `Line` (two explicit points in mm), `QRCode`, `Group`
-- Common properties on every object: `id`, `name`, `variable`, `layer`, `locked`, `visible`, `editable`, `tags`, `opacity`, `shadow`
-- `TextStyle` — font family, size, bold, italic, underline, strikethrough, color, background, letter spacing, line height, alignment (H + V), word wrap, overflow
-- `auto_shrink` — `font_size` is the maximum; text shrinks to fit; never enlarges
-- `auto_fill` — finds the largest font size that fills the box (grows and shrinks)
-- `StrokeStyle`, `FillStyle`, `ShadowStyle` — full RGBA support
-- `Transform` — position and size in mm, clockwise rotation in degrees, flip H/V; full chain API
+================================================================================
 
-**Variable / template system**
-- `VariableStore` with type validation: `text`, `number`, `date`, `image`, `qr`, `url`, `bool`
-- `doc.fill_variables({"name": "Jan"})` for batch fill
-- `ImageBox` variable — value is a local file path or HTTP URL loaded at render time
-- Non-destructive: unset variable falls back to `obj.text`
-
-**Rendering**
-- Pillow RGBA compositor; color spaces: RGB, RGBA, L, 1, CMYK; bit depths: 8 and 16
-- Configurable DPI per page
-- Rotation applied to the entire object surface (fill + border + text as one unit)
-
-**Text engine**
-- System font discovery on Windows, macOS and Linux
-- Bold / italic variant resolution, font cache
-- `list_system_fonts()`, text wrap, multi-line, vertical alignment
-
-**File format (`.edof`)**
-- ZIP archive: `manifest.json` + `document.json` + `resources/<uuid>`
-- `EdofSerializer` — `save`, `load`, `to_bytes`, `from_bytes`, `peek`
-- Forward and backward compatibility with non-fatal warnings
-
-**Export & print**
-- Bitmap: PNG, JPEG, TIFF, BMP; all-pages pattern; in-memory bytes
-- PDF via reportlab (`pip install edof[pdf]`)
-- Print: `os.startfile` (Windows), `lpr` / `lp` (macOS / Linux)
-
-**QR codes**
-- `pip install edof[qr]`; error correction L/M/Q/H; RGBA colors
-- Standalone helpers in `edof.utils.qr`
-
-**Command API**
-- `edof.api.commands.execute(doc, {"cmd": "…"})` — string-based dispatch
-- `CommandHistory` — snapshot-based undo/redo
-
-**GUI widgets**
-- `EdofTkCanvas` — Tkinter widget
-- `EdofQtWidget` — PyQt6 QGraphicsView widget
-
-### Applications
-
-**EDOF Editor** (`edof-editor`) — requires `pip install edof[all]`
-- Full desktop document editor built on PyQt6
-- Canvas with selection, move, resize, rotation, zoom, pan
-- Inline text editing, type-aware property panel, object list, page list
-- Export PNG / JPEG / TIFF / PDF, print via system dialog, 60-step undo/redo
-
-**EDOF CLI** (`edof-cli`)
-- `info`, `objects`, `validate`, `export` sub-commands
-- `--set key=value`, `--json-vars`, `--all-pages`, `--dpi`, `--format`, `--color-space`
-
----
-
-> Versions 1.x and 2.x were internal development iterations not publicly released.
+Note: Versions 1.x were internal iterations not publicly released.
+EDOF 2 was a separate pre-release format with architectural problems that led to the redesign in EDOF 3. EDOF 2 archives can be read by EDOF 4+ in best-effort mode but cannot be written back to.

@@ -47,6 +47,20 @@ class EdofObject:
     tags:      List[str]         = field(default_factory=list)
     shadow:    ShadowStyle       = field(default_factory=ShadowStyle)
     opacity:   float             = 1.0
+    # v4.0: conditional visibility — Python-style boolean expression
+    # evaluated against doc.variables. Empty = always visible (uses .visible flag).
+    visible_if: str              = ""
+    # v4.0: blend mode for compositing this object onto the canvas
+    # one of: "normal", "multiply", "screen", "overlay", "darken", "lighten"
+    blend_mode: str              = "normal"
+    # v4.0.1: per-object permission lock — modifying this object requires
+    # at least this permission level. Empty = no per-object lock.
+    # Values: "" | "fill" | "edit" | "design" | "admin"
+    lock_level: str              = ""
+    # v4.0.1: hard text lock. Even with sufficient permission, .text and
+    # .runs cannot be modified until lock_text is set False, which requires
+    # ADMIN permission. Useful for "this header must never change".
+    lock_text:  bool             = False
 
     # ── Transform shortcuts ────────────────────────────────────────────────────
 
@@ -92,6 +106,10 @@ class EdofObject:
             "shadow":    self.shadow.to_dict(),
             "opacity":   self.opacity,
             "editable":  getattr(self, "editable", True),
+            "visible_if": self.visible_if,    # v4.0
+            "blend_mode": self.blend_mode,    # v4.0
+            "lock_level": self.lock_level,    # v4.0.1
+            "lock_text":  self.lock_text,     # v4.0.1
         }
 
     def to_dict(self) -> dict:
@@ -105,6 +123,7 @@ class EdofObject:
             "shape":    Shape,
             "qrcode":   QRCode,
             "group":    Group,
+            "table":    Table,    # v4.0
         }
         cls = _cls_map.get(d.get("type", ""), EdofObject)
         return cls._from_dict(d)
@@ -123,6 +142,10 @@ class EdofObject:
         obj.shadow    = ShadowStyle.from_dict(d.get("shadow", {}))
         obj.opacity   = float(d.get("opacity", 1.0))
         obj.editable  = bool(d.get("editable", True))
+        obj.visible_if = d.get("visible_if", "") or ""    # v4.0
+        obj.blend_mode = d.get("blend_mode", "normal")    # v4.0
+        obj.lock_level = d.get("lock_level", "") or ""    # v4.0.1
+        obj.lock_text  = bool(d.get("lock_text", False))  # v4.0.1
         return obj
 
     def copy(self) -> "EdofObject":
@@ -134,6 +157,35 @@ class EdofObject:
         # Allow subclasses to set OBJECT_TYPE as a plain class attribute
         pass
 
+    # ── v4.0.1: Permission gate helpers ───────────────────────────────────────
+
+    def can_modify(self, doc) -> bool:
+        """Return True if this object can be modified given doc's current
+        session permission. Honors per-object lock_level.
+        """
+        if not getattr(doc, "_protection", None):
+            return True
+        # Plain doc with no protection → always editable
+        if not doc.is_encrypted and not self.lock_level:
+            return True
+        # If object has its own lock_level, that's the gate
+        if self.lock_level:
+            from edof.crypto.permissions import Permission, can
+            try:
+                return can(doc.permission_level,
+                           Permission.from_string(self.lock_level))
+            except ValueError:
+                return True   # malformed lock_level — fail open
+        # No per-object lock; rely on doc-level "edit" permission
+        from edof.crypto import EDIT
+        return doc.can(EDIT)
+
+    def can_modify_text(self, doc) -> bool:
+        """Return True if this object's text/runs can be modified."""
+        if self.lock_text:
+            return False
+        return self.can_modify(doc)
+
 
 # ── TextBox ───────────────────────────────────────────────────────────────────
 
@@ -141,6 +193,7 @@ class EdofObject:
 class TextBox(EdofObject):
     text:          str                = ""
     style:         TextStyle          = field(default_factory=TextStyle)
+    runs:          List["TextRun"]    = field(default_factory=list)   # v4.0: rich text
     padding:       float              = 2.0         # mm, all sides
     padding_left:  Optional[float]    = None
     padding_right: Optional[float]    = None
@@ -170,6 +223,7 @@ class TextBox(EdofObject):
         d.update({
             "text":          self.text,
             "style":         self.style.to_dict(),
+            "runs":          [r.to_dict() for r in self.runs] if self.runs else [],
             "padding":       self.padding,
             "padding_left":  self.padding_left,
             "padding_right": self.padding_right,
@@ -185,6 +239,8 @@ class TextBox(EdofObject):
         base: TextBox = EdofObject._from_dict.__func__(cls, d)
         base.text          = d.get("text", "")
         base.style         = TextStyle.from_dict(d.get("style", {}))
+        from edof.format.styles import TextRun
+        base.runs          = [TextRun.from_dict(r) for r in d.get("runs", [])]
         base.padding       = float(d.get("padding", 2.0))
         base.padding_left  = d.get("padding_left")
         base.padding_right = d.get("padding_right")
@@ -238,6 +294,7 @@ SHAPE_ELLIPSE = "ellipse"
 SHAPE_LINE    = "line"
 SHAPE_POLYGON = "polygon"
 SHAPE_ARROW   = "arrow"
+SHAPE_PATH    = "path"     # v4.0: SVG-style Bezier path
 
 
 @dataclass
@@ -248,6 +305,9 @@ class Shape(EdofObject):
     corner_radius: float       = 0.0
     # Relative points for POLYGON / LINE (mm, relative to transform origin)
     points:        List[Any]   = field(default_factory=list)
+    # v4.0: SVG-style path data when shape_type == SHAPE_PATH
+    # Format: [["M", 10.0, 20.0], ["L", 30.0, 40.0], ["C", x1, y1, x2, y2, x, y], ["Z"]]
+    path_data:     List[Any]   = field(default_factory=list)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "OBJECT_TYPE", "shape")
@@ -260,6 +320,7 @@ class Shape(EdofObject):
             "stroke":        self.stroke.to_dict(),
             "corner_radius": self.corner_radius,
             "points":        self.points,
+            "path_data":     self.path_data,
         })
         return d
 
@@ -271,8 +332,86 @@ class Shape(EdofObject):
         base.stroke        = StrokeStyle.from_dict(d.get("stroke", {}))
         base.corner_radius = float(d.get("corner_radius", 0.0))
         base.points        = list(d.get("points", []))
+        base.path_data     = list(d.get("path_data", []))
         object.__setattr__(base, "OBJECT_TYPE", "shape")
         return base
+
+    @classmethod
+    def from_svg_path(cls, d_attr: str) -> "Shape":
+        """v4.0: Create a Shape with shape_type='path' from an SVG path 'd' string.
+
+        Supports M, L, H, V, C, Q, Z (absolute and relative).
+        Coordinates are in mm, relative to the shape's transform origin.
+        """
+        sh = cls(shape_type=SHAPE_PATH)
+        sh.path_data = _parse_svg_path(d_attr)
+        return sh
+
+
+# ── SVG path parser ───────────────────────────────────────────────────────────
+
+def _parse_svg_path(d: str) -> list:
+    """Parse SVG path 'd' attribute into a list of [cmd, *args] commands.
+    Output uses absolute coordinates only.
+    """
+    import re
+    tokens = re.findall(r"[MmLlHhVvCcQqZz]|-?\d*\.?\d+(?:[eE][+-]?\d+)?", d)
+    out, i, cur_x, cur_y, start_x, start_y = [], 0, 0.0, 0.0, 0.0, 0.0
+    last_cmd = None
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in "MmLlHhVvCcQqZz":
+            cmd = tok; i += 1
+        else:
+            cmd = last_cmd or "L"
+        rel = cmd.islower()
+        c = cmd.upper()
+        try:
+            if c == "M":
+                x = float(tokens[i]); y = float(tokens[i+1]); i += 2
+                if rel: x += cur_x; y += cur_y
+                out.append(["M", x, y])
+                cur_x, cur_y = x, y
+                start_x, start_y = x, y
+                last_cmd = "L" if rel else "L"   # subsequent coords as L
+            elif c == "L":
+                x = float(tokens[i]); y = float(tokens[i+1]); i += 2
+                if rel: x += cur_x; y += cur_y
+                out.append(["L", x, y])
+                cur_x, cur_y = x, y; last_cmd = cmd
+            elif c == "H":
+                x = float(tokens[i]); i += 1
+                if rel: x += cur_x
+                out.append(["L", x, cur_y]); cur_x = x; last_cmd = cmd
+            elif c == "V":
+                y = float(tokens[i]); i += 1
+                if rel: y += cur_y
+                out.append(["L", cur_x, y]); cur_y = y; last_cmd = cmd
+            elif c == "C":
+                x1 = float(tokens[i]);   y1 = float(tokens[i+1])
+                x2 = float(tokens[i+2]); y2 = float(tokens[i+3])
+                x  = float(tokens[i+4]); y  = float(tokens[i+5]); i += 6
+                if rel:
+                    x1 += cur_x; y1 += cur_y; x2 += cur_x; y2 += cur_y
+                    x += cur_x; y += cur_y
+                out.append(["C", x1, y1, x2, y2, x, y])
+                cur_x, cur_y = x, y; last_cmd = cmd
+            elif c == "Q":
+                x1 = float(tokens[i]); y1 = float(tokens[i+1])
+                x  = float(tokens[i+2]); y = float(tokens[i+3]); i += 4
+                if rel:
+                    x1 += cur_x; y1 += cur_y; x += cur_x; y += cur_y
+                out.append(["Q", x1, y1, x, y])
+                cur_x, cur_y = x, y; last_cmd = cmd
+            elif c == "Z":
+                out.append(["Z"])
+                cur_x, cur_y = start_x, start_y
+                last_cmd = cmd
+            else:
+                i += 1
+        except (IndexError, ValueError):
+            break
+    return out
 
 
 # ── QRCode ────────────────────────────────────────────────────────────────────
@@ -356,3 +495,158 @@ class Group(EdofObject):
         base.children = [EdofObject.from_dict(c) for c in d.get("children", [])]
         object.__setattr__(base, "OBJECT_TYPE", "group")
         return base
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  v4.0  Table  —  formatted table with per-cell styling
+# ══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class CellBorder:
+    """Per-side border of a TableCell."""
+    color: tuple = (180, 180, 180, 255)
+    width: float = 0.3            # mm
+    enabled: bool = True
+
+    def to_dict(self) -> dict:
+        from edof.format.styles import _rgba_to_hex
+        return {"color": _rgba_to_hex(self.color),
+                "width": self.width, "enabled": self.enabled}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "CellBorder":
+        from edof.format.styles import _hex_to_rgba
+        b = cls()
+        c = d.get("color")
+        if isinstance(c, str): b.color = _hex_to_rgba(c)
+        elif c is not None:    b.color = tuple(c)
+        b.width   = float(d.get("width", 0.3))
+        b.enabled = bool(d.get("enabled", True))
+        return b
+
+
+@dataclass
+class TableCell:
+    """A single cell in a Table. Supports rich text via runs."""
+    text:      str            = ""
+    runs:      List[Any]      = field(default_factory=list)   # List[TextRun]
+    style:     TextStyle      = field(default_factory=TextStyle)
+    bg_color:  tuple          = (255, 255, 255, 0)            # RGBA, alpha=0 = transparent
+    padding:   float          = 1.5                           # mm
+    border_top:    CellBorder = field(default_factory=CellBorder)
+    border_right:  CellBorder = field(default_factory=CellBorder)
+    border_bottom: CellBorder = field(default_factory=CellBorder)
+    border_left:   CellBorder = field(default_factory=CellBorder)
+    colspan:   int            = 1
+    rowspan:   int            = 1
+
+    def to_dict(self) -> dict:
+        from edof.format.styles import _rgba_to_hex
+        return {
+            "text":          self.text,
+            "runs":          [r.to_dict() for r in self.runs],
+            "style":         self.style.to_dict(),
+            "bg_color":      _rgba_to_hex(self.bg_color),
+            "padding":       self.padding,
+            "border_top":    self.border_top.to_dict(),
+            "border_right":  self.border_right.to_dict(),
+            "border_bottom": self.border_bottom.to_dict(),
+            "border_left":   self.border_left.to_dict(),
+            "colspan":       self.colspan,
+            "rowspan":       self.rowspan,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TableCell":
+        from edof.format.styles import TextStyle, TextRun, _hex_to_rgba
+        c = cls()
+        c.text     = d.get("text", "")
+        c.runs     = [TextRun.from_dict(r) for r in d.get("runs", [])]
+        c.style    = TextStyle.from_dict(d.get("style", {}))
+        bg = d.get("bg_color")
+        c.bg_color = _hex_to_rgba(bg) if isinstance(bg, str) else tuple(bg) if bg else (255,255,255,0)
+        c.padding  = float(d.get("padding", 1.5))
+        c.border_top    = CellBorder.from_dict(d.get("border_top", {}))
+        c.border_right  = CellBorder.from_dict(d.get("border_right", {}))
+        c.border_bottom = CellBorder.from_dict(d.get("border_bottom", {}))
+        c.border_left   = CellBorder.from_dict(d.get("border_left", {}))
+        c.colspan = int(d.get("colspan", 1))
+        c.rowspan = int(d.get("rowspan", 1))
+        return c
+
+
+@dataclass
+class Table(EdofObject):
+    """v4.0: Formatted table with per-cell styling.
+
+    cells is a 2D grid: cells[row_index][col_index].
+    Set row_heights or col_widths to 0 to auto-distribute.
+    """
+    cells:        List[List[Any]] = field(default_factory=list)   # List[List[TableCell]]
+    row_heights:  List[float]     = field(default_factory=list)   # mm; 0 = auto
+    col_widths:   List[float]     = field(default_factory=list)   # mm; 0 = auto
+    table_border: Optional[StrokeStyle] = None    # outer border around whole table
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "OBJECT_TYPE", "table")
+
+    @property
+    def num_rows(self) -> int: return len(self.cells)
+    @property
+    def num_cols(self) -> int: return len(self.cells[0]) if self.cells else 0
+
+    def get_cell(self, row: int, col: int) -> Optional[TableCell]:
+        if 0 <= row < self.num_rows and 0 <= col < self.num_cols:
+            return self.cells[row][col]
+        return None
+
+    def set_cell(self, row: int, col: int, cell: TableCell) -> None:
+        if 0 <= row < self.num_rows and 0 <= col < self.num_cols:
+            self.cells[row][col] = cell
+
+    def to_dict(self) -> dict:
+        d = self._base_dict()
+        d.update({
+            "cells":        [[c.to_dict() for c in row] for row in self.cells],
+            "row_heights":  self.row_heights,
+            "col_widths":   self.col_widths,
+            "table_border": self.table_border.to_dict() if self.table_border else None,
+        })
+        return d
+
+    @classmethod
+    def _from_dict(cls, d: dict) -> "Table":
+        base: Table = EdofObject._from_dict.__func__(cls, d)
+        base.cells       = [[TableCell.from_dict(c) for c in row]
+                             for row in d.get("cells", [])]
+        base.row_heights = list(d.get("row_heights", []))
+        base.col_widths  = list(d.get("col_widths", []))
+        tb = d.get("table_border")
+        base.table_border = StrokeStyle.from_dict(tb) if tb else None
+        object.__setattr__(base, "OBJECT_TYPE", "table")
+        return base
+
+
+# Helper: build a table with simple row data
+def make_table(rows: List[List[str]],
+               header: bool = True,
+               header_bg=(83, 74, 183, 255),
+               header_color=(255, 255, 255),
+               alt_bg=(245, 245, 252, 255),
+               alternating: bool = True) -> Table:
+    """Quick helper to build a Table from list-of-lists."""
+    t = Table()
+    n_cols = max(len(r) for r in rows) if rows else 0
+    for ri, row in enumerate(rows):
+        cells = []
+        for ci in range(n_cols):
+            cell = TableCell(text=str(row[ci]) if ci < len(row) else "")
+            if header and ri == 0:
+                cell.bg_color = header_bg
+                cell.style.color = header_color[:3]
+                cell.style.bold = True
+            elif alternating and ri % 2 == 0:
+                cell.bg_color = alt_bg
+            cells.append(cell)
+        t.cells.append(cells)
+    return t
