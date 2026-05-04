@@ -6,6 +6,101 @@ Versioning: SemVer (https://semver.org/)
 
 ================================================================================
 
+## [4.0.2] - 2026-05-04
+
+Polish, bug fixes, and CLI completeness release. No format changes — files saved by 4.0.2 are bit-identical to 4.0.1 when no 4.0.2-only behaviors are exercised.
+
+================================================================================
+FIXED — Variable `{name}` placeholder substitution at render time
+================================================================================
+
+Previously, `{name}` placeholders inside `obj.text` were only substituted by `repeat_objects()`. Direct rendering (`doc.export_pdf()`, `doc.export_bitmap()`, `doc.export_svg()`) left placeholders as literal text. Documentation and examples in 4.0.1 promised this worked — now it actually does.
+
+Behaviour:
+- `obj.text = "Hello {name}!"` with `doc.set_variable("name", "Alice")` now renders as "Hello Alice!".
+- Multiple placeholders supported: `"{greeting} {name}"`.
+- Undefined variable names stay as literal `{name}` (graceful fallback, no exception).
+- Table cell substitution (which already worked) is unchanged.
+- The previous mechanism of binding a textbox to a single variable via `obj.variable = "name"` continues to work and takes priority.
+
+================================================================================
+FIXED — Editor: snap-to-grid during resize and rotation
+================================================================================
+
+When **Snap to Grid** (Ctrl+G) was enabled in 4.0.1, snapping only applied while moving objects. Resize handles (non-uniform scale corner / edge dragging) and rotation handles ignored the setting.
+
+In 4.0.2:
+- **Resize**: when grid snap is active and the object is non-rotated, the mouse position is snapped to the 5mm grid before computing the new size, so resize ends on grid increments. Rotated objects skip this (snapping along rotated axes is unintuitive). Hold **Alt** to bypass.
+- **Rotation**: when grid snap is active, rotation now snaps to 15° increments by default (the same behaviour you previously got only by holding Shift). Hold **Alt** to bypass.
+
+================================================================================
+ADDED — Editor settings persistence (Windows / Linux / macOS)
+================================================================================
+
+The editor now uses `QSettings` to remember preferences across sessions:
+
+- Window geometry (size + position)
+- Snap-to-grid on/off
+- Show alignment guides on/off
+- Recent files list (up to 10)
+
+Settings live in standard system locations (registry on Windows, `~/.config/edof/editor.conf` on Linux, `~/Library/Preferences/edof.plist` on macOS). Delete to reset.
+
+================================================================================
+ADDED — Validate enhancements
+================================================================================
+
+`doc.validate()` now also reports:
+- **Duplicate object IDs** anywhere in the document (recursing into groups). Useful when programmatically copying objects without resetting `obj.id`.
+- **Objects positioned entirely off-page** (i.e. their bounding box has no overlap with the page). Partially-off objects (overlapping the edge) are NOT flagged — that's a deliberate design choice (e.g. bleed marks).
+
+These join the existing checks for missing-resource references, undefined variable references, and unset required variables. The function still returns an empty list when the document is fully valid.
+
+================================================================================
+ADDED — CLI: 6 new subcommands + password support on existing ones
+================================================================================
+
+The CLI now exposes the rest of the public API. New subcommands:
+
+- `edof-cli batch <template> <csv> -o <pattern>` — generate one output file per CSV row, auto-filling variables. Supports `{n}`, `{column}` in output pattern; `--start`, `--limit`, `--continue-on-error`. Accepts PDF/PNG/JPEG/SVG output formats.
+- `edof-cli import <pdf> -o <edof>` — convert a PDF to an editable .edof (best-effort PDF reconstruction, requires `[pdf]` extra). `--no-tables`, `--no-images`, `--no-paths`, `--heading-threshold` flags.
+- `edof-cli convert <input> -o <output>` — migrate any legacy archive to current v4 format.
+- `edof-cli to-v3 <input> -o <output>` — save as v3-compatible (lossy: tables flatten, runs collapse, paths sample, gradients average).
+- `edof-cli set-password <input> --level admin --password <pwd>` — manage encryption from the command line. Supports `--remove`, `--clear-all`, `--current-password`, `--recovery-key`. Recovery key is shown once on first password.
+- `edof-cli unlock-render <encrypted> <out.pdf> --password <pwd>` — decrypt + render in one step. The decrypted document is never written to disk.
+
+Existing commands (`info`, `objects`, `validate`, `export`) gained:
+- `--password` / `--recovery-key` flags for working with encrypted templates.
+- `--vector` / `--raster` flags on PDF export.
+- SVG output support on `export` (auto-detected from `.svg` extension or via `--format svg`).
+
+`info` on an encrypted file without a password now shows public manifest data (encryption mode, permission levels, KDF parameters) instead of failing.
+
+Exit codes are now consistent with the documentation:
+- `0` success
+- `1` usage error
+- `2` file not found
+- `3` encryption error (wrong password / missing crypto extra)
+- `4` validation failure
+- `5` unknown internal error
+
+================================================================================
+DOCUMENTATION
+================================================================================
+
+Comprehensive documentation added under `docs/`. Covers every public symbol with signatures, examples, and conventions. Hosted on GitHub Pages at https://davidschobl.github.io/edof/ (after the deploy below). Includes:
+
+- Installation, quick start, and conventions
+- Full API reference (Document, Page, all object types, styles, variables, export, import, encryption, editor, CLI, helpers)
+- Five cookbook recipes (certificate, invoice, batch PDF, encrypted template, PDF import)
+- Advanced topics (file format internals, extending, troubleshooting)
+
+`pyproject.toml` now declares `[project.urls]` (Documentation, Repository, Changelog, Issues), which appear on the PyPI project page.
+
+The README badges and content link to the documentation site.
+
+================================================================================
+
 ## [4.0.1] - 2026-05-04
 
 Maintenance + protection release. Adds AES-256 encryption, multi-level password protection, real (not XOR) document security, plus editor enhancements.

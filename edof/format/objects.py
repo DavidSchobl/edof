@@ -209,14 +209,37 @@ class TextBox(EdofObject):
     def get_resolved_text(self, var_store=None) -> str:
         """
         Return text after variable substitution.
-        Falls back to obj.text if the variable is not set or empty,
-        so the editor always shows meaningful content.
+
+        Two substitution mechanisms:
+          1. If `obj.variable` is set, the value of that variable replaces the text entirely.
+          2. Otherwise, `{name}` placeholders inside `obj.text` are substituted with
+             corresponding variable values.
+
+        v4.0.2: bug fix — placeholder substitution now actually happens at render time.
+        Previously {name} placeholders were only resolved by repeat_objects(), but
+        plain rendering left them as literals.
         """
         if self.variable and var_store:
             val = var_store.get(self.variable)
             if val is not None and str(val) != "":
                 return str(val)
-        return self.text
+        # v4.0.2: substitute {name} placeholders in the static text
+        text = self.text
+        if var_store and "{" in text:
+            try:
+                # Build a fresh dict with stringified values; missing vars stay as
+                # literal "{name}" via a custom mapping.
+                class _SafeDict(dict):
+                    def __missing__(self, key):
+                        return "{" + key + "}"
+                vals = _SafeDict()
+                for n in var_store.names():
+                    v = var_store.get(n)
+                    vals[n] = "" if v is None else str(v)
+                text = text.format_map(vals)
+            except (KeyError, IndexError, ValueError):
+                pass  # leave text alone on any formatting error
+        return text
 
     def to_dict(self) -> dict:
         d = self._base_dict()

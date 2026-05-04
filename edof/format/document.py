@@ -878,8 +878,25 @@ class Document:
         issues: List[str] = []
         if not self.pages:
             issues.append("Document has no pages.")
+
+        # v4.0.2: collect all object IDs (recursing into groups) to detect duplicates
+        seen_ids: set = set()
+        dup_ids: set = set()
+
+        def _walk(obj):
+            if obj.id in seen_ids:
+                dup_ids.add(obj.id)
+            else:
+                seen_ids.add(obj.id)
+            # Recurse into groups
+            children = getattr(obj, "children", None)
+            if children:
+                for c in children:
+                    _walk(c)
+
         for i, page in enumerate(self.pages):
             for obj in page.objects:
+                _walk(obj)
                 if obj.variable and obj.variable not in self.variables.names():
                     issues.append(
                         f"Page {i}: object '{obj.id}' references "
@@ -891,6 +908,28 @@ class Document:
                             f"Page {i}: object '{obj.id}' references "
                             f"missing resource '{obj.resource_id}'."
                         )
+                # v4.0.2: detect objects positioned entirely off the page
+                t = getattr(obj, "transform", None)
+                if t is not None:
+                    pw, ph = page.width, page.height
+                    fully_off = (
+                        t.x + t.width <= 0
+                        or t.y + t.height <= 0
+                        or t.x >= pw
+                        or t.y >= ph
+                    )
+                    if fully_off:
+                        issues.append(
+                            f"Page {i}: object '{obj.id}' is positioned entirely "
+                            f"off-page (pos=({t.x:.1f}, {t.y:.1f}), "
+                            f"size={t.width:.1f}x{t.height:.1f}, "
+                            f"page={pw:.0f}x{ph:.0f})."
+                        )
+
+        # v4.0.2: report duplicate IDs (each only once)
+        for did in sorted(dup_ids):
+            issues.append(f"Duplicate object ID: '{did}'")
+
         missing = self.variables.missing_required()
         if missing:
             issues.append(f"Required variables not set: {missing}")

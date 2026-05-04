@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "edof"
-version         = "4.0.1"
+version         = "4.0.2"
 description     = "Easy Document Format – programmatic document creation, editing and export with vector PDF, rich text, tables and PDF import"
 readme          = "README.md"
 license         = { file = "LICENSE" }
@@ -48,7 +48,7 @@ dev    = ["pytest>=7.0", "pytest-cov", "black", "ruff", "mypy", "build", "twine"
 
 [project.urls]
 Homepage      = "https://github.com/DavidSchobl/edof"
-Documentation = "https://github.com/DavidSchobl/edof#readme"
+Documentation = "https://davidschobl.github.io/edof/"
 Repository    = "https://github.com/DavidSchobl/edof"
 "Bug Tracker" = "https://github.com/DavidSchobl/edof/issues"
 Changelog     = "https://github.com/DavidSchobl/edof/blob/main/CHANGELOG.md"

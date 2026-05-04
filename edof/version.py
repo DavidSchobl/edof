@@ -2,10 +2,10 @@
 """Single source-of-truth for version information."""
 
 from __future__ import annotations
-__version__         = "4.0.1"
+__version__         = "4.0.2"
 FORMAT_MAJOR        = 4
 FORMAT_MINOR        = 0
-FORMAT_PATCH        = 1
+FORMAT_PATCH        = 2
 FORMAT_VERSION_STR  = f"{FORMAT_MAJOR}.{FORMAT_MINOR}.{FORMAT_PATCH}"
 
 # Oldest format version this library can attempt to read

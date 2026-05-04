@@ -18,7 +18,7 @@ try:
         QDialog, QDialogButtonBox, QStackedWidget,
         QRadioButton, QButtonGroup, QSplitter, QSizePolicy, QSlider,
     )
-    from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, QSize, pyqtSignal, QObject
+    from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, QSize, pyqtSignal, QObject, QSettings
     from PyQt6.QtGui import (
         QAction, QPainter, QPen, QBrush, QColor, QPixmap, QImage,
         QPolygonF, QFont, QTransform, QCursor, QKeySequence,
@@ -765,7 +765,10 @@ class EdofCanvas(QGraphicsView):
             angle=math.degrees(math.atan2(sp.y()-cy_s,sp.x()-cx_s))+90
             if shift and not alt:
                 angle=round(angle/15)*15   # snap 15° on Shift
-            # Alt or no modifier = free rotation (no snap)
+            elif self._snap_to_grid and not alt:
+                # v4.0.2: rotation also snaps when grid snap is on
+                angle=round(angle/15)*15
+            # Alt or no modifier (and no snap setting) = free rotation
             obj.transform.rotation=angle%360
 
         elif self._drag_mode.startswith('line_'):
@@ -781,6 +784,13 @@ class EdofCanvas(QGraphicsView):
             sw,sh=SelectionOverlay._SIGN.get(handle,(1,1))
             cos_r=math.cos(math.radians(tf.rotation)); sin_r=math.sin(math.radians(tf.rotation))
             ax,ay=self._drag_anchor; mx,my=self._to_mm(sp)
+            # v4.0.2: snap the mouse position to grid first, so resize aligns
+            # to grid increments. Only applies for non-rotated objects (snapping
+            # along the rotated local axes is unintuitive). Alt bypasses snap.
+            if self._snap_to_grid and not alt and abs(tf.rotation) < 0.01:
+                s=self._snap_size_mm
+                mx=round(mx/s)*s
+                my=round(my/s)*s
             vx,vy=mx-ax,my-ay
             new_w=max(MIN_MM,sw*(vx*cos_r+vy*sin_r))    if sw else tf.width
             new_h=max(MIN_MM,sh*(vx*(-sin_r)+vy*cos_r)) if sh else tf.height
@@ -1436,11 +1446,59 @@ class EdofEditor(QMainWindow):
         super().__init__()
         self.doc=None; self.filepath=None
         self.history=CommandHistory(max_undo=60); self._modified=False
+        # v4.0.2: persistent settings + recent files
+        self._settings = QSettings("edof", "editor")
+        self._recent_files = self._settings.value("recent_files", []) or []
+        if isinstance(self._recent_files, str):
+            self._recent_files = [self._recent_files]
         self._build_ui(); self.setStyleSheet(QSS)
-        self.setWindowTitle(f"{t('app_title')} {edof.__version__}"); self.resize(1440,880)
+        self.setWindowTitle(f"{t('app_title')} {edof.__version__}")
+        # v4.0.2: restore window geometry
+        geom = self._settings.value("geometry")
+        if geom is not None:
+            self.restoreGeometry(geom)
+        else:
+            self.resize(1440,880)
+        # v4.0.2: restore canvas preferences
+        self._canvas._snap_to_grid = bool(self._settings.value("snap_to_grid", False, type=bool))
+        self._canvas._show_align_guides = bool(self._settings.value("show_align_guides", True, type=bool))
+        self._sync_view_actions()
         QTimer.singleShot(300,self._load_fonts)
         if filepath and os.path.isfile(filepath): self._open_file(filepath)
         else: self._new_doc()
+
+    def closeEvent(self, ev):
+        # v4.0.2: persist preferences across sessions
+        try:
+            self._settings.setValue("geometry", self.saveGeometry())
+            self._settings.setValue("snap_to_grid", bool(self._canvas._snap_to_grid))
+            self._settings.setValue("show_align_guides", bool(self._canvas._show_align_guides))
+            self._settings.setValue("recent_files", list(self._recent_files)[:10])
+        except Exception:
+            pass
+        super().closeEvent(ev)
+
+    def _add_recent(self, path):
+        """v4.0.2: track recently opened files."""
+        if not path: return
+        try:
+            path = os.path.abspath(path)
+        except Exception:
+            return
+        try: self._recent_files.remove(path)
+        except ValueError: pass
+        self._recent_files.insert(0, path)
+        self._recent_files = self._recent_files[:10]
+
+    def _sync_view_actions(self):
+        """v4.0.2: keep View menu checkboxes in sync with state."""
+        for act_name in ("_act_snap_grid", "_act_align_guides"):
+            act = getattr(self, act_name, None)
+            if act is None: continue
+            if act_name == "_act_snap_grid":
+                act.setChecked(self._canvas._snap_to_grid)
+            elif act_name == "_act_align_guides":
+                act.setChecked(self._canvas._show_align_guides)
 
     def _build_ui(self):
         self._canvas=EdofCanvas(self)
@@ -1570,11 +1628,13 @@ class EdofEditor(QMainWindow):
         snap_act.setCheckable(True); snap_act.setShortcut(QKeySequence("Ctrl+G"))
         snap_act.triggered.connect(lambda chk: setattr(self._canvas,'_snap_to_grid',chk))
         vm.addAction(snap_act)
+        self._act_snap_grid = snap_act   # v4.0.2: keep reference for state sync
         # v4.0.1: alignment guides toggle
         align_act=QAction("Show Alignment Guides",self)
         align_act.setCheckable(True); align_act.setChecked(True)
         align_act.triggered.connect(lambda chk: setattr(self._canvas,'_show_align_guides',chk))
         vm.addAction(align_act)
+        self._act_align_guides = align_act   # v4.0.2
 
     # ── Slots ─────────────────────────────────────────────────────────────────
     def _on_sel(self,obj):
@@ -1668,6 +1728,7 @@ class EdofEditor(QMainWindow):
                 QMessageBox.information(self, "Notice", "\n".join(self.doc.errors))
             self._update_protection_status()
             self._status.showMessage(t('status_opened', name=os.path.basename(path)))
+            self._add_recent(path)   # v4.0.2
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 

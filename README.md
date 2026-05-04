@@ -4,6 +4,8 @@
 [![Python](https://img.shields.io/pypi/pyversions/edof.svg)](https://pypi.org/project/edof/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+📚 **Documentation**: <https://davidschobl.github.io/edof/>
+
 A Python library for programmatic document creation, template filling, and high-quality export. Documents are described in code or in a small ZIP-based file format, then rendered to PNG, JPEG, TIFF, BMP, PDF, or SVG. A PyQt6 desktop editor is included for visual editing.
 
 The library prioritizes a few specific things: vector PDF output without large native dependencies, rich-text and table rendering that survives high-DPI export, a template-filling workflow with typed variables, and an optional encryption layer for documents that need it.
