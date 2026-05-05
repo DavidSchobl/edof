@@ -281,7 +281,7 @@ class TextBox(EdofObject):
 @dataclass
 class ImageBox(EdofObject):
     resource_id:   Optional[str]      = None
-    fit_mode:      str                = "contain"   # contain|cover|fill|stretch|none
+    fit_mode:      str                = "stretch"   # contain|cover|fill|stretch|none (v4.0.3 default changed)
     border:        Optional[StrokeStyle] = None
     corner_radius: float              = 0.0         # mm
 
@@ -302,7 +302,7 @@ class ImageBox(EdofObject):
     def _from_dict(cls, d: dict) -> "ImageBox":
         base: ImageBox = EdofObject._from_dict.__func__(cls, d)
         base.resource_id   = d.get("resource_id")
-        base.fit_mode      = d.get("fit_mode", "contain")
+        base.fit_mode      = d.get("fit_mode", "stretch")
         bd = d.get("border")
         base.border        = StrokeStyle.from_dict(bd) if bd else None
         base.corner_radius = float(d.get("corner_radius", 0.0))

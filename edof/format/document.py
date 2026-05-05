@@ -612,6 +612,10 @@ class Document:
         # v4.0.1: encryption + permissions
         from edof.crypto.document_protection import DocumentProtection
         self._protection = DocumentProtection()
+        # v4.0.3: optional editing margins (top, right, bottom, left in mm)
+        # Used by the editor as snap targets; not enforced at render/export.
+        # None = no margins set.
+        self.margins:  Optional[tuple] = None
 
     # ── Error state ───────────────────────────────────────────────────────────
 
@@ -866,6 +870,19 @@ class Document:
         from edof.export.legacy_v3 import export_3x
         export_3x(self, path)
 
+    def export_rtf(self, path: str) -> None:
+        """v4.0.3: Export the document as RTF (Rich Text Format).
+
+        Best-effort, paragraph-by-paragraph conversion. Each TextBox becomes
+        a paragraph; runs preserve bold/italic/underline/size/color.
+        Tables, images, shapes, and complex layout are NOT exported.
+
+        Use this for round-tripping with Word and other RTF editors when the
+        content is primarily text.
+        """
+        from edof.utils.rtf import export_rtf
+        export_rtf(self, path)
+
     def print_document(self, printer: Optional[str] = None,
                        pages: Optional[List[int]] = None) -> None:
         from edof.export.printer import print_document
@@ -957,6 +974,7 @@ class Document:
             "pages":     [p.to_dict() for p in self.pages],
             "variables": self.variables.to_dict(),
             "resources": self.resources.index_dict(),
+            "margins":   list(self.margins) if self.margins else None,
         }
 
     @classmethod
@@ -982,6 +1000,10 @@ class Document:
             d.get("resources", {}),
             resource_data or {},
         )
+        # v4.0.3
+        margins = d.get("margins")
+        if margins and isinstance(margins, (list, tuple)) and len(margins) == 4:
+            doc.margins = tuple(float(x) for x in margins)
         return doc
 
     def __repr__(self) -> str:

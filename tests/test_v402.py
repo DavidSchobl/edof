@@ -152,16 +152,17 @@ def test_validate_recurses_into_groups_for_duplicate_check():
 # ── Editor snap-to-grid for resize (logic test, no Qt) ───────────────────────
 
 def test_editor_resize_snap_logic_is_present():
-    """v4.0.2: ensure the editor source mentions snap-to-grid in resize block."""
+    """v4.0.3: ensure the editor source mentions snap-to-grid in resize block."""
     import os
     editor_src = os.path.join(os.path.dirname(__file__), "..", "edof", "_apps", "editor.py")
     with open(editor_src, encoding='utf-8') as f:
         src = f.read()
 
-    # The resize handle code path should now reference snap_to_grid
-    # Find the section after `def _do_drag` or wherever resize happens
-    assert "v4.0.2: snap the mouse position to grid first" in src, \
-        "Resize block should have v4.0.2 grid snap logic"
+    # The resize handle code path should reference snap_to_grid
+    # (v4.0.3 changed the comment but the logic is still there)
+    assert "Snap mouse to grid for non-rotated objects" in src or \
+           "snap the mouse position to grid first" in src, \
+        "Resize block should have grid snap logic"
 
 
 # ── CLI new subcommands ──────────────────────────────────────────────────────

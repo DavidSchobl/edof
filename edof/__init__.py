@@ -82,9 +82,22 @@ def import_pdf(path: str, **kwargs) -> Document:
         merge_paragraphs    (bool, default True)  — cluster spans into paragraphs
         heading_threshold   (float, default 1.4)  — font_size > median × X → heading
         indent_threshold_mm (float, default 3.0)  — first-line indent detection
+        extract_paths       (bool, default True)  — convert vector paths (v4.0.3)
+        extract_images      (bool, default True)  — extract embedded raster images (v4.0.3)
     """
     from edof.utils.pdf_import import import_pdf as _import_pdf
     return _import_pdf(path, **kwargs)
+
+
+def import_rtf(path: str) -> Document:
+    """v4.0.3: Import an RTF file as an editable EDOF Document.
+
+    Each non-empty paragraph becomes a TextBox stacked vertically; runs
+    preserve bold/italic/underline/size/color. Tables, images, lists, and
+    other complex RTF features are not supported.
+    """
+    from edof.utils.rtf import import_rtf as _import_rtf
+    return _import_rtf(path)
 
 
 __all__ = [
@@ -111,7 +124,7 @@ __all__ = [
     # Export helpers
     "export_page_bitmap", "export_all_pages", "export_to_bytes",
     # Convenience
-    "load", "new", "import_pdf",
+    "load", "new", "import_pdf", "import_rtf",
     # Version
     "__version__", "FORMAT_VERSION_STR",
     # Exceptions

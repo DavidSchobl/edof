@@ -257,26 +257,37 @@ def _quad_bezier(p0, p1, p2, n=20):
                     u*u*p0[1] + 2*u*t*p1[1] + t*t*p2[1]))
     return out
 
-def _path_to_polygons(path_data, dpi):
+def _path_to_polygons(path_data, dpi, offset_x=0.0, offset_y=0.0):
+    """Convert path commands to polylines.
+
+    v4.0.3: offset_x/y allow rendering paths whose coordinates are local
+    (relative to the object's transform.x/y). Default 0.0 keeps backward
+    compatibility with absolute-coord paths from older documents.
+    """
     polys, cur, cx, cy, sx, sy = [], [], 0.0, 0.0, 0.0, 0.0
     for cmd in path_data:
         if not cmd: continue
         op = cmd[0]
         if op == "M":
             if cur: polys.append(cur)
-            cur = []; x, y = cmd[1], cmd[2]
+            cur = []; x, y = cmd[1] + offset_x, cmd[2] + offset_y
             cx, cy = x, y; sx, sy = x, y
             cur.append((mm_to_px(x, dpi), mm_to_px(y, dpi)))
         elif op == "L":
-            x, y = cmd[1], cmd[2]
+            x, y = cmd[1] + offset_x, cmd[2] + offset_y
             cur.append((mm_to_px(x, dpi), mm_to_px(y, dpi))); cx, cy = x, y
         elif op == "C":
             x1, y1, x2, y2, x, y = cmd[1:]
+            x1 += offset_x; y1 += offset_y
+            x2 += offset_x; y2 += offset_y
+            x  += offset_x; y  += offset_y
             for px, py in _de_casteljau((cx,cy), (x1,y1), (x2,y2), (x,y))[1:]:
                 cur.append((mm_to_px(px, dpi), mm_to_px(py, dpi)))
             cx, cy = x, y
         elif op == "Q":
             x1, y1, x, y = cmd[1:]
+            x1 += offset_x; y1 += offset_y
+            x  += offset_x; y  += offset_y
             for px, py in _quad_bezier((cx,cy), (x1,y1), (x,y))[1:]:
                 cur.append((mm_to_px(px, dpi), mm_to_px(py, dpi)))
             cx, cy = x, y
@@ -303,7 +314,35 @@ def _render_shape(obj, canvas, dpi):
         return
 
     if st == SHAPE_PATH and obj.path_data:
-        polys = _path_to_polygons(obj.path_data, dpi)
+        # v4.0.3: detect whether path_data is in local (relative to transform.x/y)
+        # or absolute (legacy) coordinates. Local paths fit within transform width/height
+        # starting from origin; absolute paths can be anywhere on the page.
+        offset_x = offset_y = 0.0
+        try:
+            xs, ys = [], []
+            for cmd in obj.path_data:
+                op = cmd[0]
+                if op in ("M", "L", "T"):
+                    xs.append(cmd[1]); ys.append(cmd[2])
+                elif op in ("C",):
+                    xs.extend([cmd[1], cmd[3], cmd[5]])
+                    ys.extend([cmd[2], cmd[4], cmd[6]])
+                elif op == "Q":
+                    xs.extend([cmd[1], cmd[3]])
+                    ys.extend([cmd[2], cmd[4]])
+            if xs:
+                min_x, min_y = min(xs), min(ys)
+                max_x, max_y = max(xs), max(ys)
+                tol = 1.0  # mm
+                if (min_x >= -tol and min_y >= -tol
+                    and max_x <= t.width + tol and max_y <= t.height + tol):
+                    # path coords are local — translate by transform.x/y
+                    offset_x = t.x
+                    offset_y = t.y
+        except Exception:
+            pass
+
+        polys = _path_to_polygons(obj.path_data, dpi, offset_x, offset_y)
         cd = ImageDraw.Draw(canvas, "RGBA")
         sc = _rgba(obj.stroke.color, (0,0,0,255))
         sw = max(1, int(mm_to_px(obj.stroke.width / 72 * 25.4, dpi)))

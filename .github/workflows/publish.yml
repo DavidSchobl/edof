@@ -1,12 +1,13 @@
 name: Test & Publish
+
 on:
   push:
     branches: [main]
     tags: ["v*"]
   pull_request:
     branches: [main]
+
 jobs:
-  # ── Tests ───────────────────────────────────────────────────────────
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -14,33 +15,26 @@ jobs:
         python: ["3.9", "3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python }}
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Install
-        run: pip install -e ".[dev,qr]"
-      - name: Test
-        run: pytest --tb=short -q
-  # ── Publish to PyPI (only on v* tag) ─────────────────────────────────
+      - run: pip install -e ".[dev,qr]"
+      - run: pytest --tb=short -q
+
   publish:
     needs: test
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    environment: pypi
     permissions:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build
-        run: |
+      - run: |
           pip install build
           python -m build
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           attestations: false

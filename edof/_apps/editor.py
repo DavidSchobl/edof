@@ -307,6 +307,12 @@ class EdofCanvas(QGraphicsView):
         self._snap_size_mm=5.0
         self._show_align_guides=True
         self._align_guide_lines=[]      # transient overlay lines during drag
+        # v4.0.3: per-document margins (top, right, bottom, left in mm) + toggle
+        self._margins_enabled=False
+        self._margins=(15.0, 15.0, 15.0, 15.0)
+        # v4.0.3: path drawing tool state
+        self._path_drawing=False
+        self._path_points=[]            # accumulated points in mm
         self._lasso_start=None          # start point for lasso selection
         self._lasso_rect_item=None
         self._drag_mode=None; self._drag_sp0=None; self._drag_tf0=None; self._drag_anchor=None
@@ -353,15 +359,30 @@ class EdofCanvas(QGraphicsView):
     def _start_render(self):
         if not self._doc or not self._doc.pages: return
         self._render_id+=1; rid=self._render_id
-        pg_idx=self._page_idx; dpi=int(self._dpi)
-        # Snapshot references (not deep copy for perf)
+        pg_idx=self._page_idx
+        # v4.0.3: when zoomed out, render at a higher effective DPI so that
+        # thin text strokes don't disappear into sub-pixels. Cap at 2x to
+        # avoid huge memory.
+        target_dpi=int(self._dpi)
+        if self._zoom < 1.0:
+            multiplier = min(2.0, 1.0 / max(self._zoom, 0.25))
+            target_dpi = int(self._dpi * multiplier)
+        dpi=target_dpi
+        # Snapshot references
         doc=self._doc
+        canvas_dpi=int(self._dpi)
 
         def task():
             try:
                 from edof.engine.renderer import render_page
                 pg=doc.pages[pg_idx]
                 img=render_page(pg,doc.resources,doc.variables,dpi=dpi).convert("RGB")
+                # If we rendered at higher DPI, downscale back to canvas DPI
+                if dpi != canvas_dpi:
+                    target_w=max(1, int(img.width * canvas_dpi / dpi))
+                    target_h=max(1, int(img.height * canvas_dpi / dpi))
+                    from PIL import Image as _PI
+                    img=img.resize((target_w, target_h), _PI.Resampling.LANCZOS)
                 buf=_io.BytesIO(); img.save(buf,"PNG"); buf.seek(0)
                 _render_signals.done.emit(buf.read(), rid)
             except Exception as e: print(f"[render] {e}")
@@ -503,6 +524,16 @@ class EdofCanvas(QGraphicsView):
             event.accept(); return
 
         if btn==Qt.MouseButton.LeftButton:
+            # v4.0.3: path drawing tool — intercept clicks to add points
+            if getattr(self, '_path_drawing', False):
+                sp=self._sp(event); mx,my=self._to_mm(sp)
+                if self._snap_to_grid:
+                    s=self._snap_size_mm
+                    mx=round(mx/s)*s; my=round(my/s)*s
+                self._path_points.append((mx, my))
+                self._draw_path_preview()
+                event.accept(); return
+
             # If inline editor active and click is NOT on it → confirm
             if self._inline_widget:
                 vp_pos=event.position().toPoint()
@@ -591,7 +622,8 @@ class EdofCanvas(QGraphicsView):
             mods=event.modifiers()
             shift=bool(mods&Qt.KeyboardModifier.ShiftModifier)
             alt  =bool(mods&Qt.KeyboardModifier.AltModifier)
-            self._apply_drag(sp,shift,alt)
+            ctrl =bool(mods&Qt.KeyboardModifier.ControlModifier)
+            self._apply_drag(sp,shift,alt,ctrl)
         else: self._update_cursor(sp)
         super().mouseMoveEvent(event)
 
@@ -609,6 +641,10 @@ class EdofCanvas(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self,event):
+        # v4.0.3: double-click finishes path drawing
+        if getattr(self, '_path_drawing', False):
+            self._finish_path_drawing()
+            event.accept(); return
         if event.button()==Qt.MouseButton.LeftButton and not self._inline_widget:
             sp=self._sp(event); hit=self._hit_obj(sp)
             if hit:
@@ -675,6 +711,15 @@ class EdofCanvas(QGraphicsView):
         self._set_zoom(self._zoom*f); event.accept()
 
     def keyPressEvent(self,event):
+        # v4.0.3: path drawing tool keyboard handling
+        if getattr(self, '_path_drawing', False):
+            key=event.key()
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._finish_path_drawing()
+                event.accept(); return
+            elif key == Qt.Key.Key_Escape:
+                self._cancel_path_drawing()
+                event.accept(); return
         obj=self._sel_obj()
         if not obj or obj.locked: super().keyPressEvent(event); return
         d=0.5; key=event.key()
@@ -732,26 +777,43 @@ class EdofCanvas(QGraphicsView):
                     snap_y=y + (ty - my); snapped=True
         return snap_x, snap_y, snapped
 
-    def _apply_drag(self,sp,shift,alt):
-        obj=self._sel_obj();
+    def _apply_drag(self,sp,shift,alt,ctrl=False):
+        """v4.0.3: refactored drag logic.
+
+        Modifier semantics (revised):
+          - Ctrl  → bypass ALL snapping (grid + alignment guides + margins)
+          - Alt   → bypass snapping (legacy alias for Ctrl, kept for compatibility)
+          - Shift on RESIZE → toggle uniform/non-uniform scale.
+                             Default for ImageBox is uniform (preserve aspect ratio);
+                             Shift toggles to non-uniform. For other objects, default
+                             is non-uniform (legacy); Shift forces uniform.
+          - Shift on ROTATE → snap to 15° increments (same as before).
+        """
+        obj=self._sel_obj()
         if not obj: return
         tf=self._drag_tf0
+        from edof.format.objects import ImageBox
+        no_snap = alt or ctrl   # v4.0.3: Ctrl is the new "bypass snap"
 
         if self._drag_mode=='move':
             dx=px_to_mm(sp.x()-self._drag_sp0.x(),self._dpi)
             dy=px_to_mm(sp.y()-self._drag_sp0.y(),self._dpi)
             new_x=tf.x+dx; new_y=tf.y+dy
-            # v4.0.1: Snap-to-grid
-            if self._snap_to_grid and not alt:
+            # Snap to grid
+            if self._snap_to_grid and not no_snap:
                 s=self._snap_size_mm
                 new_x=round(new_x/s)*s
                 new_y=round(new_y/s)*s
-            # v4.0.1: Alignment guides — snap to other objects' edges/centers
-            if self._show_align_guides and not alt:
+            # Snap to margins (v4.0.3)
+            if not no_snap:
+                new_x, new_y = self._snap_to_margins(
+                    obj, new_x, new_y, tf.width, tf.height)
+            # Alignment guides — snap to other objects' edges/centers
+            if self._show_align_guides and not no_snap:
                 new_x, new_y, snapped = self._snap_to_neighbors(
                     obj, new_x, new_y, tf.width, tf.height)
             obj.transform.x=new_x; obj.transform.y=new_y
-            # v4.0.1: move multi-selected objects together
+            # Move multi-selected objects together
             applied_dx=new_x-tf.x; applied_dy=new_y-tf.y
             for mid, mtf0 in getattr(self, '_multi_drag_tf0', {}).items():
                 mobj=self._find_obj(mid)
@@ -763,16 +825,17 @@ class EdofCanvas(QGraphicsView):
             cx_s=mm_to_px(tf.x+tf.width/2,self._dpi)
             cy_s=mm_to_px(tf.y+tf.height/2,self._dpi)
             angle=math.degrees(math.atan2(sp.y()-cy_s,sp.x()-cx_s))+90
-            if shift and not alt:
-                angle=round(angle/15)*15   # snap 15° on Shift
-            elif self._snap_to_grid and not alt:
-                # v4.0.2: rotation also snaps when grid snap is on
+            if shift and not no_snap:
                 angle=round(angle/15)*15
-            # Alt or no modifier (and no snap setting) = free rotation
+            elif self._snap_to_grid and not no_snap:
+                angle=round(angle/15)*15
             obj.transform.rotation=angle%360
 
         elif self._drag_mode.startswith('line_'):
             ptk=self._drag_mode.split('_')[1]; mx,my=self._to_mm(sp)
+            if self._snap_to_grid and not no_snap:
+                s=self._snap_size_mm
+                mx=round(mx/s)*s; my=round(my/s)*s
             idx=0 if ptk=='P1' else 1
             pts=list(obj.points); pts[idx]=[mx,my]; obj.points=pts
             x1,y1=pts[0]; x2,y2=pts[1]
@@ -780,26 +843,170 @@ class EdofCanvas(QGraphicsView):
             obj.transform.width=max(abs(x2-x1),MIN_MM); obj.transform.height=max(abs(y2-y1),MIN_MM)
 
         else:
+            # Resize
             handle=self._drag_mode.replace('resize_','')
             sw,sh=SelectionOverlay._SIGN.get(handle,(1,1))
             cos_r=math.cos(math.radians(tf.rotation)); sin_r=math.sin(math.radians(tf.rotation))
             ax,ay=self._drag_anchor; mx,my=self._to_mm(sp)
-            # v4.0.2: snap the mouse position to grid first, so resize aligns
-            # to grid increments. Only applies for non-rotated objects (snapping
-            # along the rotated local axes is unintuitive). Alt bypasses snap.
-            if self._snap_to_grid and not alt and abs(tf.rotation) < 0.01:
+            # Snap mouse to grid for non-rotated objects
+            if self._snap_to_grid and not no_snap and abs(tf.rotation) < 0.01:
                 s=self._snap_size_mm
                 mx=round(mx/s)*s
                 my=round(my/s)*s
             vx,vy=mx-ax,my-ay
-            new_w=max(MIN_MM,sw*(vx*cos_r+vy*sin_r))    if sw else tf.width
-            new_h=max(MIN_MM,sh*(vx*(-sin_r)+vy*cos_r)) if sh else tf.height
-            new_cx=ax+sw*new_w/2*cos_r+sh*new_h/2*(-sin_r)
-            new_cy=ay+sw*new_w/2*sin_r+sh*new_h/2*cos_r
-            obj.transform.x=new_cx-new_w/2; obj.transform.y=new_cy-new_h/2
-            obj.transform.width=new_w; obj.transform.height=new_h
+
+            # v4.0.3: Decide aspect-ratio behavior
+            # Default for ImageBox = uniform (preserve aspect ratio)
+            # Shift toggles to non-uniform.
+            # For other objects, default = non-uniform; Shift forces uniform.
+            is_image = isinstance(obj, ImageBox)
+            if is_image:
+                # ImageBox: uniform unless Shift
+                uniform = not shift
+            else:
+                # Other: non-uniform unless Shift
+                uniform = shift
+
+            # Compute new dimensions in local axes
+            new_w_raw = sw*(vx*cos_r+vy*sin_r) if sw else tf.width
+            new_h_raw = sh*(vx*(-sin_r)+vy*cos_r) if sh else tf.height
+
+            if uniform and sw and sh and tf.width > 0 and tf.height > 0:
+                # Preserve aspect ratio: pick whichever scale is bigger and apply both
+                aspect = tf.height / tf.width
+                # Choose dominant axis based on which the user moved further
+                if abs(new_w_raw - tf.width) >= abs(new_h_raw - tf.height):
+                    new_w = max(MIN_MM, new_w_raw)
+                    new_h = max(MIN_MM, new_w * aspect)
+                else:
+                    new_h = max(MIN_MM, new_h_raw)
+                    new_w = max(MIN_MM, new_h / aspect)
+            elif uniform and (not sw or not sh):
+                # Edge handle on uniform mode: only one axis active, leave the other alone
+                new_w = max(MIN_MM, new_w_raw) if sw else tf.width
+                new_h = max(MIN_MM, new_h_raw) if sh else tf.height
+            else:
+                new_w = max(MIN_MM, new_w_raw) if sw else tf.width
+                new_h = max(MIN_MM, new_h_raw) if sh else tf.height
+
+            # v4.0.3 fix: keep the OPPOSITE corner fixed (the anchor).
+            # Previous logic computed new_cx/cy from sw/sh signs and resulted
+            # in image jumping when only one axis was scaled.
+            new_cx = ax + sw*new_w/2*cos_r + sh*new_h/2*(-sin_r)
+            new_cy = ay + sw*new_w/2*sin_r + sh*new_h/2*cos_r
+            obj.transform.x = new_cx - new_w/2
+            obj.transform.y = new_cy - new_h/2
+            obj.transform.width = new_w
+            obj.transform.height = new_h
 
         self._refresh_overlay(); self._show_preview(obj)
+
+    def _snap_to_margins(self, obj, new_x, new_y, w, h):
+        """v4.0.3: snap to document-level margins if enabled."""
+        if not getattr(self, '_margins_enabled', False):
+            return new_x, new_y
+        if self.doc is None or not self.doc.pages:
+            return new_x, new_y
+        page = self.doc.pages[self._page_idx] if hasattr(self, '_page_idx') else self.doc.pages[0]
+        m = getattr(self, '_margins', None)
+        if not m:
+            return new_x, new_y
+        top, right, bottom, left = m
+        threshold = 2.0  # mm
+        # left edge
+        if abs(new_x - left) < threshold:
+            new_x = left
+        # right edge of object snaps to (page width - right margin)
+        page_w = page.width
+        page_h = page.height
+        if abs(new_x + w - (page_w - right)) < threshold:
+            new_x = page_w - right - w
+        # top edge
+        if abs(new_y - top) < threshold:
+            new_y = top
+        # bottom edge of object snaps to (page height - bottom margin)
+        if abs(new_y + h - (page_h - bottom)) < threshold:
+            new_y = page_h - bottom - h
+        return new_x, new_y
+
+    # ── v4.0.3: Path drawing helpers ──────────────────────────────────────────
+    def _draw_path_preview(self):
+        """Draw temporary lines connecting collected path points."""
+        # Remove old preview items
+        for item in getattr(self, '_path_preview_items', []):
+            try: self.scene().removeItem(item)
+            except Exception: pass
+        self._path_preview_items=[]
+        if len(self._path_points) < 1: return
+        pen=QPen(QColor(120,180,255,200),2,Qt.PenStyle.SolidLine)
+        # Draw points as small dots
+        for (mx, my) in self._path_points:
+            x=mm_to_px(mx, self._dpi); y=mm_to_px(my, self._dpi)
+            r=3
+            dot=self.scene().addEllipse(x-r, y-r, 2*r, 2*r, pen, QBrush(QColor(120,180,255)))
+            dot.setZValue(9000)
+            self._path_preview_items.append(dot)
+        # Connect with lines
+        if len(self._path_points) >= 2:
+            for i in range(1, len(self._path_points)):
+                p1=self._path_points[i-1]; p2=self._path_points[i]
+                line=self.scene().addLine(
+                    mm_to_px(p1[0],self._dpi), mm_to_px(p1[1],self._dpi),
+                    mm_to_px(p2[0],self._dpi), mm_to_px(p2[1],self._dpi), pen)
+                line.setZValue(9000)
+                self._path_preview_items.append(line)
+
+    def _finish_path_drawing(self):
+        """Convert collected points into a Shape(path) object."""
+        pts=list(self._path_points or [])
+        self._cancel_path_drawing()  # cleans state and preview
+        if len(pts) < 2:
+            return
+        # Compute bbox
+        xs=[p[0] for p in pts]; ys=[p[1] for p in pts]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        w=max(1.0, max_x - min_x); h=max(1.0, max_y - min_y)
+        # Build path_data with points relative to bbox
+        path_data=[]
+        for i,(mx,my) in enumerate(pts):
+            op = "M" if i==0 else "L"
+            path_data.append([op, mx - min_x, my - min_y])
+        from edof.format.objects import Shape, SHAPE_PATH
+        sh=Shape(shape_type=SHAPE_PATH)
+        sh.path_data=path_data
+        sh.transform.x=min_x; sh.transform.y=min_y
+        sh.transform.width=w; sh.transform.height=h
+        sh.fill.color=None       # outline only by default
+        sh.stroke.color=(50,50,50,255)
+        sh.stroke.width=0.5
+        # Add to current page
+        win=self._main_window()
+        if win:
+            page=win._cp()
+            if page:
+                page.add_object(sh)
+                self.set_sel_id(sh.id)
+                self.schedule_render()
+                win._push("Add Path")
+
+    def _cancel_path_drawing(self):
+        """Exit path-drawing mode and clean up preview."""
+        self._path_drawing=False
+        self._path_points=[]
+        for item in getattr(self, '_path_preview_items', []):
+            try: self.scene().removeItem(item)
+            except Exception: pass
+        self._path_preview_items=[]
+        try: self.unsetCursor()
+        except Exception: pass
+
+    def _main_window(self):
+        """Find the parent EdofEditor window (for _push, etc.)."""
+        w=self.parent()
+        while w is not None and not isinstance(w, QMainWindow):
+            w=w.parent()
+        return w
 
     def _show_preview(self,obj):
         from edof.format.objects import Shape,SHAPE_LINE
@@ -979,14 +1186,37 @@ class ObjectListPanel(QWidget):
         super().__init__(parent); self._canvas=canvas
         vb=QVBoxLayout(self); vb.setContentsMargins(4,4,4,4); vb.setSpacing(4)
         self._list=QListWidget()
-        self._list.setAlternatingRowColors(True)
+        # v4.0.3: dark-theme friendly styling — no alternating rows (the default
+        # zebra was bright and hard to read on dark theme)
+        self._list.setAlternatingRowColors(False)
+        self._list.setStyleSheet(
+            "QListWidget{background:#1c1c2a;color:#e6e6f0;border:1px solid #2a2a3c;}"
+            "QListWidget::item{padding:4px;}"
+            "QListWidget::item:selected{background:#3050a0;color:white;}"
+            "QListWidget::item:hover{background:#2a3050;}"
+        )
+        # v4.0.3: drag-and-drop to reorder layers
+        self._list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self._list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self._list.model().rowsMoved.connect(self._on_rows_moved)
+        # v4.0.3: F2 / double-click rename, right-click menu
+        self._list.setEditTriggers(
+            QListWidget.EditTrigger.EditKeyPressed |
+            QListWidget.EditTrigger.DoubleClicked
+        )
+        self._list.itemChanged.connect(self._on_item_renamed)
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._on_context_menu)
         self._list.currentItemChanged.connect(self._on_item_changed)
+        self._suppress_rename_signal=False
         vb.addWidget(self._list)
 
     def refresh(self):
-        self._list.blockSignals(True); self._list.clear()
+        self._list.blockSignals(True)
+        self._suppress_rename_signal=True
+        self._list.clear()
         pg=self._canvas._cur_page()
-        if not pg: self._list.blockSignals(False); return
+        if not pg: self._list.blockSignals(False); self._suppress_rename_signal=False; return
         sel=self._canvas.get_sel_id()
         for obj in reversed(pg.sorted_objects()):
             icon=_TYPE_ICONS.get(obj.OBJECT_TYPE,'?')
@@ -995,15 +1225,126 @@ class ObjectListPanel(QWidget):
             vis= "" if obj.visible else " 🚫"
             lck= " 🔒" if obj.locked else ""
             item=QListWidgetItem(f"{icon} {name}{var}{vis}{lck}")
-            item.setData(Qt.ItemDataRole.UserRole,obj.id)
+            item.setData(Qt.ItemDataRole.UserRole, obj.id)
+            # v4.0.3: store the plain name separately so we can edit it
+            item.setData(Qt.ItemDataRole.UserRole+1, name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
             self._list.addItem(item)
             if obj.id==sel: self._list.setCurrentItem(item)
         self._list.blockSignals(False)
+        self._suppress_rename_signal=False
 
     def _on_item_changed(self,item):
+        if self._suppress_rename_signal: return
         if item:
             oid=item.data(Qt.ItemDataRole.UserRole)
             if oid: self.objectSelected.emit(oid)
+
+    def _on_item_renamed(self, item):
+        """v4.0.3: F2/dblclick rename committed."""
+        if self._suppress_rename_signal: return
+        oid=item.data(Qt.ItemDataRole.UserRole)
+        if not oid: return
+        new_text=item.text()
+        # Strip the icon prefix and any suffix tags ([var], 🚫, 🔒)
+        # Simple heuristic: take the text between first space and any final tag char
+        clean=new_text.strip()
+        # Drop leading icon (single character + space)
+        if len(clean) >= 2 and clean[1] == ' ':
+            clean = clean[2:]
+        # Drop trailing tags
+        for tag in (" 🔒", " 🚫"):
+            if clean.endswith(tag): clean = clean[:-len(tag)]
+        if "[" in clean and "]" in clean:
+            clean = clean[:clean.rfind("[")].strip()
+        # Don't accept empty
+        if not clean.strip():
+            self.refresh(); return
+        # Update the object
+        pg=self._canvas._cur_page()
+        if pg:
+            obj=pg.get_object(oid)
+            if obj:
+                obj.name=clean.strip()
+                self._canvas.objectChanged.emit()
+                self.refresh()
+
+    def _on_rows_moved(self, parent_idx, start, end, dest_parent, dest_row):
+        """v4.0.3: drag-and-drop to reorder layers.
+
+        The list is rendered in reverse layer order (top item = front-most layer).
+        Dragging an item up should bring it to front; dragging down should send
+        to back. We rebuild layer values from the new visual order.
+        """
+        pg=self._canvas._cur_page()
+        if not pg: return
+        # Collect new order from the list (top-to-bottom = front-to-back)
+        new_order_top_to_bottom=[]
+        for i in range(self._list.count()):
+            oid=self._list.item(i).data(Qt.ItemDataRole.UserRole)
+            obj=pg.get_object(oid)
+            if obj: new_order_top_to_bottom.append(obj)
+        # Reverse to get back-to-front order, then assign sequential layer values
+        for new_layer, obj in enumerate(reversed(new_order_top_to_bottom)):
+            obj.layer = new_layer
+        self._canvas.objectChanged.emit()
+        self._canvas.schedule_render()
+
+    def _on_context_menu(self, pos):
+        """v4.0.3: right-click context menu on the object list."""
+        item=self._list.itemAt(pos)
+        if not item: return
+        oid=item.data(Qt.ItemDataRole.UserRole)
+        if not oid: return
+        pg=self._canvas._cur_page()
+        if not pg: return
+        obj=pg.get_object(oid)
+        if not obj: return
+
+        menu=QMenu(self)
+        ren_act=menu.addAction("Rename… (F2)")
+        ren_act.triggered.connect(lambda: self._list.editItem(item))
+        menu.addSeparator()
+        # Find main window for layer ops
+        main=self._canvas
+        while main is not None and not isinstance(main, QMainWindow):
+            main=main.parent()
+
+        if main:
+            menu.addAction("Bring to Front",
+                           lambda: (self._set_sel(oid), main._layer_op('front')))
+            menu.addAction("Bring Forward",
+                           lambda: (self._set_sel(oid), main._layer_op('up')))
+            menu.addAction("Send Backward",
+                           lambda: (self._set_sel(oid), main._layer_op('down')))
+            menu.addAction("Send to Back",
+                           lambda: (self._set_sel(oid), main._layer_op('back')))
+            menu.addSeparator()
+
+        vis_lbl="Show" if not obj.visible else "Hide"
+        def _toggle_vis():
+            obj.visible = not obj.visible
+            self._canvas.objectChanged.emit(); self._canvas.schedule_render()
+            self.refresh()
+        menu.addAction(vis_lbl, _toggle_vis)
+
+        lck_lbl="Unlock" if obj.locked else "Lock"
+        def _toggle_lock():
+            obj.locked = not obj.locked
+            self._canvas.objectChanged.emit(); self._canvas.schedule_render()
+            self.refresh()
+        menu.addAction(lck_lbl, _toggle_lock)
+        menu.addSeparator()
+
+        if main:
+            menu.addAction("Duplicate", lambda: (self._set_sel(oid), main._dup_obj()))
+            menu.addAction("Delete",    lambda: (self._set_sel(oid), main._del_obj()))
+
+        menu.exec(self._list.mapToGlobal(pos))
+
+    def _set_sel(self, oid):
+        self._canvas.set_sel_id(oid)
+        self.objectSelected.emit(oid)
 
     def select(self,obj_id):
         self._list.blockSignals(True)
@@ -1078,6 +1419,57 @@ class PropPanel(QWidget):
         self._stack.addWidget(self._mk_shape())    # 3 Shape
         self._stack.addWidget(self._mk_qr())       # 4 QRCode
         self._stack.addWidget(self._mk_line())     # 5 Line
+
+        # v4.0.3: Advanced properties — visible_if, lock_level, lock_text,
+        # blend_mode, drop shadow, shape_type changer
+        g_adv=QGroupBox("Advanced"); fa=QFormLayout(g_adv)
+        fa.setSpacing(4); fa.setContentsMargins(8,8,8,6)
+
+        # visible_if expression
+        self.le_visible_if=QLineEdit()
+        self.le_visible_if.setPlaceholderText("e.g. amount > 0  or  tier == 'gold'")
+        self.le_visible_if.editingFinished.connect(
+            lambda: self._aa('visible_if', self.le_visible_if.text().strip()))
+        fa.addRow("Show if:", self.le_visible_if)
+
+        # lock_level dropdown
+        self.cb_lock_level=QComboBox()
+        self.cb_lock_level.addItems(["(none)", "fill", "edit", "design", "admin"])
+        self.cb_lock_level.currentTextChanged.connect(self._on_lock_level)
+        fa.addRow("Lock level:", self.cb_lock_level)
+        # lock_text
+        self.cb_lock_text=QCheckBox("Lock text content")
+        self.cb_lock_text.toggled.connect(lambda v: self._aa('lock_text', v))
+        fa.addRow("", self.cb_lock_text)
+
+        # blend mode
+        self.cb_blend=QComboBox()
+        self.cb_blend.addItems(["normal", "multiply", "screen", "darken", "lighten", "overlay"])
+        self.cb_blend.currentTextChanged.connect(lambda v: self._aa('blend_mode', v))
+        fa.addRow("Blend:", self.cb_blend)
+
+        # Shape type changer (only meaningful for Shape)
+        self.cb_shape_type=QComboBox()
+        self.cb_shape_type.addItems(["rect", "ellipse", "line", "polygon", "arrow", "path"])
+        self.cb_shape_type.currentTextChanged.connect(self._on_shape_type)
+        fa.addRow("Shape type:", self.cb_shape_type)
+
+        # Drop shadow
+        self.cb_shadow=QCheckBox("Drop shadow")
+        self.cb_shadow.toggled.connect(self._on_shadow_toggle)
+        fa.addRow("", self.cb_shadow)
+        self.sp_shadow_x=self._dspin(lo=-50,hi=50,dec=1,suffix=" mm")
+        self.sp_shadow_y=self._dspin(lo=-50,hi=50,dec=1,suffix=" mm")
+        self.sp_shadow_blur=self._dspin(lo=0,hi=50,dec=1,suffix=" mm")
+        self.sp_shadow_x.editingFinished.connect(self._on_shadow_change)
+        self.sp_shadow_y.editingFinished.connect(self._on_shadow_change)
+        self.sp_shadow_blur.editingFinished.connect(self._on_shadow_change)
+        fa.addRow("  X:", self.sp_shadow_x)
+        fa.addRow("  Y:", self.sp_shadow_y)
+        fa.addRow("  Blur:", self.sp_shadow_blur)
+
+        vb.addWidget(g_adv)
+        self._g_adv=g_adv  # keep reference for showing/hiding
 
         # Object meta
         g_o=QGroupBox(t('tab_object')); fo=QFormLayout(g_o); fo.setSpacing(4); fo.setContentsMargins(8,8,8,6)
@@ -1240,6 +1632,40 @@ class PropPanel(QWidget):
             self.cb_visible.setChecked(obj.visible)
             self.lbl_info.setText(f"ID: {obj.id[:24]}…  Type: {obj.OBJECT_TYPE}")
 
+            # v4.0.3: load advanced fields
+            self.le_visible_if.blockSignals(True)
+            self.le_visible_if.setText(getattr(obj, 'visible_if', '') or '')
+            self.le_visible_if.blockSignals(False)
+            ll = getattr(obj, 'lock_level', '') or ''
+            self.cb_lock_level.blockSignals(True)
+            idx = max(0, ["", "fill", "edit", "design", "admin"].index(ll)) if ll in ("","fill","edit","design","admin") else 0
+            self.cb_lock_level.setCurrentIndex(idx)
+            self.cb_lock_level.blockSignals(False)
+            self.cb_lock_text.blockSignals(True)
+            self.cb_lock_text.setChecked(bool(getattr(obj, 'lock_text', False)))
+            self.cb_lock_text.blockSignals(False)
+            self.cb_blend.blockSignals(True)
+            self.cb_blend.setCurrentText(getattr(obj, 'blend_mode', 'normal') or 'normal')
+            self.cb_blend.blockSignals(False)
+            from edof.format.objects import Shape as _Shp
+            self.cb_shape_type.blockSignals(True)
+            if isinstance(obj, _Shp):
+                self.cb_shape_type.setEnabled(True)
+                self.cb_shape_type.setCurrentText(obj.shape_type)
+            else:
+                self.cb_shape_type.setEnabled(False)
+            self.cb_shape_type.blockSignals(False)
+            sh = getattr(obj, 'shadow', None)
+            self.cb_shadow.blockSignals(True)
+            self.cb_shadow.setChecked(bool(sh and getattr(sh, 'enabled', False)))
+            self.cb_shadow.blockSignals(False)
+            if sh:
+                self.sp_shadow_x.blockSignals(True); self.sp_shadow_y.blockSignals(True); self.sp_shadow_blur.blockSignals(True)
+                self.sp_shadow_x.setValue(getattr(sh, 'offset_x', 2.0))
+                self.sp_shadow_y.setValue(getattr(sh, 'offset_y', 2.0))
+                self.sp_shadow_blur.setValue(getattr(sh, 'blur', 4.0))
+                self.sp_shadow_x.blockSignals(False); self.sp_shadow_y.blockSignals(False); self.sp_shadow_blur.blockSignals(False)
+
             from edof.format.objects import Shape,SHAPE_LINE
             if isinstance(obj,edof.TextBox):       self._load_tb(obj); self._stack.setCurrentIndex(1)
             elif isinstance(obj,edof.ImageBox):    self._load_img(obj); self._stack.setCurrentIndex(2)
@@ -1326,6 +1752,40 @@ class PropPanel(QWidget):
         if not self._obj: return
         if axis=='h': self._obj.transform.flip_horizontal()
         else:         self._obj.transform.flip_vertical()
+        self._canvas.schedule_render(); self.changed.emit()
+
+    # v4.0.3: advanced property handlers
+    def _on_lock_level(self, txt):
+        if self._loading or not self._obj: return
+        val = "" if txt == "(none)" else txt
+        self._obj.lock_level = val
+        self.changed.emit()
+
+    def _on_shape_type(self, txt):
+        if self._loading or not self._obj: return
+        from edof.format.objects import Shape
+        if isinstance(self._obj, Shape):
+            self._obj.shape_type = txt
+            self._canvas.schedule_render(); self.changed.emit()
+
+    def _on_shadow_toggle(self, on):
+        if self._loading or not self._obj: return
+        if not getattr(self._obj, 'shadow', None):
+            from edof.format.styles import ShadowStyle
+            self._obj.shadow = ShadowStyle(enabled=False)
+        self._obj.shadow.enabled = bool(on)
+        self._canvas.schedule_render(); self.changed.emit()
+
+    def _on_shadow_change(self):
+        if self._loading or not self._obj: return
+        sh = getattr(self._obj, 'shadow', None)
+        if sh is None:
+            from edof.format.styles import ShadowStyle
+            self._obj.shadow = ShadowStyle(enabled=True)
+            sh = self._obj.shadow
+        sh.offset_x = self.sp_shadow_x.value()
+        sh.offset_y = self.sp_shadow_y.value()
+        sh.blur     = self.sp_shadow_blur.value()
         self._canvas.schedule_render(); self.changed.emit()
 
     def _live_text(self):
@@ -1459,20 +1919,27 @@ class EdofEditor(QMainWindow):
             self.restoreGeometry(geom)
         else:
             self.resize(1440,880)
-        # v4.0.2: restore canvas preferences
+        # v4.0.3: restore dock layout (window state) — happens after build_ui
+        ws = self._settings.value("windowState")
+        if ws is not None:
+            QTimer.singleShot(50, lambda: self.restoreState(ws))
+        # v4.0.2/4.0.3: restore canvas preferences
         self._canvas._snap_to_grid = bool(self._settings.value("snap_to_grid", False, type=bool))
         self._canvas._show_align_guides = bool(self._settings.value("show_align_guides", True, type=bool))
+        self._canvas._margins_enabled = bool(self._settings.value("margins_enabled", False, type=bool))
         self._sync_view_actions()
         QTimer.singleShot(300,self._load_fonts)
         if filepath and os.path.isfile(filepath): self._open_file(filepath)
         else: self._new_doc()
 
     def closeEvent(self, ev):
-        # v4.0.2: persist preferences across sessions
+        # v4.0.2/4.0.3: persist preferences across sessions
         try:
             self._settings.setValue("geometry", self.saveGeometry())
+            self._settings.setValue("windowState", self.saveState())   # v4.0.3: dock layout
             self._settings.setValue("snap_to_grid", bool(self._canvas._snap_to_grid))
             self._settings.setValue("show_align_guides", bool(self._canvas._show_align_guides))
+            self._settings.setValue("margins_enabled", bool(self._canvas._margins_enabled))
             self._settings.setValue("recent_files", list(self._recent_files)[:10])
         except Exception:
             pass
@@ -1491,14 +1958,13 @@ class EdofEditor(QMainWindow):
         self._recent_files = self._recent_files[:10]
 
     def _sync_view_actions(self):
-        """v4.0.2: keep View menu checkboxes in sync with state."""
-        for act_name in ("_act_snap_grid", "_act_align_guides"):
-            act = getattr(self, act_name, None)
-            if act is None: continue
-            if act_name == "_act_snap_grid":
-                act.setChecked(self._canvas._snap_to_grid)
-            elif act_name == "_act_align_guides":
-                act.setChecked(self._canvas._show_align_guides)
+        """v4.0.2/4.0.3: keep View menu checkboxes in sync with state."""
+        if hasattr(self, "_act_snap_grid") and self._act_snap_grid is not None:
+            self._act_snap_grid.setChecked(self._canvas._snap_to_grid)
+        if hasattr(self, "_act_align_guides") and self._act_align_guides is not None:
+            self._act_align_guides.setChecked(self._canvas._show_align_guides)
+        if hasattr(self, "_act_margins") and self._act_margins is not None:
+            self._act_margins.setChecked(self._canvas._margins_enabled)
 
     def _build_ui(self):
         self._canvas=EdofCanvas(self)
@@ -1522,16 +1988,28 @@ class EdofEditor(QMainWindow):
         self._obj_panel.objectSelected.connect(self._on_obj_select)
         left_tabs.addTab(self._obj_panel,t('panel_objects'))
         ld=QDockWidget("",self); ld.setWidget(left_tabs)
-        ld.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-        ld.setFixedWidth(175); self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,ld)
+        # v4.0.3: dock is movable + resizable (was Fixed)
+        ld.setObjectName("LeftDock")
+        ld.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                       QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        ld.setMinimumWidth(140)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,ld)
+        self._left_dock = ld
+        # Set initial width via resizeDocks (replaces setFixedWidth)
+        QTimer.singleShot(0, lambda: self.resizeDocks([ld], [175], Qt.Orientation.Horizontal))
 
         # Right: properties (scrollable)
         self._props=PropPanel(self._canvas); self._props.changed.connect(self._on_chg)
         scroll=QScrollArea(); scroll.setWidget(self._props); scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         rd=QDockWidget(t('panel_properties'),self); rd.setWidget(scroll)
-        rd.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-        rd.setFixedWidth(310); self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,rd)
+        rd.setObjectName("RightDock")
+        rd.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                       QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        rd.setMinimumWidth(240)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,rd)
+        self._right_dock = rd
+        QTimer.singleShot(0, lambda: self.resizeDocks([rd], [310], Qt.Orientation.Horizontal))
 
         self._lbl_zoom=QLabel("100%")
         self._status=QStatusBar(); self.setStatusBar(self._status)
@@ -1540,20 +2018,46 @@ class EdofEditor(QMainWindow):
 
     def _build_toolbar(self):
         tb=self.addToolBar("Main"); tb.setMovable(False); tb.setIconSize(QSize(14,14))
-        def a(lbl,slot,key=None):
+        def a(lbl, slot, key=None, tip=None):
             ac=QAction(lbl,self); ac.triggered.connect(slot)
-            if key: ac.setShortcut(QKeySequence(key))
+            if key:
+                ac.setShortcut(QKeySequence(key))
+                if tip:
+                    ac.setToolTip(f"{tip}  ({key})")
+                    ac.setStatusTip(tip)
+                else:
+                    ac.setToolTip(key); ac.setStatusTip(key)
+            elif tip:
+                ac.setToolTip(tip); ac.setStatusTip(tip)
             tb.addAction(ac)
-        a("📄",self._new_doc,"Ctrl+N"); a("📂",self._open_dlg,"Ctrl+O"); a("💾",self._save,"Ctrl+S")
+        # v4.0.3: every toolbar button now has a descriptive tooltip
+        a("📄", self._new_doc,                "Ctrl+N",  "New document")
+        a("📂", self._open_dlg,               "Ctrl+O",  "Open .edof file")
+        a("💾", self._save,                   "Ctrl+S",  "Save")
         tb.addSeparator()
-        a("↩",self._undo,"Ctrl+Z"); a("↪",self._redo,"Ctrl+Y"); tb.addSeparator()
-        a("T",self._ins_textbox); a("🖼",self._ins_image)
-        a("⬜",lambda:self._ins_shape("rect")); a("⬭",lambda:self._ins_shape("ellipse"))
-        a("╱",self._ins_line); a("⬛",self._ins_qr); tb.addSeparator()
-        a("🔍+",lambda:self._zoom_step(1.25),"Ctrl+="); a("🔍-",lambda:self._zoom_step(1/1.25),"Ctrl+-")
-        a("Fit",self._zoom_fit,"Ctrl+0"); tb.addSeparator()
-        a("⧉",self._dup_obj,"Ctrl+D"); a("🗑",self._del_obj,"Delete"); tb.addSeparator()
-        a("PNG",self._export_png); a("PDF",self._export_pdf); a("📊 CSV",self._batch_csv)
+        a("↩",  self._undo,                   "Ctrl+Z",  "Undo")
+        a("↪",  self._redo,                   "Ctrl+Y",  "Redo")
+        tb.addSeparator()
+        a("T",  self._ins_textbox,             tip="Insert text box")
+        a("🖼", self._ins_image,                tip="Insert image")
+        a("⬜", lambda:self._ins_shape("rect"),    tip="Insert rectangle")
+        a("⬭", lambda:self._ins_shape("ellipse"), tip="Insert ellipse")
+        a("╱",  self._ins_line,                tip="Insert line")
+        a("⬛", self._ins_qr,                   tip="Insert QR code")
+        # v4.0.3: new insert tools
+        a("⊞",  self._ins_table,               tip="Insert table…")
+        a("✎",  self._ins_path,                tip="Draw vector path (click points; double-click or Enter to finish; Esc to cancel)")
+        tb.addSeparator()
+        a("🔍+",lambda:self._zoom_step(1.25),  "Ctrl+=", "Zoom in")
+        a("🔍-",lambda:self._zoom_step(1/1.25),"Ctrl+-", "Zoom out")
+        a("Fit",self._zoom_fit,                "Ctrl+0", "Fit page to window")
+        tb.addSeparator()
+        a("⧉",  self._dup_obj,                 "Ctrl+D", "Duplicate selected object")
+        a("🗑", self._del_obj,                 "Delete", "Delete selected object")
+        tb.addSeparator()
+        a("PNG",self._export_png,              tip="Export current page as PNG")
+        a("PDF",self._export_pdf,              tip="Export document as PDF…")
+        a("📊 CSV",self._batch_csv,            tip="Batch generate from CSV")
 
     def _build_menu(self):
         mb=self.menuBar()
@@ -1573,6 +2077,10 @@ class EdofEditor(QMainWindow):
         imp_act=QAction("Import PDF…",self)
         imp_act.triggered.connect(self._import_pdf)
         fm.addAction(imp_act)
+        # v4.0.3: Import RTF
+        imp_rtf=QAction("Import RTF…",self)
+        imp_rtf.triggered.connect(self._import_rtf)
+        fm.addAction(imp_rtf)
         a(fm,sep=True,tk="",slot=None)
         a(fm,'save',self._save,"Ctrl+S"); a(fm,'save_as',self._save_as,"Ctrl+Shift+S")
         # v4.0.1: Save as v3 (downgrade)
@@ -1586,6 +2094,10 @@ class EdofEditor(QMainWindow):
         svg_act=QAction("Export SVG…",self)
         svg_act.triggered.connect(self._export_svg)
         fm.addAction(svg_act)
+        # v4.0.3: Export RTF
+        rtf_act=QAction("Export RTF…",self)
+        rtf_act.triggered.connect(self._export_rtf)
+        fm.addAction(rtf_act)
         a(fm,'batch_csv',self._batch_csv); a(fm,sep=True,tk="",slot=None)
         a(fm,'print',self._print); a(fm,sep=True,tk="",slot=None); a(fm,'quit',self.close,"Ctrl+Q")
         em=m('menu_edit')
@@ -1635,6 +2147,32 @@ class EdofEditor(QMainWindow):
         align_act.triggered.connect(lambda chk: setattr(self._canvas,'_show_align_guides',chk))
         vm.addAction(align_act)
         self._act_align_guides = align_act   # v4.0.2
+
+        # v4.0.3: margin snap toggle + setup
+        margin_act=QAction("Use Page Margins (snap)", self)
+        margin_act.setCheckable(True)
+        margin_act.triggered.connect(self._toggle_margins)
+        vm.addAction(margin_act)
+        self._act_margins = margin_act
+        margin_set_act=QAction("Set Margins…", self)
+        margin_set_act.triggered.connect(self._set_margins_dlg)
+        vm.addAction(margin_set_act)
+
+        vm.addSeparator()
+        # v4.0.3: reset panels
+        reset_panels_act=QAction("Reset Panel Layout", self)
+        reset_panels_act.triggered.connect(self._reset_panels)
+        vm.addAction(reset_panels_act)
+
+        # v4.0.3: Help menu
+        hm=mb.addMenu("&Help")
+        sk_act=QAction("Keyboard Shortcuts…", self)
+        sk_act.setShortcut(QKeySequence("F1"))
+        sk_act.triggered.connect(self._show_shortcuts)
+        hm.addAction(sk_act)
+        about_act=QAction("About edof…", self)
+        about_act.triggered.connect(self._show_about)
+        hm.addAction(about_act)
 
     # ── Slots ─────────────────────────────────────────────────────────────────
     def _on_sel(self,obj):
@@ -1904,6 +2442,53 @@ class EdofEditor(QMainWindow):
         qr=pg.add_qrcode(data,30,30,50); self._canvas.set_sel_id(qr.id)
         self._canvas.schedule_render(); self._push("Add QR")
 
+    # v4.0.3: Insert Table
+    def _ins_table(self):
+        if not self._check_perm("design", "Insert table"): return
+        pg=self._cp()
+        if not pg: return
+        dlg=QDialog(self); dlg.setWindowTitle("Insert Table"); dlg.setStyleSheet(QSS)
+        v=QVBoxLayout(dlg)
+        form=QFormLayout()
+        sp_r=QSpinBox(); sp_r.setRange(1, 100); sp_r.setValue(3)
+        sp_c=QSpinBox(); sp_c.setRange(1, 20); sp_c.setValue(3)
+        sp_w=QDoubleSpinBox(); sp_w.setRange(20, 500); sp_w.setValue(100); sp_w.setSuffix(" mm")
+        sp_h=QDoubleSpinBox(); sp_h.setRange(10, 500); sp_h.setValue(40);  sp_h.setSuffix(" mm")
+        cb_hdr=QCheckBox("First row is header (bold + accent)"); cb_hdr.setChecked(True)
+        cb_zb=QCheckBox("Alternating row colors"); cb_zb.setChecked(False)
+        form.addRow("Rows:", sp_r); form.addRow("Columns:", sp_c)
+        form.addRow("Width:", sp_w); form.addRow("Height:", sp_h)
+        form.addRow(cb_hdr); form.addRow(cb_zb)
+        v.addLayout(form)
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); v.addWidget(bb)
+        if dlg.exec()!=QDialog.DialogCode.Accepted: return
+
+        rows = sp_r.value(); cols = sp_c.value()
+        from edof.format.objects import Table, TableCell
+        # Use make_table helper for nicer defaults
+        from edof import make_table
+        sample = [[f"Col {c+1}" if cb_hdr.isChecked() and r==0 else "" for c in range(cols)]
+                   for r in range(rows)]
+        t_obj = make_table(sample, header=cb_hdr.isChecked(), alternating=cb_zb.isChecked())
+        t_obj.transform.x = 20; t_obj.transform.y = 20
+        t_obj.transform.width = sp_w.value(); t_obj.transform.height = sp_h.value()
+        pg.add_object(t_obj)
+        self._canvas.set_sel_id(t_obj.id); self._canvas.schedule_render()
+        self._push("Add Table")
+
+    # v4.0.3: Path tool — collects clicks until double-click / Enter
+    def _ins_path(self):
+        if not self._check_perm("design", "Draw path"): return
+        pg=self._cp()
+        if not pg: return
+        # Switch canvas into path-drawing mode; mouse clicks accumulate points
+        self._canvas._path_drawing = True
+        self._canvas._path_points = []
+        self._status.showMessage(
+            "Path tool: click to add points, double-click or Enter to finish, Esc to cancel.")
+        self._canvas.setCursor(Qt.CursorShape.CrossCursor)
+
     def _dup_obj(self):
         if not self._check_perm("design", "Duplicate object"): return
         pg=self._cp(); sid=self._canvas.get_sel_id()
@@ -1950,6 +2535,185 @@ class EdofEditor(QMainWindow):
         self._canvas.zoom_fit(); self._lbl_zoom.setText(f"{int(self._canvas.zoom*100)}%")
 
     # ── Export / Print ────────────────────────────────────────────────────────
+    # ── v4.0.3: View menu helpers ─────────────────────────────────────────────
+    def _toggle_margins(self, on):
+        self._canvas._margins_enabled = bool(on)
+        # If enabling and doc has saved margins, use them; otherwise default
+        if self.doc and self.doc.margins:
+            self._canvas._margins = tuple(self.doc.margins)
+        self._canvas.schedule_render()
+
+    def _set_margins_dlg(self):
+        if not self.doc:
+            QMessageBox.information(self, "No document", "Open a document first.")
+            return
+        cur = self.doc.margins or (15.0, 15.0, 15.0, 15.0)
+        dlg=QDialog(self); dlg.setWindowTitle("Page Margins"); dlg.setStyleSheet(QSS)
+        v=QVBoxLayout(dlg)
+        info=QLabel("Margins are used as snap targets in the editor. "
+                    "They are not enforced at export.")
+        info.setWordWrap(True); v.addWidget(info)
+        form=QFormLayout()
+        sps={}
+        for label, val in (("Top:",cur[0]),("Right:",cur[1]),("Bottom:",cur[2]),("Left:",cur[3])):
+            sp=QDoubleSpinBox(); sp.setRange(0,200); sp.setSuffix(" mm"); sp.setValue(val)
+            form.addRow(label, sp)
+            sps[label]=sp
+        v.addLayout(form)
+        cb_enable=QCheckBox("Enable margin snapping")
+        cb_enable.setChecked(self._canvas._margins_enabled)
+        v.addWidget(cb_enable)
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); v.addWidget(bb)
+        if dlg.exec()!=QDialog.DialogCode.Accepted: return
+        margins=(sps["Top:"].value(), sps["Right:"].value(),
+                  sps["Bottom:"].value(), sps["Left:"].value())
+        self.doc.margins = margins
+        self._canvas._margins = margins
+        self._canvas._margins_enabled = cb_enable.isChecked()
+        if hasattr(self, '_act_margins'):
+            self._act_margins.setChecked(cb_enable.isChecked())
+        self._modified=True; self._upd_title()
+        self._canvas.schedule_render()
+
+    def _reset_panels(self):
+        """Reset all dock widget sizes/positions to defaults."""
+        # Resize the main window first
+        self.resize(1440, 880)
+        # Try to restore default state — if we have a saved baseline, use it;
+        # otherwise just reset specific dock geometry
+        for dock_name in ("_left_dock", "_right_dock", "_pages_dock"):
+            d = getattr(self, dock_name, None)
+            if d is None: continue
+            d.setVisible(True)
+            d.setFloating(False)
+        # Re-apply default sizes by minimum-size hint
+        if hasattr(self, "_settings"):
+            self._settings.remove("geometry")
+            self._settings.remove("windowState")
+        QMessageBox.information(self, "Panels reset",
+            "Panel layout reset. Restart editor for full effect.")
+
+    def _show_shortcuts(self):
+        """v4.0.3: keyboard shortcuts reference dialog."""
+        dlg=QDialog(self); dlg.setWindowTitle("Keyboard Shortcuts"); dlg.setStyleSheet(QSS)
+        dlg.resize(560, 600)
+        v=QVBoxLayout(dlg)
+        from PyQt6.QtWidgets import QTextBrowser
+        tb=QTextBrowser()
+        tb.setOpenExternalLinks(True)
+        tb.setHtml("""
+        <h2>EDOF Editor — Keyboard Shortcuts</h2>
+
+        <h3>File</h3>
+        <table cellpadding="3">
+        <tr><td><b>Ctrl+N</b></td><td>New document</td></tr>
+        <tr><td><b>Ctrl+O</b></td><td>Open .edof file</td></tr>
+        <tr><td><b>Ctrl+S</b></td><td>Save</td></tr>
+        <tr><td><b>Ctrl+Shift+S</b></td><td>Save As…</td></tr>
+        <tr><td><b>Ctrl+P</b></td><td>Print…</td></tr>
+        <tr><td><b>Ctrl+Q</b></td><td>Quit</td></tr>
+        </table>
+
+        <h3>Edit</h3>
+        <table cellpadding="3">
+        <tr><td><b>Ctrl+Z</b></td><td>Undo</td></tr>
+        <tr><td><b>Ctrl+Y</b></td><td>Redo</td></tr>
+        <tr><td><b>Ctrl+D</b></td><td>Duplicate selection</td></tr>
+        <tr><td><b>Delete</b></td><td>Delete selection</td></tr>
+        <tr><td><b>Ctrl+F</b></td><td>Find &amp; Replace</td></tr>
+        </table>
+
+        <h3>View</h3>
+        <table cellpadding="3">
+        <tr><td><b>Ctrl+=</b></td><td>Zoom in</td></tr>
+        <tr><td><b>Ctrl+-</b></td><td>Zoom out</td></tr>
+        <tr><td><b>Ctrl+0</b></td><td>Fit page to window</td></tr>
+        <tr><td><b>Ctrl+G</b></td><td>Toggle snap to grid</td></tr>
+        </table>
+
+        <h3>Insert</h3>
+        <table cellpadding="3">
+        <tr><td><b>T</b></td><td>Text box</td></tr>
+        <tr><td><b>I</b></td><td>Image</td></tr>
+        <tr><td><b>R</b></td><td>Rectangle</td></tr>
+        <tr><td><b>E</b></td><td>Ellipse</td></tr>
+        <tr><td><b>L</b></td><td>Line</td></tr>
+        <tr><td><b>Q</b></td><td>QR code</td></tr>
+        </table>
+
+        <h3>Document</h3>
+        <table cellpadding="3">
+        <tr><td><b>Ctrl+Shift+L</b></td><td>Unlock for editing (encrypted docs)</td></tr>
+        </table>
+
+        <h3>Selection / dragging</h3>
+        <table cellpadding="3">
+        <tr><td><b>Click</b></td><td>Select object</td></tr>
+        <tr><td><b>Ctrl+click</b></td><td>Add/remove from multi-select</td></tr>
+        <tr><td><b>Drag empty area</b></td><td>Lasso multi-select</td></tr>
+        <tr><td><b>Drag object</b></td><td>Move (snaps to grid + alignment guides + margins)</td></tr>
+        <tr><td><b>Drag corner handle</b></td><td>Resize</td></tr>
+        <tr><td><b>Drag rotate handle</b></td><td>Rotate</td></tr>
+        <tr><td><b>Drag middle-mouse</b></td><td>Pan canvas</td></tr>
+        <tr><td><b>Mouse wheel</b></td><td>Zoom toward cursor</td></tr>
+        <tr><td><b>Double-click textbox</b></td><td>Edit text inline</td></tr>
+        <tr><td><b>Arrow keys</b></td><td>Nudge selection by 0.5 mm</td></tr>
+        </table>
+
+        <h3>Modifier keys (v4.0.3 revised)</h3>
+        <table cellpadding="3">
+        <tr><td><b>Shift</b> while resizing</td>
+            <td><b>For images:</b> toggle to non-uniform scale (default is uniform).<br>
+                <b>For shapes/text:</b> force uniform scale (preserve aspect ratio).</td></tr>
+        <tr><td><b>Shift</b> while rotating</td>
+            <td>Snap to 15° increments</td></tr>
+        <tr><td><b>Ctrl</b> while dragging</td>
+            <td>Bypass all snapping (grid, alignment guides, margins)</td></tr>
+        <tr><td><b>Alt</b> while dragging</td>
+            <td>Bypass snapping (legacy alias for Ctrl)</td></tr>
+        </table>
+
+        <h3>Object panel (left side)</h3>
+        <table cellpadding="3">
+        <tr><td><b>F2</b> on selected item</td><td>Rename object</td></tr>
+        <tr><td><b>Double-click item</b></td><td>Rename object</td></tr>
+        <tr><td><b>Right-click item</b></td><td>Layer / lock / hide / duplicate / delete menu</td></tr>
+        <tr><td><b>Drag item</b></td><td>Reorder layers</td></tr>
+        </table>
+
+        <h3>Path drawing tool (✎)</h3>
+        <table cellpadding="3">
+        <tr><td><b>Click</b></td><td>Add point</td></tr>
+        <tr><td><b>Double-click</b> or <b>Enter</b></td><td>Finish path</td></tr>
+        <tr><td><b>Esc</b></td><td>Cancel</td></tr>
+        </table>
+
+        <p>For more info see the
+        <a href="https://davidschobl.github.io/edof/">documentation</a>.</p>
+        """)
+        v.addWidget(tb)
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        bb.rejected.connect(dlg.reject); bb.accepted.connect(dlg.accept)
+        bb.button(QDialogButtonBox.StandardButton.Close).clicked.connect(dlg.accept)
+        v.addWidget(bb)
+        dlg.exec()
+
+    def _show_about(self):
+        QMessageBox.about(self, "About edof",
+            f"<h3>edof Editor</h3>"
+            f"<p>Version: <b>{edof.__version__}</b><br>"
+            f"Format: edof {edof.FORMAT_VERSION_STR}</p>"
+            f"<p>A Python library for programmatic document creation, "
+            f"template filling, and high-quality export.</p>"
+            f"<p>Documentation: "
+            f"<a href='https://davidschobl.github.io/edof/'>"
+            f"davidschobl.github.io/edof</a><br>"
+            f"Source: "
+            f"<a href='https://github.com/DavidSchobl/edof'>"
+            f"github.com/DavidSchobl/edof</a></p>"
+            f"<p>License: MIT</p>")
+
     def _export_png(self):
         if not self.doc or not self.doc.pages: return
         p,_=QFileDialog.getSaveFileName(self,t('export_png'),"","PNG (*.png);;JPEG (*.jpg);;TIFF (*.tiff)")
@@ -1972,10 +2736,50 @@ class EdofEditor(QMainWindow):
 
     def _export_pdf(self):
         if not self.doc: return
-        p,_=QFileDialog.getSaveFileName(self,t('export_pdf'),"","PDF (*.pdf)")
+        # v4.0.3: dialog with vector/raster choice
+        dlg=QDialog(self); dlg.setWindowTitle("Export PDF"); dlg.setStyleSheet(QSS)
+        dlg.resize(420, 220)
+        v=QVBoxLayout(dlg)
+
+        info=QLabel(
+            "<b>Vector PDF</b> (default): pure-Python writer. Smaller files, "
+            "selectable text. Limited to Standard 14 PDF fonts (Helvetica, "
+            "Times, Courier with bold/italic).<br><br>"
+            "<b>Raster PDF</b>: rendered as bitmap at given DPI. Larger files, "
+            "no text selection, but supports any TTF font. Requires reportlab."
+        )
+        info.setWordWrap(True)
+        v.addWidget(info)
+
+        from PyQt6.QtWidgets import QRadioButton, QButtonGroup
+        rb_vec=QRadioButton("Vector PDF (recommended)"); rb_vec.setChecked(True)
+        rb_ras=QRadioButton("Raster PDF (custom fonts, larger files)")
+        v.addWidget(rb_vec); v.addWidget(rb_ras)
+
+        dpi_row=QWidget(); hb=QHBoxLayout(dpi_row); hb.setContentsMargins(20,0,0,0)
+        sp_dpi=QSpinBox(); sp_dpi.setRange(72, 600); sp_dpi.setValue(300)
+        sp_dpi.setSuffix(" DPI"); sp_dpi.setEnabled(False)
+        rb_ras.toggled.connect(sp_dpi.setEnabled)
+        hb.addWidget(QLabel("Resolution:")); hb.addWidget(sp_dpi); hb.addStretch()
+        v.addWidget(dpi_row)
+
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); v.addWidget(bb)
+        if dlg.exec()!=QDialog.DialogCode.Accepted: return
+
+        p,_=QFileDialog.getSaveFileName(self, "Save PDF", "", "PDF (*.pdf)")
         if not p: return
-        try: self.doc.export_pdf(p)
-        except Exception as e: QMessageBox.critical(self,"PDF Error",f"pip install edof[pdf]\n\n{e}")
+        if not p.lower().endswith(".pdf"): p += ".pdf"
+        vector = rb_vec.isChecked()
+        try:
+            self.doc.export_pdf(p, vector=vector)
+            mode = "vector" if vector else "raster"
+            self._status.showMessage(f"Saved {mode} PDF: {os.path.basename(p)}")
+        except ImportError:
+            QMessageBox.critical(self,"PDF Error",
+                "Raster PDF requires reportlab.\npip install edof[pdf]")
+        except Exception as e:
+            QMessageBox.critical(self,"PDF Error", str(e))
 
     def _batch_csv(self):
         """Item 26: CSV import for batch fill → export per row."""
@@ -2669,6 +3473,39 @@ class EdofEditor(QMainWindow):
             QMessageBox.information(self, "Import successful", msg)
         except Exception as e:
             QMessageBox.warning(self, "Import error", f"Could not import PDF:\n{e}")
+
+    # v4.0.3: RTF import/export handlers
+    def _import_rtf(self):
+        if not self._confirm(): return
+        path,_=QFileDialog.getOpenFileName(self, "Import RTF",
+            "", "RTF files (*.rtf)")
+        if not path: return
+        try:
+            new_doc=edof.import_rtf(path)
+            self.doc=new_doc; self.filepath=None
+            self._canvas.set_document(new_doc, 0)
+            self._obj_panel.set_document(new_doc)
+            self.setWindowTitle(f"edof editor — Imported from {os.path.basename(path)}")
+            self._push("Import RTF")
+            QMessageBox.information(self, "Import successful",
+                f"Imported {sum(len(p.objects) for p in new_doc.pages)} text "
+                f"box(es) from RTF.\n\nNote: RTF import preserves paragraphs "
+                f"and inline formatting (bold/italic/underline/size/color). "
+                f"Tables, images, and lists are not supported.")
+        except Exception as e:
+            QMessageBox.warning(self, "Import error", f"Could not import RTF:\n{e}")
+
+    def _export_rtf(self):
+        if not self.doc: return
+        path,_=QFileDialog.getSaveFileName(self, "Export RTF",
+            "", "RTF files (*.rtf)")
+        if not path: return
+        if not path.lower().endswith(".rtf"): path+=".rtf"
+        try:
+            self.doc.export_rtf(path)
+            self._status.showMessage(f"RTF saved: {os.path.basename(path)}")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not export RTF:\n{e}")
 
     def _export_svg(self):
         """Export current page as SVG."""

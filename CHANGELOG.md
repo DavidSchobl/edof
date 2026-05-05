@@ -6,6 +6,225 @@ Versioning: SemVer (https://semver.org/)
 
 ================================================================================
 
+## [4.0.3] - 2026-05-04
+
+The "editor catches up with the API" release. Substantial editor improvements,
+PDF import bug fixes, RTF import/export, and a long list of polish.
+No format changes — files saved by 4.0.3 are wire-compatible with 4.0.2.
+
+================================================================================
+FIXED — PDF import: vector paths had wrong bounding box
+================================================================================
+
+Previously, vector paths (lines, curves, rectangles) imported from PDF were
+created with a transform spanning the entire page, while the path coordinates
+themselves were absolute. The renderer worked, but the editor couldn't select
+or move them — the bounding box covered the whole page.
+
+In 4.0.3:
+- `_extract_paths()` now computes the actual bbox of each path
+- Path coordinates are stored as local (relative to transform.x/y)
+- The renderer auto-detects local vs absolute coords for backward compatibility
+  with documents created before this fix
+
+Also added new flags to `import_pdf()`:
+- `extract_paths` (default True): convert PDF vector paths to Shape objects
+- `extract_images` (default True): extract embedded raster images
+
+These flags were promised in the 4.0.2 docs but were not actually wired up.
+
+================================================================================
+FIXED — Image scale X breaks position
+================================================================================
+
+When resizing an ImageBox by dragging an edge handle (only one axis), the
+opposite anchor was not held fixed, causing the image to "jump" sideways. The
+resize now correctly keeps the opposite corner / edge as the anchor regardless
+of which handle you drag.
+
+================================================================================
+FIXED — Subpixel text rendering disappears at low zoom
+================================================================================
+
+When zoomed below 100%, thin text strokes on the canvas would render at
+sub-pixel widths and disappear into anti-aliasing — the text became unreadable.
+
+In 4.0.3, the editor canvas renders at higher DPI when zoomed out (up to 2×)
+and downscales with LANCZOS, so thin strokes survive. This affects only the
+canvas preview; export quality is unchanged.
+
+================================================================================
+CHANGED — Modifier semantics for resize/rotation/move
+================================================================================
+
+The editor's modifier behaviors were inconsistent and didn't match user
+expectations. Revised in 4.0.3:
+
+- **Ctrl** while dragging — bypass ALL snapping (grid, alignment guides, margins).
+  This is the primary "give me precise control" modifier.
+- **Alt** while dragging — bypass snapping (legacy alias for Ctrl, kept for
+  compatibility).
+- **Shift on resize** — toggles uniform/non-uniform scale:
+  - For ImageBox: default is uniform (preserve aspect ratio); Shift toggles
+    to non-uniform.
+  - For other objects: default is non-uniform; Shift forces uniform.
+- **Shift on rotation** — snap to 15° increments.
+
+This means typical workflows do the right thing automatically:
+- Drag image corner → preserves aspect ratio
+- Drag image corner with Shift → free distortion if you really want it
+- Drag rectangle corner → free resize
+- Drag rectangle corner with Shift → preserve aspect ratio
+
+================================================================================
+ADDED — Page margins (per-document) with snap support
+================================================================================
+
+Documents now have an optional `doc.margins` field — a 4-tuple of
+(top, right, bottom, left) in mm. Margins are saved/loaded with the document.
+
+In the editor:
+- View menu → "Use Page Margins (snap)" toggle
+- View menu → "Set Margins…" dialog
+- When enabled, dragged objects snap their edges to the margin lines
+
+Margins are editor-only — they're not enforced at render or export.
+
+================================================================================
+ADDED — Editor: Insert Table dialog
+================================================================================
+
+Tables existed in the API since 4.0.0 but had no UI to create them. Insert
+Table dialog now offers:
+- Rows × columns
+- Width × height in mm
+- Optional header (first row in bold + accent color)
+- Optional alternating row colors
+
+================================================================================
+ADDED — Editor: Path drawing tool
+================================================================================
+
+A new toolbar button (✎) puts the canvas in path-drawing mode:
+- Click adds a point
+- Double-click or Enter finishes the path
+- Esc cancels
+- Snap-to-grid is honored if enabled
+
+The result is a `Shape(shape_type="path")` with proper local coordinates and
+correct bounding box.
+
+================================================================================
+ADDED — Editor: Object panel rename, drag-and-drop, context menu
+================================================================================
+
+The left-side object list panel was bare-bones. Now:
+
+- **F2** or **double-click** an item to rename the object inline
+- **Drag** items up/down to reorder layers (front-to-back ordering)
+- **Right-click** an item for: Rename, Bring to Front, Bring Forward,
+  Send Backward, Send to Back, Show/Hide, Lock/Unlock, Duplicate, Delete
+
+Also fixed a dark-theme rendering bug where alternating row colors were too
+bright; the panel now uses a quieter selected-state highlight.
+
+================================================================================
+ADDED — Editor: Properties panel — Advanced section
+================================================================================
+
+A new "Advanced" group on the right-side properties panel exposes API-level
+features that previously had no UI:
+
+- **Show if** (`visible_if` expression) — conditional visibility
+- **Lock level** dropdown (none / fill / edit / design / admin) — for
+  permission-aware editing of encrypted templates
+- **Lock text** checkbox — prevents changes to text content even when the
+  object itself is editable
+- **Blend mode** dropdown (normal / multiply / screen / darken / lighten / overlay)
+- **Shape type** changer — convert rect ↔ ellipse ↔ polygon ↔ path on the fly
+- **Drop shadow** — toggle + offset X/Y + blur
+
+================================================================================
+ADDED — Editor: Help → Keyboard Shortcuts dialog
+================================================================================
+
+F1 now opens a comprehensive reference dialog covering File, Edit, View,
+Insert, Document, Selection, Modifier keys (with the new v4.0.3 semantics),
+Object panel actions, and the Path tool.
+
+Help → About also added.
+
+================================================================================
+ADDED — Editor: PDF Export dialog with Vector / Raster choice
+================================================================================
+
+The PDF export menu item now opens a dialog explaining the trade-off:
+- **Vector PDF** (default): pure-Python writer, smaller files, selectable text,
+  limited to Standard 14 PDF fonts
+- **Raster PDF**: rendered as bitmap, larger files, no text selection,
+  supports any TTF font, requires reportlab
+
+Plus a DPI control for raster mode.
+
+================================================================================
+ADDED — Editor: Resizable docks + persistence
+================================================================================
+
+The left and right panels were previously fixed-width. Now:
+- Both docks are user-resizable
+- Both are dockable (movable, can detach to floating)
+- Geometry, snap-to-grid state, alignment guides state, margin state, and
+  full window/dock layout persist across sessions (via `QSettings`)
+- View menu → "Reset Panel Layout" to restore defaults
+
+================================================================================
+ADDED — Editor: Toolbar tooltips
+================================================================================
+
+Every toolbar button now has a descriptive tooltip + status-bar message +
+keyboard shortcut hint. Previously hovering "💾" gave no explanation; now it
+shows "Save (Ctrl+S)".
+
+================================================================================
+ADDED — RTF import / export
+================================================================================
+
+A new utility module (`edof.utils.rtf`) provides best-effort interop with
+Rich Text Format documents:
+
+- `edof.import_rtf(path)` reads an RTF file into an EDOF Document. Each
+  non-empty paragraph becomes a TextBox; runs preserve bold/italic/underline/
+  size/color. Tables, images, lists, fields are not supported.
+- `doc.export_rtf(path)` writes an EDOF document as flat RTF — paragraphs in
+  vertical order, runs with formatting. Other object types (shapes, images,
+  tables) are not exported.
+
+In the editor:
+- File → Import RTF…
+- File → Export RTF…
+
+================================================================================
+DOCUMENTATION
+================================================================================
+
+- Documentation site at https://davidschobl.github.io/edof/ updated for 4.0.3
+- Editor reference page (`docs/reference/08-editor.md`) updated with
+  v4.0.3 modifier semantics, margins, panel persistence
+- New "Path tool" section in editor docs
+
+================================================================================
+TESTS
+================================================================================
+
+138/138 tests passing (vs 112 in 4.0.2):
+- 36 v3.1 (legacy)
+- 36 v4.0
+- 21 v4.0.1
+- 19 v4.0.2
+- 26 v4.0.3 (new)
+
+================================================================================
+
 ## [4.0.2] - 2026-05-04
 
 Polish, bug fixes, and CLI completeness release. No format changes — files saved by 4.0.2 are bit-identical to 4.0.1 when no 4.0.2-only behaviors are exercised.

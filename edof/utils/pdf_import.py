@@ -24,13 +24,17 @@ def import_pdf(path: str,
                 detect_tables: bool = False,
                 merge_paragraphs: bool = True,
                 heading_threshold: float = 1.4,
-                indent_threshold_mm: float = 3.0) -> "Document":
+                indent_threshold_mm: float = 3.0,
+                extract_paths: bool = True,
+                extract_images: bool = True) -> "Document":
     """Import a PDF as an editable EDOF Document.
 
     detect_tables       — enable heuristic table detection (requires pdfplumber)
     merge_paragraphs    — cluster spans into paragraphs based on font/size/spacing
     heading_threshold   — font_size > median × this ratio → heading TextBox
     indent_threshold_mm — first-line offset above this triggers paragraph indent
+    extract_paths       — convert PDF vector paths to Shape objects (v4.0.3)
+    extract_images      — extract embedded raster images as ImageBox objects (v4.0.3)
     """
     try:
         import fitz   # pymupdf
@@ -86,12 +90,14 @@ def import_pdf(path: str,
             if tb: page.add_object(tb)
 
         # 5. Extract images
-        for img_info in _extract_images(pdf_page, doc):
-            page.add_object(img_info)
+        if extract_images:
+            for img_info in _extract_images(pdf_page, doc):
+                page.add_object(img_info)
 
         # 6. Extract vector paths (basic)
-        for path_obj in _extract_paths(pdf_page, h_mm):
-            page.add_object(path_obj)
+        if extract_paths:
+            for path_obj in _extract_paths(pdf_page, h_mm):
+                page.add_object(path_obj)
 
         # 7. Detect tables (optional)
         if detect_tables:
@@ -424,7 +430,13 @@ def _extract_images(pdf_page, doc):
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _extract_paths(pdf_page, page_h_mm):
-    """Extract vector paths (lines, curves, fills) as Shape objects."""
+    """Extract vector paths (lines, curves, fills) as Shape objects.
+
+    v4.0.3 fix: previously paths used transform spanning the whole page with
+    path_data in absolute coordinates. The renderer worked but the editor
+    couldn't select / move them (bbox was the whole page). Now we compute
+    the actual path bbox and store coordinates relative to it.
+    """
     from edof.format.objects import Shape, SHAPE_PATH
     out = []
     try:
@@ -433,36 +445,68 @@ def _extract_paths(pdf_page, page_h_mm):
         return out
 
     for d in drawings:
-        path_data = []
+        # Collect absolute-coord path
+        abs_path = []
         for item in d.get("items", []):
             op = item[0]
-            if op == "l":   # line: (l, p1, p2) in pymupdf
+            if op == "l":
                 p1, p2 = item[1], item[2]
-                if not path_data:
-                    path_data.append(["M", p1.x / 72 * 25.4, p1.y / 72 * 25.4])
-                path_data.append(["L", p2.x / 72 * 25.4, p2.y / 72 * 25.4])
-            elif op == "c":   # cubic Bezier
+                if not abs_path:
+                    abs_path.append(["M", p1.x / 72 * 25.4, p1.y / 72 * 25.4])
+                abs_path.append(["L", p2.x / 72 * 25.4, p2.y / 72 * 25.4])
+            elif op == "c":
                 p1, p2, p3, p4 = item[1], item[2], item[3], item[4]
-                if not path_data:
-                    path_data.append(["M", p1.x / 72 * 25.4, p1.y / 72 * 25.4])
-                path_data.append(["C",
+                if not abs_path:
+                    abs_path.append(["M", p1.x / 72 * 25.4, p1.y / 72 * 25.4])
+                abs_path.append(["C",
                                   p2.x / 72 * 25.4, p2.y / 72 * 25.4,
                                   p3.x / 72 * 25.4, p3.y / 72 * 25.4,
                                   p4.x / 72 * 25.4, p4.y / 72 * 25.4])
-            elif op == "re":   # rectangle
+            elif op == "re":
                 rect = item[1]
                 x0 = rect.x0 / 72 * 25.4; y0 = rect.y0 / 72 * 25.4
                 x1 = rect.x1 / 72 * 25.4; y1 = rect.y1 / 72 * 25.4
-                path_data.extend([["M", x0, y0], ["L", x1, y0],
-                                   ["L", x1, y1], ["L", x0, y1], ["Z"]])
+                abs_path.extend([["M", x0, y0], ["L", x1, y0],
+                                 ["L", x1, y1], ["L", x0, y1], ["Z"]])
 
-        if not path_data: continue
+        if not abs_path: continue
+
+        # v4.0.3: compute bbox from path
+        xs, ys = [], []
+        for cmd in abs_path:
+            op = cmd[0]
+            if op in ("M", "L"):
+                xs.append(cmd[1]); ys.append(cmd[2])
+            elif op == "C":
+                xs.extend([cmd[1], cmd[3], cmd[5]])
+                ys.extend([cmd[2], cmd[4], cmd[6]])
+        if not xs:
+            continue
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        w = max(0.5, max_x - min_x)
+        h = max(0.5, max_y - min_y)
+
+        # Translate to local
+        path_data = []
+        for cmd in abs_path:
+            op = cmd[0]
+            if op in ("M", "L"):
+                path_data.append([op, cmd[1] - min_x, cmd[2] - min_y])
+            elif op == "C":
+                path_data.append([op,
+                                  cmd[1] - min_x, cmd[2] - min_y,
+                                  cmd[3] - min_x, cmd[4] - min_y,
+                                  cmd[5] - min_x, cmd[6] - min_y])
+            else:
+                path_data.append(cmd)
 
         sh = Shape(shape_type=SHAPE_PATH)
         sh.path_data = path_data
-        sh.transform.x = 0; sh.transform.y = 0
-        sh.transform.width = pdf_page.rect.width / 72 * 25.4
-        sh.transform.height = pdf_page.rect.height / 72 * 25.4
+        sh.transform.x = min_x
+        sh.transform.y = min_y
+        sh.transform.width = w
+        sh.transform.height = h
 
         if d.get("fill"):
             c = d["fill"]

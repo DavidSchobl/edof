@@ -57,4 +57,4 @@ Complete API reference, organized by topic:
 
 ## Version
 
-This documentation is for **edof 4.0.2**.
+This documentation is for **edof 4.0.3**.
