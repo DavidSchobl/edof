@@ -8,6 +8,7 @@ on:
     branches: [main]
 
 jobs:
+  # ── Tests ───────────────────────────────────────────────────────────
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -21,10 +22,12 @@ jobs:
       - run: pip install -e ".[dev,qr]"
       - run: pytest --tb=short -q
 
+  # ── Publish to PyPI (only on v* tag) ─────────────────────────────────
   publish:
     needs: test
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    environment: pypi
     permissions:
       id-token: write
     steps:
