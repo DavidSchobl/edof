@@ -10534,13 +10534,14 @@ class EdofEditor(QMainWindow):
         self._canvas.schedule_render(100)
 
     def _open_donate(self):
-        """v4.1.0: Open the GitHub Sponsors page in the user's browser."""
+        """v4.1.0: Open the donate page (Ko-fi) in the user's browser."""
         try:
             import webbrowser
-            webbrowser.open("https://github.com/sponsors/DavidSchobl")
+            webbrowser.open("https://ko-fi.com/davidschobl")
         except Exception as e:
             QMessageBox.information(self, "Support",
                 f"To support the developer, visit:\n"
+                f"https://ko-fi.com/davidschobl\n"
                 f"https://github.com/sponsors/DavidSchobl\n\n({e})")
 
     def _show_about(self):
@@ -10580,8 +10581,9 @@ class EdofEditor(QMainWindow):
             f"<a href='https://pypi.org/project/edof/'>pypi.org/project/edof</a></p>"
             f"<h3>Support the developer</h3>"
             f"<p>If edof saves you time and you'd like to support its development, "
-            f"<a href='https://github.com/sponsors/DavidSchobl'>"
-            f"GitHub Sponsors</a> lets you donate any amount. "
+            f"you can donate any amount via "
+            f"<a href='https://ko-fi.com/davidschobl'>Ko-fi</a> or "
+            f"<a href='https://github.com/sponsors/DavidSchobl'>GitHub Sponsors</a>. "
             f"Every contribution helps keep edof maintained and free.</p>"
             f"<p>License: MIT &nbsp;|&nbsp; © 2025 DavidSchobl</p>")
 

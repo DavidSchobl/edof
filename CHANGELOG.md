@@ -6,6 +6,28 @@ Versioning: SemVer (https://semver.org/)
 
 ================================================================================
 
+## [4.2.1] - 2026-06-04
+
+Follow-up release: 4.2.0 was published before these were caught, and PyPI
+versions are immutable, so they ship here.
+
+### Fixed
+- `edof._apps.viewer` now imports without PyQt6 installed (it falls back to a
+  harmless base class and `main()` prints an install hint), so the CI test
+  suite passes on the lean `[dev,qr]` install instead of erroring on import.
+
+### Added
+- Ko-fi funding links (`https://ko-fi.com/davidschobl`): `.github/FUNDING.yml`,
+  the `Funding` project URL, the README, and the in-app "Support the
+  developer" action and About dialogs (alongside GitHub Sponsors).
+
+### Packaging
+- `deploy-edof.bat` / `deploy-edof.sh` default the deploy clone to a directory
+  next to the script (the unzipped package) instead of a hard-coded developer
+  path.
+
+================================================================================
+
 ## [4.2.0] - 2026-06-04
 
 First public release since 4.1.2. The 4.1.3–4.1.24 development was an extended

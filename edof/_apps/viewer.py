@@ -513,6 +513,9 @@ class EdofViewer(QMainWindow):
             f"<a href='https://davidschobl.github.io/edof/'>davidschobl.github.io/edof</a><br>"
             f"<b>Source:</b> "
             f"<a href='https://github.com/DavidSchobl/edof'>github.com/DavidSchobl/edof</a></p>"
+            f"<p><b>Support development:</b> "
+            f"<a href='https://ko-fi.com/davidschobl'>Ko-fi</a> &nbsp;|&nbsp; "
+            f"<a href='https://github.com/sponsors/DavidSchobl'>GitHub Sponsors</a></p>"
             f"<p>License: MIT &nbsp;|&nbsp; © 2025 DavidSchobl</p>"
         )
 
@@ -543,7 +546,7 @@ class EdofViewer(QMainWindow):
     def _on_donate(self):
         try:
             import webbrowser
-            webbrowser.open("https://github.com/sponsors/DavidSchobl")
+            webbrowser.open("https://ko-fi.com/davidschobl")
         except Exception:
             pass
 

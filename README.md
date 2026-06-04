@@ -6,9 +6,10 @@
 [![Build status](https://github.com/DavidSchobl/edof/actions/workflows/publish.yml/badge.svg)](https://github.com/DavidSchobl/edof/actions/workflows/publish.yml)
 [![Downloads](https://static.pepy.tech/badge/edof)](https://pepy.tech/project/edof)
 [![Sponsor](https://img.shields.io/badge/sponsor-%E2%9D%A4-ff69b4)](https://github.com/sponsors/DavidSchobl)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-support-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/davidschobl)
 
 📚 **Documentation**: <https://davidschobl.github.io/edof/> &nbsp;|&nbsp;
-💖 **Support development**: <https://github.com/sponsors/DavidSchobl>
+💖 **Support development**: <https://ko-fi.com/davidschobl> &nbsp;|&nbsp; <https://github.com/sponsors/DavidSchobl>
 
 A Python library and visual editor for programmatic document creation, template filling, and high-quality export. Documents are described in code or in a small ZIP-based file format, then rendered to PNG, JPEG, TIFF, BMP, PDF, RTF, or SVG. A PyQt6 desktop editor is included for visual editing with Photoshop-style layer effects, table cell editor, multi-blend compositing, and a path tool.
 
