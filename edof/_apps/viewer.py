@@ -33,6 +33,10 @@ try:
     _HAS_QT = True
 except ImportError:
     _HAS_QT = False
+    # Allow the module to import without PyQt6 so non-GUI tooling (and the
+    # test suite) can load it. The class below then subclasses a harmless
+    # stand-in; main() refuses to run and prints an install hint instead.
+    QMainWindow = object
 
 import edof
 
