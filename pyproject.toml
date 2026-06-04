@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "edof"
-version         = "4.0.3"
+version         = "4.2.0"
 description     = "Easy Document Format – programmatic document creation, editing and export with vector PDF, rich text, tables and PDF import"
 readme          = "README.md"
 license         = { file = "LICENSE" }
@@ -38,11 +38,16 @@ dependencies = [
 pdf    = ["pymupdf>=1.23", "pdfplumber>=0.10", "reportlab>=4.0"]
 qr     = ["qrcode[pil]>=7.4"]
 pyqt6  = ["PyQt6>=6.6"]
+# v4.1.1: viewer (read-only .edof viewer, lightweight standalone)
+viewer = ["PyQt6>=6.6"]
 # v4.0.1: AES-256 encryption, multi-level passwords, recovery keys
 crypto = ["cryptography>=42.0"]
+# v4.1.24.0: Word (.docx) import/export
+docx   = ["python-docx>=1.1"]
 all    = [
     "pymupdf>=1.23", "pdfplumber>=0.10", "reportlab>=4.0",
     "qrcode[pil]>=7.4", "PyQt6>=6.6", "cryptography>=42.0",
+    "python-docx>=1.1",
 ]
 dev    = ["pytest>=7.0", "pytest-cov", "black", "ruff", "mypy", "build", "twine"]
 
@@ -52,6 +57,7 @@ Documentation = "https://davidschobl.github.io/edof/"
 Repository    = "https://github.com/DavidSchobl/edof"
 "Bug Tracker" = "https://github.com/DavidSchobl/edof/issues"
 Changelog     = "https://github.com/DavidSchobl/edof/blob/main/CHANGELOG.md"
+Funding       = "https://github.com/sponsors/DavidSchobl"
 
 [tool.setuptools.packages.find]
 where   = ["."]
@@ -82,4 +88,5 @@ source = ["edof"]
 
 [project.scripts]
 edof-editor = "edof._apps.editor:main"
+edof-viewer = "edof._apps.viewer:main"
 edof-cli    = "edof._apps.cli:main"

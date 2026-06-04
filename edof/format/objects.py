@@ -19,7 +19,7 @@ from __future__ import annotations
 import copy
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict
 
 from edof.engine.transform import Transform
 from edof.format.styles import (
@@ -47,6 +47,12 @@ class EdofObject:
     tags:      List[str]         = field(default_factory=list)
     shadow:    ShadowStyle       = field(default_factory=ShadowStyle)
     opacity:   float             = 1.0
+    # v4.1.1: Photoshop-style fill opacity — affects the object pixels but
+    # NOT layer effects (drop shadow, glow, stroke etc still render at full
+    # alpha). When equal to opacity, behaves like a single opacity field.
+    fill_opacity: float          = 1.0
+    # v4.1.0: Photoshop-style layer effects (list of LayerEffect)
+    effects:   List["LayerEffect"] = field(default_factory=list)
     # v4.0: conditional visibility — Python-style boolean expression
     # evaluated against doc.variables. Empty = always visible (uses .visible flag).
     visible_if: str              = ""
@@ -61,6 +67,9 @@ class EdofObject:
     # .runs cannot be modified until lock_text is set False, which requires
     # ADMIN permission. Useful for "this header must never change".
     lock_text:  bool             = False
+    # v4.1.0: position lock — object cannot be moved/resized via the editor
+    # but its content (text, colors, effects) is still editable.
+    lock_position: bool          = False
 
     # ── Transform shortcuts ────────────────────────────────────────────────────
 
@@ -105,11 +114,14 @@ class EdofObject:
             "tags":      self.tags,
             "shadow":    self.shadow.to_dict(),
             "opacity":   self.opacity,
+            "fill_opacity": self.fill_opacity,
             "editable":  getattr(self, "editable", True),
             "visible_if": self.visible_if,    # v4.0
             "blend_mode": self.blend_mode,    # v4.0
             "lock_level": self.lock_level,    # v4.0.1
             "lock_text":  self.lock_text,     # v4.0.1
+            "lock_position": self.lock_position,   # v4.1.0
+            "effects":   [e.to_dict() for e in self.effects],   # v4.1.0
         }
 
     def to_dict(self) -> dict:
@@ -124,7 +136,19 @@ class EdofObject:
             "qrcode":   QRCode,
             "group":    Group,
             "table":    Table,    # v4.0
+            "subdocument": SubDocumentBox,   # v4.1.0
+            "svgbox":   SvgBox,   # v4.1.13
         }
+        # v4.1.23: document-mode subclasses. Imported lazily to avoid a
+        # circular import at module load time.
+        try:
+            from edof.format.document_boxes import (
+                DocumentTextBox, DocumentHeaderBox, DocumentFooterBox)
+            _cls_map["document_textbox"] = DocumentTextBox
+            _cls_map["document_header"]  = DocumentHeaderBox
+            _cls_map["document_footer"]  = DocumentFooterBox
+        except Exception:
+            pass
         cls = _cls_map.get(d.get("type", ""), EdofObject)
         return cls._from_dict(d)
 
@@ -141,11 +165,16 @@ class EdofObject:
         obj.tags      = list(d.get("tags",    []))
         obj.shadow    = ShadowStyle.from_dict(d.get("shadow", {}))
         obj.opacity   = float(d.get("opacity", 1.0))
+        obj.fill_opacity = float(d.get("fill_opacity", obj.opacity))  # v4.1.1
         obj.editable  = bool(d.get("editable", True))
         obj.visible_if = d.get("visible_if", "") or ""    # v4.0
         obj.blend_mode = d.get("blend_mode", "normal")    # v4.0
         obj.lock_level = d.get("lock_level", "") or ""    # v4.0.1
         obj.lock_text  = bool(d.get("lock_text", False))  # v4.0.1
+        obj.lock_position = bool(d.get("lock_position", False))  # v4.1.0
+        # v4.1.0: layer effects
+        from edof.format.styles import LayerEffect
+        obj.effects = [LayerEffect.from_dict(e) for e in d.get("effects", [])]
         return obj
 
     def copy(self) -> "EdofObject":
@@ -202,6 +231,12 @@ class TextBox(EdofObject):
     border:        Optional[StrokeStyle] = None
     fill:          FillStyle          = field(
                        default_factory=lambda: FillStyle(color=None))
+    # v4.1.21: per-paragraph alignment overrides. Maps paragraph index
+    # (counted from 0, where paragraph break = "\n" inside runs) → one of
+    # 'left' | 'center' | 'right' | 'justify' | 'justify_full'. Paragraphs
+    # without an entry fall back to `style.alignment`. Keyed by stringified
+    # int for JSON friendliness.
+    paragraph_alignments: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "OBJECT_TYPE", "textbox")
@@ -253,7 +288,9 @@ class TextBox(EdofObject):
             "padding_top":   self.padding_top,
             "padding_bot":   self.padding_bot,
             "border":        self.border.to_dict() if self.border else None,
-            "fill":          self.fill.to_dict(),
+            "fill":           self.fill.to_dict(),
+            # v4.1.21: per-paragraph alignment overrides
+            "paragraph_alignments": dict(self.paragraph_alignments) if self.paragraph_alignments else {},
         })
         return d
 
@@ -272,6 +309,9 @@ class TextBox(EdofObject):
         bd = d.get("border")
         base.border        = StrokeStyle.from_dict(bd) if bd else None
         base.fill          = FillStyle.from_dict(d.get("fill", {"color": None}))
+        # v4.1.21: per-paragraph alignment overrides — normalise keys to str
+        pa = d.get("paragraph_alignments") or {}
+        base.paragraph_alignments = {str(k): str(v) for k, v in pa.items()}
         object.__setattr__(base, "OBJECT_TYPE", "textbox")
         return base
 
@@ -310,6 +350,44 @@ class ImageBox(EdofObject):
         return base
 
 
+# ── SvgBox (v4.1.13) ──────────────────────────────────────────────────────────
+
+@dataclass
+class SvgBox(EdofObject):
+    """v4.1.13: An SVG file embedded as a rastered image. Stores the original
+    SVG XML inline so loading/saving is lossless. In the editor, double-click
+    offers to convert to native EDOF path shapes for editing — at that point
+    the SvgBox is replaced by Shape objects and the SVG is discarded."""
+    svg_xml:       str                = ""
+    fit_mode:      str                = "contain"   # contain|stretch|none
+    border:        Optional[StrokeStyle] = None
+    corner_radius: float              = 0.0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "OBJECT_TYPE", "svgbox")
+
+    def to_dict(self) -> dict:
+        d = self._base_dict()
+        d.update({
+            "svg_xml":       self.svg_xml,
+            "fit_mode":      self.fit_mode,
+            "border":        self.border.to_dict() if self.border else None,
+            "corner_radius": self.corner_radius,
+        })
+        return d
+
+    @classmethod
+    def _from_dict(cls, d: dict) -> "SvgBox":
+        base: SvgBox = EdofObject._from_dict.__func__(cls, d)
+        base.svg_xml       = d.get("svg_xml", "")
+        base.fit_mode      = d.get("fit_mode", "contain")
+        bd = d.get("border")
+        base.border        = StrokeStyle.from_dict(bd) if bd else None
+        base.corner_radius = float(d.get("corner_radius", 0.0))
+        object.__setattr__(base, "OBJECT_TYPE", "svgbox")
+        return base
+
+
 # ── Shape ─────────────────────────────────────────────────────────────────────
 
 SHAPE_RECT    = "rect"
@@ -331,6 +409,12 @@ class Shape(EdofObject):
     # v4.0: SVG-style path data when shape_type == SHAPE_PATH
     # Format: [["M", 10.0, 20.0], ["L", 30.0, 40.0], ["C", x1, y1, x2, y2, x, y], ["Z"]]
     path_data:     List[Any]   = field(default_factory=list)
+    # v4.1.10: per-anchor type. Parallel to path_data indices (same length).
+    # Valid values: "corner" | "smooth" | "asymmetric" | "auto".
+    # Affects drag behavior: corner = independent CPs, smooth = symmetric CPs,
+    # asymmetric = independent (both moveable but separately), auto = CPs
+    # recomputed from neighbors on each move.
+    path_point_types: List[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "OBJECT_TYPE", "shape")
@@ -344,6 +428,7 @@ class Shape(EdofObject):
             "corner_radius": self.corner_radius,
             "points":        self.points,
             "path_data":     self.path_data,
+            "path_point_types": self.path_point_types,
         })
         return d
 
@@ -356,6 +441,7 @@ class Shape(EdofObject):
         base.corner_radius = float(d.get("corner_radius", 0.0))
         base.points        = list(d.get("points", []))
         base.path_data     = list(d.get("path_data", []))
+        base.path_point_types = list(d.get("path_point_types", []))
         object.__setattr__(base, "OBJECT_TYPE", "shape")
         return base
 
@@ -369,6 +455,26 @@ class Shape(EdofObject):
         sh = cls(shape_type=SHAPE_PATH)
         sh.path_data = _parse_svg_path(d_attr)
         return sh
+
+    def to_svg_path_d(self) -> str:
+        """v4.1.13: Serialize self.path_data back to SVG 'd' attribute string.
+        Uses absolute coordinates only."""
+        if not self.path_data: return ""
+        parts = []
+        for cmd in self.path_data:
+            if not cmd: continue
+            op = cmd[0]
+            if op == "M":
+                parts.append(f"M{cmd[1]:.4f} {cmd[2]:.4f}")
+            elif op == "L":
+                parts.append(f"L{cmd[1]:.4f} {cmd[2]:.4f}")
+            elif op == "C":
+                parts.append(f"C{cmd[1]:.4f} {cmd[2]:.4f} {cmd[3]:.4f} {cmd[4]:.4f} {cmd[5]:.4f} {cmd[6]:.4f}")
+            elif op == "Q":
+                parts.append(f"Q{cmd[1]:.4f} {cmd[2]:.4f} {cmd[3]:.4f} {cmd[4]:.4f}")
+            elif op == "Z":
+                parts.append("Z")
+        return " ".join(parts)
 
 
 # ── SVG path parser ───────────────────────────────────────────────────────────
@@ -656,8 +762,31 @@ def make_table(rows: List[List[str]],
                header_bg=(83, 74, 183, 255),
                header_color=(255, 255, 255),
                alt_bg=(245, 245, 252, 255),
-               alternating: bool = True) -> Table:
-    """Quick helper to build a Table from list-of-lists."""
+               alternating: bool = True,
+               # v4.1.0: position/size convenience
+               x: Optional[float] = None,
+               y: Optional[float] = None,
+               width: Optional[float] = None,
+               col_widths: Optional[List[float]] = None,
+               row_heights: Optional[List[float]] = None,
+               row_height: float = 8.0,
+               header_height: Optional[float] = None) -> Table:
+    """Quick helper to build a Table from list-of-lists.
+
+    v4.1.0: accept x, y, width, col_widths, row_heights — Transform is set
+    accordingly and Table.transform.height is computed from row_heights so
+    callers can immediately read tbl.transform.y + tbl.transform.height for
+    the next vertical position.
+
+    Examples:
+        # Auto-distribute columns across width=120mm, default row height 8mm
+        tbl = edof.make_table(rows, header=True, x=20, y=20, width=120)
+
+        # Explicit column widths and row heights
+        tbl = edof.make_table(rows, x=20, y=20,
+                               col_widths=[60, 30, 30],
+                               row_heights=[10, 8, 8, 8])
+    """
     t = Table()
     n_cols = max(len(r) for r in rows) if rows else 0
     for ri, row in enumerate(rows):
@@ -672,4 +801,76 @@ def make_table(rows: List[List[str]],
                 cell.bg_color = alt_bg
             cells.append(cell)
         t.cells.append(cells)
+
+    # v4.1.0: position + sizing convenience
+    if col_widths is not None:
+        t.col_widths = list(col_widths)
+        total_w = sum(col_widths)
+    elif width is not None and n_cols > 0:
+        per_col = width / n_cols
+        t.col_widths = [per_col] * n_cols
+        total_w = width
+    else:
+        total_w = 0  # auto-distribute later
+
+    if row_heights is not None:
+        t.row_heights = list(row_heights)
+        total_h = sum(row_heights)
+    else:
+        n_rows = len(rows)
+        rh = []
+        for i in range(n_rows):
+            if i == 0 and header and header_height is not None:
+                rh.append(header_height)
+            else:
+                rh.append(row_height)
+        t.row_heights = rh
+        total_h = sum(rh)
+
+    if x is not None: t.transform.x = x
+    if y is not None: t.transform.y = y
+    if total_w > 0:   t.transform.width = total_w
+    if total_h > 0:   t.transform.height = total_h
     return t
+
+
+# ── v4.1.0: SubDocumentBox — embed another EDOF document inside this one ─────
+
+@dataclass
+class SubDocumentBox(EdofObject):
+    """A box that embeds another EDOF document (or a reference to one).
+
+    Two storage modes:
+    - resource_id: the embedded document is stored in doc.resources[resource_id] as bytes
+    - source_path: an external path to a .edof file (loaded at render time)
+
+    page_index: which page of the sub-document to embed
+    fit_mode: contain | cover | stretch | none
+    """
+    resource_id:  Optional[str] = None
+    source_path:  Optional[str] = None
+    page_index:   int           = 0
+    fit_mode:     str           = "contain"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "OBJECT_TYPE", "subdocument")
+
+    def to_dict(self) -> dict:
+        d = self._base_dict()
+        d.update({
+            "resource_id": self.resource_id,
+            "source_path": self.source_path,
+            "page_index":  self.page_index,
+            "fit_mode":    self.fit_mode,
+        })
+        return d
+
+    @classmethod
+    def _from_dict(cls, d: dict) -> "SubDocumentBox":
+        base: SubDocumentBox = EdofObject._from_dict.__func__(cls, d)
+        base.resource_id = d.get("resource_id")
+        base.source_path = d.get("source_path")
+        base.page_index  = int(d.get("page_index", 0))
+        base.fit_mode    = d.get("fit_mode", "contain")
+        object.__setattr__(base, "OBJECT_TYPE", "subdocument")
+        return base

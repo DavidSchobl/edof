@@ -37,19 +37,19 @@ def test_textrun_creation():
 
 
 def test_textrun_resolve_inherits():
-    style = TextStyle(font_size=12, font_family="Arial", bold=False)
+    style = TextStyle(font_size=4.233, font_family="Arial", bold=False)
     run   = TextRun(text="X", bold=True)   # only bold overridden
     rs = run.resolve(style)
     assert rs["bold"] is True
-    assert rs["font_size"] == 12          # inherited
+    assert rs["font_size"] == 4.233       # inherited (mm)
     assert rs["font_family"] == "Arial"   # inherited
 
 
 def test_textrun_resolve_with_scale():
-    style = TextStyle(font_size=10)
-    run   = TextRun(text="X", font_size=20)
+    style = TextStyle(font_size=3.528)
+    run   = TextRun(text="X", font_size=7.056)
     rs = run.resolve(style, scale=0.5)
-    assert rs["font_size"] == 10.0
+    assert rs["font_size"] == 3.528       # 7.056 mm × 0.5
 
 
 def test_textbox_runs_persisted_in_dict():

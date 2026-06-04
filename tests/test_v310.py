@@ -43,7 +43,7 @@ def test_padding_smaller_than_2mm_default(page):
     """Padding=0.5 allows text in a tiny 5mm-tall box (was invisible with 2mm default)."""
     _, pg = page
     tb = pg.add_textbox(10, 10, 60, 5, "X")
-    tb.style.font_size = 8
+    tb.style.font_size = 0.996
     tb.style.padding   = 0.5
     from edof.engine.renderer import render_page
     from edof.format.document import Document
@@ -221,9 +221,9 @@ def test_column_positions(page):
 def test_column_auto_textbox(page):
     _, pg = page
     col = pg.column(x=10, gap=2, width=80)
-    c1  = col.add_textbox_auto("Short text", font_size=12)
+    c1  = col.add_textbox_auto("Short text", font_size=4.233)
     c2  = col.add_textbox_auto("Longer text that might wrap over several lines " * 3,
-                                font_size=12, wrap=True)
+                                font_size=4.233, wrap=True)
     assert c1.transform.height > 0
     assert c2.transform.height > c1.transform.height, \
         "Longer text should produce taller auto box"
@@ -258,34 +258,34 @@ def test_column_next_y(page):
 
 def test_add_textbox_auto_basic(page):
     _, pg = page
-    tb = pg.add_textbox_auto(10, 10, 100, text="Hello World", font_size=14)
+    tb = pg.add_textbox_auto(10, 10, 100, text="Hello World", font_size=4.939)
     assert tb.transform.height > 0
     assert tb.transform.height < 30   # should be small for one line
 
 
 def test_add_textbox_auto_min_height(page):
     _, pg = page
-    tb = pg.add_textbox_auto(10, 10, 100, text="Hi", font_size=8, min_height=15)
+    tb = pg.add_textbox_auto(10, 10, 100, text="Hi", font_size=2.822, min_height=15)
     assert tb.transform.height >= 15
 
 
 def test_add_textbox_auto_multiline(page):
     _, pg = page
-    short = pg.add_textbox_auto(10, 10, 80, text="Short", font_size=12)
+    short = pg.add_textbox_auto(10, 10, 80, text="Short", font_size=4.233)
     long  = pg.add_textbox_auto(10, 50, 80,
                                  text="This is a much longer text that should wrap " * 5,
-                                 font_size=12, wrap=True)
+                                 font_size=4.233, wrap=True)
     assert long.transform.height > short.transform.height
 
 
 def test_add_textbox_auto_empty(page):
     _, pg = page
-    tb = pg.add_textbox_auto(10, 10, 80, text="", font_size=12, min_height=8)
+    tb = pg.add_textbox_auto(10, 10, 80, text="", font_size=4.233, min_height=8)
     assert tb.transform.height >= 8
 
 
 def test_measure_text_height():
-    s = TextStyle(font_size=12, wrap=True)
+    s = TextStyle(font_size=4.233, wrap=True)
     h1 = measure_text_height("Short", s, width_mm=100)
     h2 = measure_text_height("Much longer text " * 20, s, width_mm=50)
     assert h1 > 0
@@ -293,7 +293,7 @@ def test_measure_text_height():
 
 
 def test_measure_text_height_empty():
-    s = TextStyle(font_size=12)
+    s = TextStyle(font_size=4.233)
     h = measure_text_height("", s, width_mm=100)
     assert h > 0   # empty returns single-line height
 
@@ -306,7 +306,7 @@ def test_render_with_all_new_helpers():
     page = doc.add_page(dpi=72)
 
     # Auto-height textbox
-    page.add_textbox_auto(10, 10, 190, text="Document Title", font_size=24, bold=True)
+    page.add_textbox_auto(10, 10, 190, text="Document Title", font_size=8.467, bold=True)
 
     # Row of metrics
     row = page.row(y=30, gap=5, height=25)

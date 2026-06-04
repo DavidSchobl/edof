@@ -1,22 +1,37 @@
+# Byte-compiled / cache
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
-*.egg
 *.egg-info/
-dist/
-build/
-.eggs/
-.venv/
-venv/
-env/
-.env
-*.edof
-*.png
-*.pdf
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-htmlcov/
-.coverage
+
+# Build / distribution
+build/
+dist/
+*.egg
+wheels/
+
+# MkDocs build output
+site/
+
+# Credentials — never commit these
+publish
+.pypirc
+*.pypirc
+.env
+*.token
+
+# Debug logs
+edof_debug.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Virtual envs
+.venv/
+venv/
+env/

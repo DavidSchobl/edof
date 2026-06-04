@@ -14,14 +14,18 @@ if TYPE_CHECKING:
 
 def export_pdf(doc: "Document", path: str,
                vector: bool = True,
-               dpi: Optional[int] = None) -> None:
+               dpi: Optional[int] = None,
+               embed_source: bool = True) -> None:
     """Export the document to PDF.
 
     vector=True (default): pure-Python vector PDF — searchable, copyable, small.
     vector=False: legacy raster mode via reportlab.
+    embed_source=True (default): embed the source .edof as a PDF file attachment
+    so the document can be re-opened and edited from the PDF later. Disabled
+    automatically when the document's permissions prohibit re-editing.
     """
     if vector:
-        _export_pdf_vector(doc, path)
+        _export_pdf_vector(doc, path, embed_source=embed_source)
     else:
         _export_pdf_raster(doc, path, dpi)
 
@@ -30,7 +34,7 @@ def export_pdf(doc: "Document", path: str,
 #  v4.0  Vector export
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _export_pdf_vector(doc, path: str) -> None:
+def _export_pdf_vector(doc, path: str, embed_source: bool = True) -> None:
     from edof.export.pdf_writer import PdfWriter
     from edof.utils.safe_eval import is_visible
 
@@ -38,11 +42,74 @@ def _export_pdf_vector(doc, path: str) -> None:
         title   = doc.title       or "EDOF Document",
         author  = doc.author      or "",
         subject = doc.description or "",
-        creator = "edof v4.0.1",
+        creator = "edof v4.1.17.4",
     )
 
-    for page in doc.pages:
+    # v4.1.17.4: by default embed a copy of the source document inside the
+    # PDF so it can be re-opened and edited by anyone with an EDOF editor.
+    # Honours the document's permission flags — if re-editing is blocked
+    # we don't attach the source.
+    if embed_source:
+        try:
+            perms = getattr(doc, 'permissions', None)
+            allow_embed = True
+            if perms is not None:
+                # Treat any "no_edit" / "view_only" intent as a no-embed
+                if getattr(perms, 'allow_edit', True) is False:
+                    allow_embed = False
+                if getattr(perms, 'allow_export_with_source', True) is False:
+                    allow_embed = False
+            if allow_embed:
+                import tempfile, os as _os
+                tmp = tempfile.mktemp(suffix=".edof")
+                try:
+                    doc.save(tmp)
+                    with open(tmp, "rb") as _f:
+                        source_bytes = _f.read()
+                finally:
+                    try: _os.unlink(tmp)
+                    except Exception: pass
+                src_name = (doc.title or "document").replace("/", "_") + ".edof"
+                writer.attach_file(
+                    src_name, source_bytes,
+                    mime_type="application/x-edof",
+                    description="EDOF source — open in the EDOF editor to edit this document."
+                )
+        except Exception:
+            # Embedding failure is non-fatal; the PDF still exports
+            pass
+
+    for page_idx, page in enumerate(doc.pages):
         pp = writer.add_page(page.width, page.height)
+
+        # v4.1.17.3: if ANY object on the page has layer effects, blends, or
+        # fractional opacity, rasterize the ENTIRE page as a single full-page
+        # PNG and embed it. PDF's native primitive set can't represent these
+        # features reliably, and mixing vectors with per-object rasters causes
+        # z-order / halo / drop-shadow-compositing problems. Going full raster
+        # for affected pages gives pixel-perfect WYSIWYG at the cost of
+        # selectable text and file size — a trade the user explicitly chose.
+        needs_full_raster = False
+        def _walk(o):
+            nonlocal needs_full_raster
+            if needs_full_raster: return
+            if _has_complex_effects(o):
+                needs_full_raster = True; return
+            for child in getattr(o, 'flatten', lambda: [])() or []:
+                if child is not o:
+                    _walk(child)
+        for obj in page.sorted_objects():
+            if is_visible(obj, doc.variables):
+                _walk(obj)
+                if needs_full_raster: break
+
+        if needs_full_raster:
+            try:
+                _emit_page_as_raster(pp, page, doc, writer, page_idx)
+                continue
+            except Exception:
+                # Fall through to native emit on rasterization failure
+                pass
 
         # Page background
         bg = page.background
@@ -57,24 +124,141 @@ def _export_pdf_vector(doc, path: str) -> None:
     writer.save(path)
 
 
+def _emit_page_as_raster(pp, page, doc, writer, page_idx: int, dpi: float = 300.0) -> None:
+    """v4.1.17.3: Render an entire page via the canvas renderer and embed as a
+    single full-page PNG XObject. Used when the page contains layer effects /
+    blends / fractional opacity that PDF cannot represent natively."""
+    from edof.engine.renderer import render_page
+    img = render_page(page, doc.resources, doc.variables, dpi=dpi)
+    # Flatten to RGB (PDF FlateDecode XObject expects RGB without alpha;
+    # background was already composited by the renderer).
+    if img.mode != 'RGB':
+        # Composite onto white if there's an alpha channel
+        from PIL import Image
+        bg_color = (255, 255, 255)
+        page_bg = getattr(page, 'background', None)
+        if page_bg and len(page_bg) >= 3:
+            bg_color = tuple(page_bg[:3])
+        if img.mode == 'RGBA':
+            base = Image.new('RGB', img.size, bg_color)
+            base.paste(img, mask=img.split()[-1])
+            img = base
+        else:
+            img = img.convert('RGB')
+    image_id = f"page_{page_idx}_raster"
+    writer.add_image(image_id, img.width, img.height, img.tobytes())
+    pp.image(image_id, 0, 0, page.width, page.height)
+
+
+def _has_complex_effects(obj) -> bool:
+    """v4.1.17.3: Detect objects that PDF's native primitive set can't
+    represent accurately. When ANY object on a page returns True here,
+    the entire page is rasterized as a single image (see _export_pdf_vector).
+    """
+    if getattr(obj, 'effects', None):
+        for e in obj.effects:
+            if getattr(e, 'enabled', False):
+                return True
+    if getattr(obj, 'blend_mode', 'normal') not in ('normal', '', None):
+        return True
+    fo = getattr(obj, 'fill_opacity', 1.0)
+    if fo is not None and fo < 0.999:
+        return True
+    op = getattr(obj, 'opacity', 1.0)
+    if op is not None and op < 0.999:
+        return True
+    # SvgBox / SubDocumentBox render via raster pipelines anyway — no native
+    # PDF primitive can reproduce their content with full fidelity.
+    type_name = type(obj).__name__
+    if type_name in ('SvgBox', 'SubDocumentBox'):
+        return True
+    return False
+
+
+def _emit_rasterized(pp, obj, doc, writer, dpi: float = 300.0):
+    """Render `obj` onto a transparent PIL canvas via the regular renderer,
+    crop to the rendered bbox, and embed as a PNG image in the PDF.
+
+    This is used for objects that exceed PDF's native expressive power:
+    layer effects (drop shadow, glow, etc), non-normal blend modes, and
+    fractional opacity."""
+    from PIL import Image
+    from edof.engine.renderer import _render_object, mm_to_px
+    from edof.units import px_to_mm
+    t = obj.transform
+    # Compute a buffer big enough for the object + some headroom for effects
+    margin_mm = 20.0
+    pad_px = int(mm_to_px(margin_mm, dpi))
+    w_px = int(mm_to_px(t.width, dpi)) + 2 * pad_px
+    h_px = int(mm_to_px(t.height, dpi)) + 2 * pad_px
+    # Place a temporary canvas; we shift coordinates so the obj is centred
+    canvas = Image.new("RGBA", (w_px, h_px), (0, 0, 0, 0))
+    # Translate obj's transform so it draws at the correct buffer position
+    orig_x, orig_y = t.x, t.y
+    t.x = px_to_mm(pad_px, dpi)
+    t.y = px_to_mm(pad_px, dpi)
+    try:
+        _render_object(obj, canvas, doc.resources, doc.variables, dpi)
+    finally:
+        t.x, t.y = orig_x, orig_y
+    bbox = canvas.getbbox()
+    if bbox is None: return
+    cropped = canvas.crop(bbox)
+    # Compute absolute mm position of the cropped image's top-left
+    rel_x_mm = px_to_mm(bbox[0] - pad_px, dpi)
+    rel_y_mm = px_to_mm(bbox[1] - pad_px, dpi)
+    abs_x_mm = orig_x + rel_x_mm
+    abs_y_mm = orig_y + rel_y_mm
+    w_mm = px_to_mm(cropped.width, dpi)
+    h_mm = px_to_mm(cropped.height, dpi)
+    # Embed as PNG image in PDF
+    import io as _io
+    buf = _io.BytesIO()
+    cropped.save(buf, "PNG")
+    image_id = f"rast_{id(obj):x}"
+    # PDF writer's add_image expects raw RGB or RGBA bytes
+    rgb = cropped.convert("RGB")
+    writer.add_image(image_id, cropped.width, cropped.height, rgb.tobytes())
+    pp.image(image_id, abs_x_mm, abs_y_mm, w_mm, h_mm)
+
+
 def _emit_object(pp, obj, doc, writer):
     from edof.format.objects import (TextBox, ImageBox, Shape, QRCode, Group, Table)
     from edof.utils.safe_eval import is_visible
 
-    if isinstance(obj, TextBox):
-        _emit_textbox(pp, obj, doc)
-    elif isinstance(obj, ImageBox):
-        _emit_imagebox(pp, obj, doc, writer)
-    elif isinstance(obj, Shape):
-        _emit_shape(pp, obj)
-    elif isinstance(obj, QRCode):
-        _emit_qrcode(pp, obj, doc, writer)
-    elif isinstance(obj, Table):
-        _emit_table(pp, obj, doc)
-    elif isinstance(obj, Group):
-        for child in obj.flatten():
-            if is_visible(child, doc.variables):
-                _emit_object(pp, child, doc, writer)
+    # v4.1.17: respect transform.rotation by wrapping draws in save/restore
+    # graphics state with a rotation around the object's centre.
+    # (Complex-effects cases are handled at the page level via full-page
+    # rasterization, not here; this function emits native PDF primitives.)
+    rotation = float(getattr(obj.transform, 'rotation', 0.0) or 0.0) if hasattr(obj, 'transform') else 0.0
+    rotated = abs(rotation) > 0.01
+    if rotated:
+        t = obj.transform
+        cx = t.x + t.width / 2.0
+        cy = t.y + t.height / 2.0
+        pp.save_state()
+        pp.rotate_at(rotation, cx, cy)
+    try:
+        if isinstance(obj, TextBox):
+            _emit_textbox(pp, obj, doc)
+        elif isinstance(obj, ImageBox):
+            _emit_imagebox(pp, obj, doc, writer)
+        elif isinstance(obj, Shape):
+            _emit_shape(pp, obj)
+        elif isinstance(obj, QRCode):
+            _emit_qrcode(pp, obj, doc, writer)
+        elif isinstance(obj, Table):
+            _emit_table(pp, obj, doc)
+        elif isinstance(obj, Group):
+            for child in obj.flatten():
+                if is_visible(child, doc.variables):
+                    _emit_object(pp, child, doc, writer)
+        # Unknown types (SvgBox, SubDocumentBox) silently skipped here —
+        # they will have triggered full-page rasterization via the page
+        # checker's _has_complex_effects sweep when relevant.
+    finally:
+        if rotated:
+            pp.restore_state()
 
 
 def _emit_textbox(pp, obj, doc):
@@ -103,7 +287,8 @@ def _emit_textbox(pp, obj, doc):
         if not text: return
         font_name = map_to_standard(obj.style.font_family,
                                      obj.style.bold, obj.style.italic)
-        size_pt  = obj.style.font_size
+        # v4.1.17: font_size is now in mm canonically; PDF needs pt
+        size_pt  = obj.style.font_size_pt
         max_w_pt = (t.width - 2 * pad) / 25.4 * 72
 
         # Auto-shrink: simple width-based downscale
@@ -171,25 +356,29 @@ def _emit_runs(pp, obj, x_mm, y_mm, w_mm, h_mm):
                 i = j
 
     # Pack into lines
+    # v4.1.17: rs["font_size"] is now in mm; convert to pt at PDF boundary
+    _MM_TO_PT = 72.0 / 25.4
     lines, cur_line, cur_w = [], [], 0
     for run, word, is_nl in word_seq:
         if is_nl:
             lines.append(cur_line); cur_line = []; cur_w = 0; continue
         rs = run.resolve(parent, scale=1.0)
         font_name = map_to_standard(rs["font_family"], rs["bold"], rs["italic"])
-        w_pt = measure_text_width(word, font_name, rs["font_size"])
+        fs_pt = rs["font_size"] * _MM_TO_PT
+        w_pt = measure_text_width(word, font_name, fs_pt)
         if parent.wrap and cur_w + w_pt > max_w_pt and cur_line:
             lines.append(cur_line); cur_line = []; cur_w = 0
             if word.strip() == "": continue
-        cur_line.append((run, word, w_pt, rs))
+        cur_line.append((run, word, w_pt, rs, fs_pt))
         cur_w += w_pt
     if cur_line: lines.append(cur_line)
 
     # Compute line heights
     line_heights = []
     for line in lines:
-        max_size = max((seg[3]["font_size"] for seg in line), default=parent.font_size)
-        line_heights.append(max_size * parent.line_height / 72 * 25.4)
+        max_size_pt = max((seg[4] for seg in line),
+                          default=parent.font_size * _MM_TO_PT)
+        line_heights.append(max_size_pt * parent.line_height / 72 * 25.4)
 
     total_h = sum(line_heights)
     if   parent.vertical_align == "middle": y_off = (h_mm - total_h) / 2
@@ -203,7 +392,7 @@ def _emit_runs(pp, obj, x_mm, y_mm, w_mm, h_mm):
         elif parent.alignment == "right":  cur_x_mm = x_mm + w_mm - line_w_mm
         else:                               cur_x_mm = x_mm
 
-        for run, word, w_pt, rs in line:
+        for run, word, w_pt, rs, fs_pt in line:
             bg = rs.get("background")
             if bg and len(bg) >= 4 and bg[3] > 0:
                 pp.rect(cur_x_mm, cur_y_mm, w_pt / 72 * 25.4, lh_mm,
@@ -211,13 +400,13 @@ def _emit_runs(pp, obj, x_mm, y_mm, w_mm, h_mm):
             color = rs["color"] if rs["color"] else (0, 0, 0)
             pp.text(cur_x_mm, cur_y_mm, word,
                     font_family=rs["font_family"],
-                    font_size_pt=rs["font_size"],
+                    font_size_pt=fs_pt,
                     color=color[:3],
                     bold=rs["bold"], italic=rs["italic"])
             if rs.get("underline"):
                 pp.text_underline(cur_x_mm, cur_y_mm, word,
                                    font_family=rs["font_family"],
-                                   font_size_pt=rs["font_size"],
+                                   font_size_pt=fs_pt,
                                    color=color[:3])
             cur_x_mm += w_pt / 72 * 25.4
         cur_y_mm += lh_mm
@@ -271,7 +460,26 @@ def _emit_shape(pp, obj):
             pp.polygon(obj.points, fill=fill, stroke=stroke, width_pt=width_pt)
     elif obj.shape_type == SHAPE_PATH:
         if obj.path_data:
-            pp.path(obj.path_data, fill=fill, stroke=stroke, width_pt=width_pt)
+            # v4.1.17.2: path_data is in path-local coords (relative to
+            # transform.x, transform.y). The PDF writer expects absolute mm.
+            # Offset each command's coords by the transform origin.
+            ox, oy = t.x, t.y
+            shifted = []
+            for cmd in obj.path_data:
+                if not cmd: continue
+                op = cmd[0]
+                if op == "M" or op == "L":
+                    shifted.append([op, cmd[1] + ox, cmd[2] + oy])
+                elif op == "C":
+                    shifted.append([op, cmd[1] + ox, cmd[2] + oy,
+                                       cmd[3] + ox, cmd[4] + oy,
+                                       cmd[5] + ox, cmd[6] + oy])
+                elif op == "Q":
+                    shifted.append([op, cmd[1] + ox, cmd[2] + oy,
+                                       cmd[3] + ox, cmd[4] + oy])
+                elif op == "Z":
+                    shifted.append(["Z"])
+            pp.path(shifted, fill=fill, stroke=stroke, width_pt=width_pt)
 
 
 def _emit_imagebox(pp, obj, doc, writer):
@@ -375,7 +583,8 @@ def _emit_table(pp, obj, doc):
             elif cell_text:
                 font_name = map_to_standard(cell.style.font_family,
                                              cell.style.bold, cell.style.italic)
-                size_pt = cell.style.font_size
+                # v4.1.17: cell.style.font_size is in mm; PDF needs pt
+                size_pt = cell.style.font_size_pt
                 max_w_pt = (cw - 2*cell.padding) / 25.4 * 72
                 if cell.style.auto_shrink:
                     w = measure_text_width(cell_text, font_name, size_pt)

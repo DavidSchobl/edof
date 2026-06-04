@@ -789,7 +789,41 @@ Examples:
                      help="(PDF) Raster writer")
     add_unlock_args(pur)
 
+    # ── v4.1.1: file association ─────────────────────────────────────────────
+    pa = sub.add_parser("associate-files",
+        help="Register .edof files with edof-viewer (so double-click opens viewer)")
+    pa.add_argument("--remove", action="store_true",
+                     help="Remove the .edof file association instead of adding it")
+    pa.add_argument("--status", action="store_true",
+                     help="Show current association status and exit")
+
     return p
+
+
+def cmd_associate_files(args):
+    """v4.1.1: Register or unregister the .edof file association."""
+    from edof._apps.file_assoc import (
+        associate_edof_files, unassociate_edof_files, current_association_status,
+    )
+    if args.status:
+        print(current_association_status())
+        return
+    if args.remove:
+        try:
+            unassociate_edof_files()
+            print("OK: .edof file association removed.")
+        except Exception as e:
+            print(f"ERROR: {e}")
+            sys.exit(1)
+    else:
+        try:
+            associate_edof_files()
+            print("OK: .edof files now associated with edof-viewer.")
+            print("  Double-clicking a .edof file will now open it in edof-viewer.")
+            print("  On Windows, you may need to log out and back in for icons to refresh.")
+        except Exception as e:
+            print(f"ERROR: {e}")
+            sys.exit(1)
 
 
 def main():
@@ -808,6 +842,8 @@ def main():
         "to-v3":         cmd_to_v3,
         "set-password":  cmd_set_password,
         "unlock-render": cmd_unlock_render,
+        # v4.1.1
+        "associate-files": cmd_associate_files,
     }
     cmd_map[args.command](args)
 

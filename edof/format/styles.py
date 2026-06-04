@@ -38,26 +38,77 @@ def as_color(value) -> Color:
 
 @dataclass
 class TextStyle:
+    """v4.1.17: ALL length fields are in millimetres (mm), the canonical
+    unit of EDOF. Typography users can interact with pt via the
+    `font_size_pt` / `letter_spacing_pt` accessors below — but on-disk
+    and in-memory the canonical unit is mm.
+
+    Reference: 12 pt ≈ 4.233 mm; 1 pt = 25.4/72 mm.
+    """
     font_family:     str            = "Arial"
-    font_size:       float          = 12.0          # pt
+    font_size:       float          = 4.233   # mm (= 12 pt)
     bold:            bool           = False
     italic:          bool           = False
     underline:       bool           = False
     strikethrough:   bool           = False
     color:           Color          = (0, 0, 0)
     background:      Optional[Color]= None
-    letter_spacing:  float          = 0.0           # pt extra between glyphs
-    line_height:     float          = 1.2           # multiplier of font_size
-    alignment:       str            = "left"        # left|center|right|justify
+    letter_spacing:  float          = 0.0           # mm extra between glyphs
+    line_height:     float          = 1.2           # unit-less multiplier
+    alignment:       str            = "left"        # left|center|right|justify|justify_full
+    justify_mode:    str            = "space"       # 'space' | 'full' (see text_layout)
     vertical_align:  str            = "top"         # top|middle|bottom
-    # Auto-shrink: reduce font_size until text fits the box
     auto_shrink:     bool           = False
-    auto_fill:       bool           = False   # grows AND shrinks to fill the box
-    min_font_size:   float          = 4.0
-    max_font_size:   float          = 200.0
+    auto_fill:       bool           = False
+    min_font_size:   float          = 1.411   # mm (= 4 pt)
+    max_font_size:   float          = 70.555  # mm (= 200 pt)
     wrap:            bool           = True
-    overflow_hidden: bool           = True
-    padding:         float          = 1.0   # mm – space between box edge and text
+    overflow_hidden: bool           = False
+    padding:         float          = 1.0   # mm
+    padding_top:     Optional[float] = None
+    padding_right:   Optional[float] = None
+    padding_bottom:  Optional[float] = None
+    padding_left:    Optional[float] = None
+    # v4.1.16.7: non-uniform glyph deformation
+    glyph_scale_x:   float          = 1.0
+    glyph_scale_y:   float          = 1.0
+
+    # ── v4.1.17: pt accessors as convenience for typography users ────────────
+    # The canonical unit is mm; these properties convert in/out of pt for
+    # legacy code, app integrations (e.g. DOCX export), and humans who
+    # think in points.
+    @property
+    def font_size_pt(self) -> float:
+        return self.font_size * 72.0 / 25.4
+
+    @font_size_pt.setter
+    def font_size_pt(self, pt: float) -> None:
+        self.font_size = float(pt) * 25.4 / 72.0
+
+    # mm accessor is just an alias — for code that wants explicit naming
+    @property
+    def font_size_mm(self) -> float:
+        return self.font_size
+
+    @font_size_mm.setter
+    def font_size_mm(self, mm: float) -> None:
+        self.font_size = float(mm)
+
+    @property
+    def letter_spacing_pt(self) -> float:
+        return self.letter_spacing * 72.0 / 25.4
+
+    @letter_spacing_pt.setter
+    def letter_spacing_pt(self, pt: float) -> None:
+        self.letter_spacing = float(pt) * 25.4 / 72.0
+
+    @property
+    def letter_spacing_mm(self) -> float:
+        return self.letter_spacing
+
+    @letter_spacing_mm.setter
+    def letter_spacing_mm(self, mm: float) -> None:
+        self.letter_spacing = float(mm)
 
     def to_dict(self) -> dict:
         return {
@@ -73,6 +124,7 @@ class TextStyle:
             "line_height":    self.line_height,
             "alignment":      self.alignment,
             "vertical_align": self.vertical_align,
+            "justify_mode":   self.justify_mode,
             "auto_shrink":    self.auto_shrink,
             "auto_fill":      self.auto_fill,
             "min_font_size":  self.min_font_size,
@@ -80,7 +132,25 @@ class TextStyle:
             "wrap":           self.wrap,
             "overflow_hidden":self.overflow_hidden,
             "padding":        self.padding,
+            "padding_top":    self.padding_top,
+            "padding_right":  self.padding_right,
+            "padding_bottom": self.padding_bottom,
+            "padding_left":   self.padding_left,
+            "glyph_scale_x":  self.glyph_scale_x,
+            "glyph_scale_y":  self.glyph_scale_y,
         }
+
+    def get_padding(self):
+        """v4.1.0: Return (top, right, bottom, left) in mm.
+        Per-side fields override the uniform `padding` if set.
+        """
+        p = self.padding
+        return (
+            self.padding_top    if self.padding_top    is not None else p,
+            self.padding_right  if self.padding_right  is not None else p,
+            self.padding_bottom if self.padding_bottom is not None else p,
+            self.padding_left   if self.padding_left   is not None else p,
+        )
 
     @classmethod
     def from_dict(cls, d: dict) -> "TextStyle":
@@ -100,11 +170,29 @@ class TextStyle:
 
 @dataclass
 class StrokeStyle:
+    """v4.1.17: width is in millimetres (mm), canonical EDOF unit.
+    Use `width_pt` property for typography pt access (1 pt ≈ 0.353 mm)."""
     color: Color = (0, 0, 0)
-    width: float = 1.0          # pt
+    width: float = 0.353        # mm (= 1 pt)
     dash:  list  = field(default_factory=list)   # e.g. [6, 3]
     cap:   str   = "butt"       # butt|round|square
     join:  str   = "miter"      # miter|round|bevel
+
+    @property
+    def width_pt(self) -> float:
+        return self.width * 72.0 / 25.4
+
+    @width_pt.setter
+    def width_pt(self, pt: float) -> None:
+        self.width = float(pt) * 25.4 / 72.0
+
+    @property
+    def width_mm(self) -> float:
+        return self.width
+
+    @width_mm.setter
+    def width_mm(self, mm: float) -> None:
+        self.width = float(mm)
 
     def to_dict(self) -> dict:
         return {
@@ -166,17 +254,53 @@ class Gradient:
 class TextRun:
     """A styled segment of text within a TextBox.runs list. v4.0 feature.
 
+    v4.1.17: font_size is in millimetres (mm), the canonical EDOF unit.
+    Use the `font_size_pt` property for typography-style pt values.
+
     Any field set to None inherits from the parent TextStyle.
     """
     text:           str                 = ""
     font_family:    Optional[str]       = None
-    font_size:      Optional[float]     = None
+    font_size:      Optional[float]     = None      # mm (None = inherit)
     bold:           Optional[bool]      = None
     italic:         Optional[bool]      = None
     underline:      Optional[bool]      = None
     strikethrough:  Optional[bool]      = None
     color:          Optional[Color]     = None
     background:     Optional[Color]     = None    # highlight color, RGBA
+    # v4.1.23.33: per-run vertical line spacing (unit-less multiplier) and
+    # horizontal letter spacing (mm of extra advance after each glyph).
+    # None = inherit from the parent TextStyle. These make spacing a run
+    # attribute like font size: a span of text keeps the spacing it was
+    # typed with until a different value is set, and a line's height is the
+    # max over the runs on it of (font_size * line_height).
+    line_height:    Optional[float]     = None
+    letter_spacing: Optional[float]     = None
+    # v4.1.20.10: per-paragraph alignment. The layout engine reads this
+    # for the paragraph containing each run — runs within a single
+    # paragraph (= group separated by '\n') should all carry the same
+    # value (the editor's set_alignment sets all runs in the current
+    # paragraph together). None = inherit from parent TextStyle.alignment.
+    alignment:      Optional[str]       = None    # 'left'|'center'|'right'|'justify'
+
+    # v4.1.17: pt accessor (legacy / typography integration)
+    @property
+    def font_size_pt(self) -> Optional[float]:
+        if self.font_size is None: return None
+        return self.font_size * 72.0 / 25.4
+
+    @font_size_pt.setter
+    def font_size_pt(self, pt: Optional[float]) -> None:
+        self.font_size = (float(pt) * 25.4 / 72.0) if pt is not None else None
+
+    # mm alias for clarity
+    @property
+    def font_size_mm(self) -> Optional[float]:
+        return self.font_size
+
+    @font_size_mm.setter
+    def font_size_mm(self, mm: Optional[float]) -> None:
+        self.font_size = float(mm) if mm is not None else None
 
     def resolve(self, parent: "TextStyle", scale: float = 1.0) -> dict:
         """Return effective style dict for rendering this run.
@@ -190,6 +314,8 @@ class TextRun:
             "strikethrough": self.strikethrough  if self.strikethrough is not None else parent.strikethrough,
             "color":         self.color          if self.color         is not None else parent.color,
             "background":    self.background,    # None means transparent
+            "line_height":   self.line_height    if self.line_height    is not None else getattr(parent, 'line_height', 1.2),
+            "letter_spacing": (self.letter_spacing if self.letter_spacing is not None else getattr(parent, 'letter_spacing', 0.0)) * scale,
         }
 
     def to_dict(self) -> dict:
@@ -202,13 +328,15 @@ class TextRun:
         if self.strikethrough is not None: d["strikethrough"] = self.strikethrough
         if self.color         is not None: d["color"]         = _rgba_to_hex(self.color)
         if self.background    is not None: d["background"]    = _rgba_to_hex(self.background)
+        if self.line_height   is not None: d["line_height"]   = self.line_height
+        if self.letter_spacing is not None: d["letter_spacing"] = self.letter_spacing
         return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "TextRun":
         r = cls(text=d.get("text", ""))
         for k in ("font_family", "font_size", "bold", "italic",
-                  "underline", "strikethrough"):
+                  "underline", "strikethrough", "line_height", "letter_spacing"):
             if k in d: setattr(r, k, d[k])
         for k in ("color", "background"):
             if k in d:
@@ -271,6 +399,75 @@ class ShadowStyle:
         for k, v in d.items():
             if k == "color" and isinstance(v, str):
                 v = _hex_to_rgba(v)
+            if hasattr(obj, k):
+                setattr(obj, k, v)
+        return obj
+
+
+# v4.1.0: Photoshop-style layer effects
+@dataclass
+class LayerEffect:
+    """A Photoshop-style layer effect.
+
+    type: one of 'drop_shadow', 'inner_shadow', 'outer_glow', 'inner_glow',
+                 'bevel', 'stroke', 'color_overlay', 'gradient_overlay'
+    """
+    type: str = "drop_shadow"
+    enabled: bool = True
+    color: Color = (0, 0, 0, 200)
+    color2: Color = (255, 255, 255, 200)   # for bevel highlight, gradient end
+    blend_mode: str = "normal"
+    blend_mode2: str = "normal"            # for bevel highlight blend
+    opacity: float = 1.0                    # 0..1
+    size: float = 2.0                       # mm — blur/glow radius, bevel size
+    distance: float = 2.0                   # mm — shadow offset, used with direction
+    direction: float = 135.0                # degrees, 0=right, 90=up, etc.
+    # Stroke-specific
+    stroke_position: str = "outside"        # outside | center | inside
+    # Bevel-specific
+    bevel_kind: str = "outer"               # outer | inner | smooth
+    # Gradient-specific
+    gradient_start: Color = (0, 0, 0, 255)
+    gradient_end: Color = (255, 255, 255, 255)
+    gradient_angle: float = 90.0
+    # v4.1.1: Texture overlay
+    texture_path:    Optional[str]   = None      # external file path
+    texture_scale:   float           = 100.0     # %, relative to object size
+    texture_data:    Optional[bytes] = None      # embedded bytes
+    texture_fit:     str             = "tile"    # tile | fit | fill | stretch
+    texture_anchor:  str             = "top-left"  # top-left | center
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "enabled": self.enabled,
+            "color": _rgba_to_hex(self.color),
+            "color2": _rgba_to_hex(self.color2),
+            "blend_mode": self.blend_mode,
+            "blend_mode2": self.blend_mode2,
+            "opacity": self.opacity,
+            "size": self.size,
+            "distance": self.distance,
+            "direction": self.direction,
+            "stroke_position": self.stroke_position,
+            "bevel_kind": self.bevel_kind,
+            "gradient_start": _rgba_to_hex(self.gradient_start),
+            "gradient_end": _rgba_to_hex(self.gradient_end),
+            "gradient_angle": self.gradient_angle,
+            "texture_path": self.texture_path,
+            "texture_scale": self.texture_scale,
+            "texture_fit": self.texture_fit,
+            "texture_anchor": self.texture_anchor,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "LayerEffect":
+        obj = cls()
+        color_keys = {"color", "color2", "gradient_start", "gradient_end"}
+        for k, v in d.items():
+            if k in color_keys and isinstance(v, str):
+                v = _hex_to_rgba(v)
+            if k == "texture_data": continue  # not serialized
             if hasattr(obj, k):
                 setattr(obj, k, v)
         return obj

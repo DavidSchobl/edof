@@ -6,6 +6,422 @@ Versioning: SemVer (https://semver.org/)
 
 ================================================================================
 
+## [4.2.0] - 2026-06-04
+
+First public release since 4.1.2. The 4.1.3–4.1.24 development was an extended
+hardening series for the document-mode editor (continuous text flow,
+pagination, undo) and the new Word interop; those changes are consolidated
+here.
+
+### Added
+- **Word (.docx) import and export** (optional, needs `python-docx`:
+  `pip install edof[docx]`). New top-level API `edof.export_docx(doc, path)`
+  and `edof.import_docx(path, return_report=False)`, plus **File → Import /
+  Export Word (.docx)…** in the desktop editor.
+  - Export writes the document body flow: runs with bold / italic / underline
+    / strikethrough, font family and size, run colour, paragraph alignment,
+    page size and margins, page-break-before, single-level lists, and a line
+    height matched **exactly** to EDOF's so Word paginates the same way the
+    editor does.
+  - Import builds a document-mode file and produces a compatibility report.
+    It never silently drops content: tables, images, drawings, text boxes,
+    equations and embedded objects are detected and the user is advised
+    against importing when such content is significant; headers/footers,
+    footnotes and comments are reported as dropped. See
+    `docs/reference/11-docx.md`.
+- **Unified document-wide undo/redo.** A single timeline now covers both
+  body-text editing and object operations (move / add / delete / style).
+  Body edits coalesce into one step per typing burst and are flushed before
+  any undo/redo or object change, so Ctrl+Z/Ctrl+Y behave consistently
+  everywhere and never split between two histories.
+- **Document mode** maturity: continuous multi-page text flow with automatic
+  pagination, hard page breaks (Ctrl+Enter), per-paragraph keep/break
+  controls, and per-run/paragraph line spacing.
+- Complete generated **API reference** (`docs/reference/API.md`) and a
+  MkDocs-Material documentation site published to GitHub Pages.
+
+### Changed
+- **Debug logging is now opt-in.** It is disabled by default and only writes a
+  log when `EDOF_DEBUG=1` is set or it is enabled programmatically;
+  `EDOF_DEBUG_PATH` overrides the location. Releases no longer create
+  `edof_debug.log` in the home directory during normal use.
+- Line-height model on export uses an exact point value (not Word's "multiple"
+  rule), eliminating the ~15 % taller spacing that pushed extra lines onto
+  later pages.
+
+### Fixed
+- Pagination: hard page breaks and empty break-pages survive re-pagination;
+  the caret no longer drops below the bottom margin while typing at the end of
+  a full page; the empty-document caret respects paragraph alignment;
+  continuing pages no longer render a spurious trailing cursor line.
+- Close / New / Open now prompt to save unsaved body edits, including edits
+  made on a single line that previously failed to mark the document modified.
+- New documents no longer capture the editor's placeholder hint into undo
+  history, so undoing to the very start leaves a clean empty document.
+
+### Packaging
+- Clean release tree (no build/debug helpers or caches); restored the
+  `.github/workflows/publish.yml` Trusted-Publishing (OIDC) workflow; added a
+  `Funding` project URL and a `.gitignore`.
+
+================================================================================
+
+## [4.1.2] - 2026-05-09
+
+Quick follow-up release adding embedded sub-documents in the editor with
+multi-window editing and live cross-window updates, plus a critical UI fix
+for spinbox arrows that were displaying as tiny dots and clicking the glyph
+instead of the button.
+
+================================================================================
+FIXED — Spinbox arrows tiny / unclickable (CRITICAL UI, reported @4.1.1)
+================================================================================
+On Windows the up/down arrows on every QSpinBox / QDoubleSpinBox in the UI
+appeared as small dots. Worse, the click target was the glyph rather than
+the surrounding button area, so clicks frequently missed.
+
+Fix: explicit QSS for `QSpinBox::up-button` / `down-button` with 22×14 px
+fixed dimensions, accent-color hover state, pressed state, and CSS-triangle
+arrows that scale to the requested size and are easy to hit. The whole
+button is now the click target.
+
+================================================================================
+ADDED — SubDocumentBox UI in the editor
+================================================================================
+The data model has supported `SubDocumentBox` since 4.0.x but the editor
+had no UI for it. v4.1.2 adds a dedicated properties panel:
+
+- Source path display (read-only)
+- "Load .edof…" — pick a file to embed (bytes stored in `doc.resources`)
+- "📂 Open in new tab" — open the embedded document in a child editor window
+- "Extract & link…" — convert embedded → external file, switch to
+  `source_path` mode (auto-reload on external changes)
+- Fit mode (contain / cover / stretch / none)
+- Page index (which page of the embedded document to display)
+- Layer Effects entry point
+
+Toolbar: `📄` button inserts a new SubDocumentBox, optionally embedding an
+existing .edof file at the same time.
+
+================================================================================
+ADDED — Multi-window editing for embedded sub-documents
+================================================================================
+Double-clicking an embedded `.edof` block opens it in a new editor window
+(the "tab"-equivalent — independent windows in the same process).
+
+- For external `source_path` SubDocs: opens the file directly. Both
+  windows can edit the same file independently; the parent watches the
+  file system and re-renders when the child saves.
+- For embedded `resource_id` SubDocs: extracts the bytes to a temp file,
+  opens it. When the child editor saves, the new bytes are written back
+  into the parent's resource bundle and the parent canvas re-renders.
+
+The parent window tracks its child windows; closing the parent prompts if
+any child has unsaved changes.
+
+================================================================================
+ADDED — File system watcher for external sub-documents
+================================================================================
+`QFileSystemWatcher` monitors all `source_path` references in the open
+document. If another process modifies the linked file, the parent canvas
+re-renders automatically. Atomic-replace patterns (where editors save by
+deleting and recreating the file) are handled by re-adding the path on
+each `fileChanged` signal.
+
+================================================================================
+TESTS
+================================================================================
+182 tests passing. New smoke test for embedded SubDoc round-trip:
+create child .edof → embed in parent.resources → save parent → reload →
+render — verifying the embedded content appears in the rendered page.
+
+================================================================================
+
+
+## [4.1.1] - 2026-05-08
+
+The "editor catches up with the API" major release plus critical bug fixes
+reported against 4.0.3. Combines what was internally called 4.1.0 (never
+published) with 4.1.1 (read-only viewer + OS-level file associations + fixes
+for layer effects, smooth path, properties UI, WYSIWYG inline editor, GPU
+acceleration).
+
+================================================================================
+FIXED — Critical PDF text-layer duplication (CRITICAL, reported @4.0.3)
+================================================================================
+PDF text layer contained massive duplicates: a 4-page document with ~3,000
+chars per page extracted 427,492 / 231,838 / 198,175 chars via pdfplumber
+and pypdf. Visually correct but text search, copy-paste, screen readers, and
+PDF parsing tools all failed.
+
+Root cause: `PageBuilder._buf` (io.BytesIO) was never reset after
+`_save_to_writer()`. Each subsequent emit appended ALL previously emitted
+operations cumulatively. For N text emissions the page stream contained
+1+2+...+N = N(N+1)/2 operations.
+
+Fix: reset the buffer (`seek(0); truncate(0)`) after each save. PDF size
+and operation count drop to expected values; text extraction is correct.
+
+================================================================================
+FIXED — Silent text loss when textbox is "too short" (HIGH, reported @4.0.3)
+================================================================================
+Setting `font_size=24` on a 12mm-tall textbox resulted in empty output, no
+warning, no error.
+
+Root causes:
+1. `TextStyle.overflow_hidden` defaulted to `True`, triggering `break` on
+   the first line if it was even 0.5px taller than the inner box.
+2. No warning was emitted on overflow.
+
+Fixes:
+- `overflow_hidden` defaults to `False` now.
+- A `RuntimeWarning` is emitted when text overflows and `auto_shrink` is
+  off, with actionable suggestion.
+
+================================================================================
+ADDED — `edof-viewer` (read-only viewer)
+================================================================================
+A separate lightweight viewer for `.edof` files. Opens any `.edof`
+document, navigates pages (next/prev/first/last), zooms (fit page / fit
+width / 100% / custom), prints, exports to PDF — but cannot edit objects.
+Designed to be the default association for `.edof` files on the OS so
+double-clicking a `.edof` file opens it for viewing.
+
+Entry point: `edof-viewer [filepath]`
+
+================================================================================
+ADDED — Cross-platform file association (Help → Associate .edof files…)
+================================================================================
+- Windows: writes to `HKEY_CURRENT_USER\Software\Classes` (no admin needed).
+- Linux:  installs `.desktop` file + MIME type via `xdg-mime`.
+- macOS:  prints instructions (full UTType registration requires `.app`
+  bundle, planned for v4.2 standalone installer).
+
+Available from `edof-editor` Help menu and programmatically via
+`edof._apps.file_assoc.{associate,unassociate}_edof_files()`.
+
+================================================================================
+ADDED — Photoshop-style Layer Effects engine
+================================================================================
+Every object supports stackable layer effects via `obj.effects` (a
+`List[LayerEffect]`). Nine effect types implemented end-to-end:
+
+- `drop_shadow` — color, blend, opacity, size (blur), distance, direction
+- `inner_shadow` — applied inside the silhouette
+- `outer_glow` / `inner_glow` — soft luminous halo
+- `bevel` — outer / inner / emboss with light direction, dual color
+  (highlight + shadow)
+- `stroke` — outline; outside/center/inside positioning
+- `color_overlay` — solid color via alpha mask
+- `gradient_overlay` — linear gradient with angle (NumPy-accelerated)
+- `texture_overlay` — load any image and tile across the silhouette
+
+Layer Effects dialog (Photoshop-style "Layer Style" pane):
+- First tab: **Blending Options** — master blend mode, master opacity,
+  effects enabled toggle
+- Per-effect tabs with their own parameter widgets (each effect has its
+  own color, size, distance, blend mode, etc. — not shared)
+- Live preview during editing
+- Cancel restores original effects
+
+================================================================================
+ADDED — 16 blend modes (was 6 in v4.0.3)
+================================================================================
+normal, multiply, screen, overlay, darken, lighten, color_dodge, color_burn,
+hard_light, soft_light, difference, exclusion, hue, saturation, color,
+luminosity. NumPy-accelerated when available.
+
+================================================================================
+ADDED — WYSIWYG inline rich-text editor
+================================================================================
+Click into a text box to start editing. Floating formatting toolbar above
+shows Bold/Italic/Underline buttons (B/I/U), font dropdown (170px wide),
+font size, text color picker, alignment (left/center/right), Confirm/Cancel.
+
+v4.1.1 fix: editor box is now fully transparent with a thin dashed border
+(was opaque yellow rectangle in the early 4.1.0 build that obscured the
+page). The underlying object is hidden during edit and restored on commit
+or cancel — true WYSIWYG.
+
+================================================================================
+ADDED — Table cell editor
+================================================================================
+Tables previously had no editor UI. v4.1.1 adds:
+- Properties panel for tables: outer border on/off, color, width;
+  add/remove row/column buttons
+- "Edit Cells…" dialog with a `QTableWidget` showing the grid; click
+  cells, set background color, text color, bold/italic, alignment,
+  per-side border color/width
+- "Tables — Programmatic" page in the Help Guide showing API access
+
+Formula support is planned for v5.0.
+
+================================================================================
+ADDED — Sub-document embedding (`SubDocumentBox`)
+================================================================================
+A new object type that embeds another `.edof` document inside the current
+one. Sub-document is referenced by `resource_id` (embedded as bytes in
+`doc.resources`) or `source_path` (external file). Configurable
+`fit_mode` (contain / cover / stretch / none) and `page_index`.
+
+================================================================================
+ADDED — Pen tool with curve support
+================================================================================
+Path tool (now "Pen tool"):
+- Click = corner point
+- Click+drag = smooth curve point with outgoing handle (Photoshop-like)
+- Click on first point = close path
+- Smooth/Sharp toggle in properties: Catmull-Rom → Cubic Bezier conversion
+- Path edit mode: click "✎ Edit Path Points" to drag individual points
+
+v4.1.1 fix: after smooth/sharpen, path bbox is recomputed and
+`transform.x/y/width/height` adjusted so the visible position stays
+correct and selection handles align with the curve.
+
+================================================================================
+ADDED — `make_table()` with position and sizing
+================================================================================
+```python
+tbl = edof.make_table(rows,
+    x=20, y=30,
+    col_widths=[60, 30, 30],   # mm; sum becomes width
+    row_heights=[10, 8, 8],    # mm; sum becomes height
+    # Or:  width=120,          # auto-distribute equal columns
+)
+next_y = tbl.transform.y + tbl.transform.height   # works correctly now
+```
+
+================================================================================
+ADDED — `Document.export_all_pages()` bound method
+================================================================================
+For consistency with `export_pdf()`, `export_bitmap()`. Wrapper around
+`edof.export_all_pages`. Documented in README (was incorrectly mentioned
+as method in v4.0.3 README without existing).
+
+================================================================================
+ADDED — Per-side padding (`padding_top/right/bottom/left`)
+================================================================================
+`TextStyle.padding` remains a uniform float for backward compatibility.
+v4.1.1 adds optional per-side overrides; missing fields fall back to
+`padding`. `style.get_padding()` returns the resolved 4-tuple.
+
+================================================================================
+ADDED — `edof.as_color()` exported helper for hex-string colors
+================================================================================
+```python
+tb.style.color = edof.as_color("#4a90e2")    # 6-digit hex
+tb.style.color = edof.as_color("#4a90e2cc")  # 8-digit hex with alpha
+```
+
+================================================================================
+ADDED — Custom font import
+================================================================================
+File → Import Font… registers a `.ttf` or `.otf` font with `QFontDatabase`
+and embeds the bytes in `doc.resources`. The font appears in the font
+dropdown immediately. Standard 14 PDF base fonts are marked with ✓ and
+"(PDF-safe)" so designers can pick fonts that survive vector PDF export.
+
+================================================================================
+ADDED — `lock_position` field
+================================================================================
+Independent of the existing `locked` flag. Object cannot be moved or
+resized via the editor, but its content (text, colors, effects) is still
+editable. Useful for templates with fixed layout.
+
+================================================================================
+ADDED — `New Document` dialog with paper and video presets
+================================================================================
+File → New opens a dialog with two modes (Empty / Document with
+auto-margins) plus 14 paper presets (A0–A6, US Letter, US Legal, Tabloid,
+business card, postcard) and 9 video/screen presets (720p, 1080p, 4K UHD,
+Cinema 4K, 8K, square IG, story IG, YT thumbnail, Twitter post). Custom
+W/H/DPI input also available.
+
+================================================================================
+ADDED — Multi-page Help Guide (F2)
+================================================================================
+Comprehensive in-app help with table of contents and 10 sections:
+Getting Started, Tools & Toolbar, Layer Effects, Variables & Templates,
+Encryption & Permissions, Keyboard Shortcuts, Tips & Tricks,
+Programmatic API, Tables — Programmatic.
+
+================================================================================
+ADDED — GPU acceleration via OpenGL
+================================================================================
+The canvas viewport now uses `QOpenGLWidget` with 4× MSAA when available,
+giving smoother panning/zooming and antialiased edges. Falls back to the
+default raster viewport if Qt OpenGL is missing.
+
+================================================================================
+ADDED — Donate / Support menu item
+================================================================================
+Help → "💖 Support the developer…" opens the GitHub Sponsors page.
+Linked from About dialog and README.
+
+================================================================================
+CHANGED — Properties panel auto-fits content height
+================================================================================
+The type-specific properties stack now resizes to the current page's
+content instead of always taking the height of the largest page.
+
+================================================================================
+CHANGED — UI fonts upgraded
+================================================================================
+- Global QSS: 9pt → **10pt** Segoe UI base
+- Buttons: 22px → **24px** height, 5px padding
+- Inline editor toolbar: 22px → **30px** height, 12-14pt fonts, clear B/I/U
+- QCheckBox indicator: 14px → **16px**
+- Scrollbars: 8px → **10px**
+
+================================================================================
+CHANGED — Drop shadow direction default = bottom-right (315°)
+================================================================================
+v4.1.0 had 135° (upper-left) which felt wrong. Now matches Photoshop default.
+
+================================================================================
+CHANGED — Drop shadow no longer duplicated in properties panel
+================================================================================
+Previously both `obj.shadow` (legacy) and `obj.effects[]` drop_shadow
+existed, causing confusion. v4.1.1: properties panel offers only the
+"✨ Layer Effects…" button; legacy `obj.shadow` field is still serialized
+but no longer rendered or editable.
+
+================================================================================
+FIXED — Margins crash (`AttributeError: 'EdofCanvas' has no 'doc'`)
+================================================================================
+Adding any object after enabling page margins crashed the editor.
+`_snap_to_margins` used `self.doc` instead of `self._doc`.
+
+================================================================================
+FIXED — Page render quality at high DPI / when zoomed in
+================================================================================
+Canvas now renders at zoom-aware DPI (up to 3× when zoomed in, 2×
+oversample when zoomed out). Re-render is debounced (150ms) to avoid lag.
+The page pixmap item also has `SmoothTransformation`.
+
+================================================================================
+DOCUMENTATION — README accuracy fixes
+================================================================================
+- Explicit Transform fields list (x, y, width, height, rotation, flip_h,
+  flip_v) — no more `w` vs `width` confusion.
+- Explicit "Color formats" section showing accepted forms.
+- Explicit "Padding" section.
+- New "Recipes" section with copy-pastable patterns for headings,
+  positioned tables, color formats, per-side padding.
+- Comparison table (edof vs Photoshop / PDF / Inkscape / ReportLab /
+  WeasyPrint / FPDF).
+
+================================================================================
+TESTS
+================================================================================
+180+ tests passing (vs 138 in v4.0.3): all v4.0.3 tests retained, plus
+new tests for LayerEffect, all 16 blend modes, all major effect types,
+PDF non-duplication regression, padding-per-side, make_table positioning,
+export_all_pages, as_color, transform.width/height vs w/h, overflow
+warning, overflow_hidden default.
+
+================================================================================
+
 ## [4.0.3] - 2026-05-04
 
 The "editor catches up with the API" release. Substantial editor improvements,

@@ -228,11 +228,15 @@ def test_editor_has_help_dialog(editor_src):
 
 
 def test_editor_has_advanced_properties(editor_src):
-    """Properties panel has v4.0.3 advanced fields."""
+    """Properties panel has v4.0.3 advanced fields.
+
+    v4.1.1: drop shadow moved exclusively to Layer Effects dialog;
+    the legacy `_on_shadow_toggle` was removed.
+    """
     assert "visible_if" in editor_src
     assert "lock_level" in editor_src
     assert "blend_mode" in editor_src
-    assert "_on_shadow_toggle" in editor_src
+    assert "_open_layer_effects_dialog" in editor_src
 
 
 def test_editor_object_panel_has_dragdrop_and_rename(editor_src):
@@ -262,8 +266,11 @@ def test_editor_has_panel_persistence(editor_src):
 
 
 def test_editor_has_subpixel_render_fix(editor_src):
-    """Higher DPI render at low zoom for crisp text."""
-    assert "thin text strokes" in editor_src or "multiplier = min" in editor_src
+    """v4.1.15.7: oversampling removed (caused text-position jumps at
+    different zoom levels). Render is now at canvas DPI directly."""
+    assert ("render at canvas DPI directly" in editor_src or
+            "thin text strokes" in editor_src or
+            "multiplier = min" in editor_src)
 
 
 # ── Backward compat ─────────────────────────────────────────────────────────

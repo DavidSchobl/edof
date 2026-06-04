@@ -21,8 +21,10 @@ def export_page_bitmap(
     """Render one page and save it to a file."""
     from edof.engine.renderer import render_page
     page = doc.pages[page_index]
+    # v4.1.8: export with real transparency (no editor checker pattern)
     img  = render_page(page, doc.resources, doc.variables,
-                       dpi, color_space, bit_depth)
+                       dpi, color_space, bit_depth,
+                       show_transparency_checker=False)
     _save_image(img, path, format, dpi or page.dpi, jpeg_quality)
 
 
@@ -45,7 +47,8 @@ def export_all_pages(
     for i, page in enumerate(doc.pages):
         path = path_pattern.format(n=i, page=i + 1)
         img  = render_page(page, doc.resources, doc.variables,
-                           dpi, color_space, bit_depth)
+                           dpi, color_space, bit_depth,
+                           show_transparency_checker=False)
         _save_image(img, path, format, dpi or page.dpi, jpeg_quality)
         paths.append(path)
     return paths
@@ -65,7 +68,8 @@ def export_to_bytes(
     from edof.engine.renderer import render_page
     page = doc.pages[page_index]
     img  = render_page(page, doc.resources, doc.variables,
-                       dpi, color_space, bit_depth)
+                       dpi, color_space, bit_depth,
+                       show_transparency_checker=False)
     buf  = io.BytesIO()
     _save_image(img, buf, format, dpi or page.dpi, jpeg_quality)
     return buf.getvalue()

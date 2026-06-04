@@ -3,12 +3,47 @@
 [![PyPI version](https://img.shields.io/pypi/v/edof.svg)](https://pypi.org/project/edof/)
 [![Python](https://img.shields.io/pypi/pyversions/edof.svg)](https://pypi.org/project/edof/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Build status](https://github.com/DavidSchobl/edof/actions/workflows/publish.yml/badge.svg)](https://github.com/DavidSchobl/edof/actions/workflows/publish.yml)
+[![Downloads](https://static.pepy.tech/badge/edof)](https://pepy.tech/project/edof)
+[![Sponsor](https://img.shields.io/badge/sponsor-%E2%9D%A4-ff69b4)](https://github.com/sponsors/DavidSchobl)
 
-📚 **Documentation**: <https://davidschobl.github.io/edof/>
+📚 **Documentation**: <https://davidschobl.github.io/edof/> &nbsp;|&nbsp;
+💖 **Support development**: <https://github.com/sponsors/DavidSchobl>
 
-A Python library for programmatic document creation, template filling, and high-quality export. Documents are described in code or in a small ZIP-based file format, then rendered to PNG, JPEG, TIFF, BMP, PDF, or SVG. A PyQt6 desktop editor is included for visual editing.
+A Python library and visual editor for programmatic document creation, template filling, and high-quality export. Documents are described in code or in a small ZIP-based file format, then rendered to PNG, JPEG, TIFF, BMP, PDF, RTF, or SVG. A PyQt6 desktop editor is included for visual editing with Photoshop-style layer effects, table cell editor, multi-blend compositing, and a path tool.
 
-The library prioritizes a few specific things: vector PDF output without large native dependencies, rich-text and table rendering that survives high-DPI export, a template-filling workflow with typed variables, and an optional encryption layer for documents that need it.
+The library prioritizes a few specific things: vector PDF output without large native dependencies, rich-text and table rendering that survives high-DPI export, a template-filling workflow with typed variables, an optional encryption layer for documents that need it, and a rich visual editor that maps 1:1 to the API.
+
+## How does it compare?
+
+|                                           | edof | Photoshop | PDF (raw) | Inkscape | ReportLab | WeasyPrint | FPDF |
+|-------------------------------------------|:----:|:---------:|:---------:|:--------:|:---------:|:----------:|:----:|
+| **Open source / free**                    | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Pure Python (no native deps for core)** | ✅ | n/a | n/a | ❌ | ✅ | ❌ | ✅ |
+| **Programmatic document creation**        | ✅ | ⚠️ | ❌ | ⚠️ | ✅ | ⚠️ | ✅ |
+| **Visual editor included**                | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **Vector PDF export**                     | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Raster export (PNG, JPEG, TIFF)**       | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **SVG export**                            | ✅ | ⚠️ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **RTF import / export**                   | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Templates with typed variables**        | ✅ | ❌ | ⚠️ | ❌ | ⚠️ | ⚠️ | ❌ |
+| **Conditional visibility (visible_if)**   | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **AES-256 document encryption**           | ✅ | ❌ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+| **Permission tiers (fill/edit/admin)**    | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Layer effects (drop shadow, glow…)**    | ✅ | ✅ | ❌ | ⚠️ | ❌ | ❌ | ❌ |
+| **15+ blend modes**                       | ✅ | ✅ | ❌ | ⚠️ | ❌ | ❌ | ❌ |
+| **Tables with per-cell formatting**       | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| **QR code generation**                    | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **PDF import (text + paths + images)**    | ✅ | ❌ | n/a | ✅ | ❌ | ❌ | ❌ |
+| **Embedded sub-document references**      | ✅ | ❌ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+| **Custom font import**                    | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ |
+| **Photo retouching / drawing tools**      | ❌ | ✅ | ❌ | ⚠️ | ❌ | ❌ | ❌ |
+| **Bitmap painting**                       | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Animation / video timeline**            | ❌ | ⚠️ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+Legend: ✅ first-class · ⚠️ partial / via extensions · ❌ not supported · n/a not applicable
+
+**Note:** edof is a *layout & document* tool, not a paint or photo-retouching app. Pixel-level drawing/painting tools are not on the current roadmap. If there's strong demand they could be added in a future major release; right now edof focuses on giving you the most powerful possible vector-and-raster layout system that's still fully scriptable from Python.
 
 ## Install
 
@@ -22,7 +57,7 @@ pip install edof[pyqt6]         # + desktop editor
 pip install edof[all]           # everything above
 ```
 
-Console scripts: `edof-cli` (terminal tool), `edof-editor` (PyQt6 GUI).
+Console scripts: `edof-cli` (terminal tool), `edof-editor` (PyQt6 GUI editor), `edof-viewer` (lightweight read-only viewer).
 
 ## Quick start
 
@@ -67,7 +102,42 @@ A `Document` contains pages; each `Page` contains objects. All measurements are 
 | `Table` | Formatted table with per-cell styling | `cells`, `col_widths`, `row_heights`, `table_border` |
 | `Group` | Container with optional clip | `children` |
 
-Common fields on every object: `transform` (position/size/rotation/flip), `opacity`, `layer`, `visible`, `visible_if`, `blend_mode`, `lock_level`, `lock_text`, `tags`, `shadow`.
+Common fields on every object: `transform` (position/size/rotation/flip), `opacity`, `layer`, `visible`, `visible_if`, `blend_mode`, `lock_level`, `lock_text`, `lock_position`, `tags`, `shadow`, `effects` (v4.1.0+).
+
+#### Transform fields
+
+```python
+obj.transform.x          # mm, X position (top-left)
+obj.transform.y          # mm, Y position (top-left)
+obj.transform.width      # mm, width  (use this name, not `w`)
+obj.transform.height     # mm, height (use this name, not `h`)
+obj.transform.rotation   # degrees, clockwise around the box center
+obj.transform.flip_h     # bool
+obj.transform.flip_v     # bool
+```
+
+#### Color formats
+
+All color fields accept tuples in 0–255 range. Both RGB (3-tuple) and RGBA (4-tuple) are accepted; missing alpha defaults to 255 (opaque):
+
+```python
+obj.style.color    = (74, 144, 226)        # RGB → alpha 255 implied
+obj.fill.color     = (245, 245, 248, 255)  # RGBA — explicit
+obj.stroke.color   = (0, 0, 0, 200)        # RGBA — translucent black
+shape.fill.color   = "#4a90e2"             # v4.1.0+: hex string accepted
+```
+
+When read back, colors come as tuples (`obj.style.color` returns `(74, 144, 226)`, `obj.fill.color` returns `(245, 245, 248, 255)`).
+
+#### Padding
+
+Currently `padding` is a single `float` (mm) applied uniformly on all four sides:
+
+```python
+tb.padding = 2.0          # 2 mm on all sides
+```
+
+A 4-side struct (`padding.left`, `padding.right`, etc.) is on the roadmap for v5.0. For now, if you need asymmetric padding, use a wider/taller textbox with `padding=0` and position content explicitly.
 
 ### Rich text
 
@@ -311,7 +381,61 @@ heading.lock_text  = True       # text never editable until lock_text is cleared
 
 **What it does not protect against**: a user with the password running their own decryption code (they have the password); side-channel attacks on the host running the library; loss of all passwords AND the recovery key — the document is then mathematically unrecoverable. Write down the recovery key.
 
-## Editor
+## Recipes
+
+### Headings with auto-computed height (no more silent text loss)
+
+```python
+# v4.1.0+: add_textbox_auto computes height from content and accepts style kwargs
+heading = page.add_textbox_auto(
+    20, 20, 170, "MY HEADING",
+    font_size=24, bold=True, alignment="center",
+)
+# Read final height to position the next element
+next_y = heading.transform.y + heading.transform.height + 5  # 5 mm gap
+```
+
+### Tables with explicit sizing
+
+```python
+# v4.1.0+: make_table accepts position + size and computes total height
+tbl = edof.make_table(
+    rows=[
+        ["Product",    "Qty", "Price"],
+        ["Widget",     "3",   "29.99"],
+        ["Gadget",     "1",   "149.00"],
+    ],
+    header=True, alternating=True,
+    x=20, y=next_y,
+    col_widths=[100, 30, 40],   # mm; sum becomes table.transform.width
+    row_heights=[10, 8, 8],     # mm; sum becomes table.transform.height
+    # Or just: width=170 (auto-distribute equal column widths)
+)
+page.add_object(tbl)
+print(f"Table ends at y = {tbl.transform.y + tbl.transform.height} mm")
+```
+
+### Colors — accepted formats
+
+```python
+import edof
+
+tb.style.color   = (74, 144, 226)              # RGB tuple
+tb.style.color   = (74, 144, 226, 200)         # RGBA tuple
+tb.style.color   = edof.as_color("#4a90e2")    # hex via helper
+tb.style.color   = edof.as_color("#4a90e2cc")  # 8-digit hex with alpha
+```
+
+### Per-side padding (v4.1.0+)
+
+```python
+tb.style.padding = 2.0           # uniform 2 mm on all sides
+tb.style.padding_left  = 8.0     # override left only
+tb.style.padding_right = 4.0     # override right only
+# top/bottom fall back to padding=2.0
+```
+
+
 
 A PyQt6 desktop editor (`edof-editor`) ships with the library. It is a working editor, not a demo: it produces files that the API can load and round-trip without loss.
 
@@ -346,6 +470,29 @@ A PyQt6 desktop editor (`edof-editor`) ships with the library. It is a working e
 - Cursor position in mm in the status bar
 - Page panel for multi-page docs
 - Translatable UI: `editor_lang/en.json`; add `XX.json` for other languages
+
+## Viewer
+
+A lightweight read-only viewer (`edof-viewer`) ships alongside the editor (v4.1.1+). It is designed for the case where someone receives a `.edof` file and just wants to view, print, or convert it — without launching the full editor.
+
+```bash
+pip install 'edof[viewer]'
+edof-viewer document.edof
+```
+
+**Features:** multi-page navigation (Page Up/Down, Ctrl+Home/End), zoom (Fit page Ctrl+0, Fit width Ctrl+1, Ctrl++/-), pan with middle-mouse drag, OS-level Print dialog, Export PDF, Export current page as PNG.
+
+### File association
+
+Register `.edof` files with `edof-viewer` so double-clicking opens the viewer (similar to PDF files):
+
+```bash
+edof-cli associate-files            # register
+edof-cli associate-files --status   # check current status
+edof-cli associate-files --remove   # unregister
+```
+
+This works on Windows (per-user, no admin needed) and Linux (writes desktop entry + MIME type). On macOS, full `.app` bundle association is planned for v5.0.
 
 ## Programmatic helpers
 

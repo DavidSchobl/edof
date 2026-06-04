@@ -104,13 +104,15 @@ class EdofSerializer:
             mode = (protection_block or {}).get("mode", "none")
 
             if mode == "none":
-                doc = _load_plain(zf, names)
+                doc = _load_plain(zf, names, file_version=file_version)
             elif mode == "partial":
                 doc = _load_partial(zf, names, protection_block,
-                                     password, recovery_key)
+                                     password, recovery_key,
+                                     file_version=file_version)
             elif mode == "full":
                 doc = _load_full(zf, names, protection_block,
-                                  password, recovery_key)
+                                  password, recovery_key,
+                                  file_version=file_version)
             else:
                 raise EdofVersionError(f"Unknown encryption mode {mode!r}")
 
@@ -128,6 +130,20 @@ class EdofSerializer:
         with zipfile.ZipFile(buf, "r") as zf:
             return json.loads(zf.read(MANIFEST_FILE))
 
+    @staticmethod
+    def read_preview(path: str) -> Optional[bytes]:
+        """v4.1.5: Return PNG thumbnail bytes embedded in an .edof file, or
+        None if no preview is present (older files / encrypted full mode)."""
+        try:
+            with open(path, "rb") as fh:
+                buf = io.BytesIO(fh.read())
+            with zipfile.ZipFile(buf, "r") as zf:
+                if "preview.png" in zf.namelist():
+                    return zf.read("preview.png")
+        except Exception:
+            return None
+        return None
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Plain mode
@@ -141,19 +157,117 @@ def _save_plain(doc) -> bytes:
                     json.dumps(doc.to_dict(), ensure_ascii=False, indent=2))
         for entry in doc.resources.all_entries():
             zf.writestr(RESOURCE_DIR + entry.resource_id, entry.data)
+        # v4.1.5: embed a compressed preview thumbnail (preview.png) of the
+        # first page. Keeps file size small while enabling thumbnails in
+        # file explorers / viewers.
+        try:
+            preview = _build_preview_thumbnail(doc)
+            if preview:
+                zf.writestr("preview.png", preview)
+        except Exception:
+            pass  # never fail the save because of a thumbnail problem
     return buf.getvalue()
 
 
-def _load_plain(zf, names) -> "Document":
+def _build_preview_thumbnail(doc, max_dim_px: int = 256) -> Optional[bytes]:
+    """v4.1.5: Render the first page of the document at a small size and
+    return PNG bytes, or None on any failure.
+
+    The thumbnail is sized so the longer side is at most ``max_dim_px``
+    pixels, keeping the .edof file overhead minimal (typically <30 KB).
+    """
+    try:
+        if not doc.pages:
+            return None
+        page = doc.pages[0]
+        from edof.engine.renderer import render_page
+        # Use a low target DPI so the thumbnail render is fast and small
+        target_dpi = max(36, int(max_dim_px / max(page.width, page.height) * 25.4))
+        img = render_page(page, doc.resources, doc.variables, dpi=target_dpi)
+        # Cap final size
+        img.thumbnail((max_dim_px, max_dim_px))
+        out = io.BytesIO()
+        img.save(out, "PNG", optimize=True)
+        return out.getvalue()
+    except Exception:
+        return None
+
+
+def _load_plain(zf, names, *, file_version: str = "0.0.0") -> "Document":
     from edof.format.document import Document
     if DOCUMENT_FILE not in names:
         raise EdofVersionError("Corrupt .edof (document.json missing).")
     doc_dict = json.loads(zf.read(DOCUMENT_FILE))
+    # v4.1.17: migrate pre-4.2.0 documents from pt → mm
+    from edof.version import is_legacy_pt_format
+    if is_legacy_pt_format(file_version):
+        doc_dict = _migrate_pt_to_mm(doc_dict)
     resource_data: Dict[str, bytes] = {}
     for n in names:
         if n.startswith(RESOURCE_DIR) and n != RESOURCE_DIR:
             resource_data[n[len(RESOURCE_DIR):]] = zf.read(n)
     return Document.from_dict(doc_dict, resource_data)
+
+
+# ─── v4.1.17: pt → mm migration for legacy .edof files (4.0.3 — 4.1.16.x) ──
+_PT_TO_MM = 25.4 / 72.0
+
+def _migrate_pt_to_mm(doc_dict: dict) -> dict:
+    """In-place convert font_size, letter_spacing, min/max_font_size,
+    and stroke widths from pt → mm. Called for documents with format
+    version < 4.2.0.
+
+    The migration is exhaustive: walks pages → objects → style/runs/border
+    /stroke and any nested structures (groups, tables) so no pt value
+    escapes."""
+    def _conv_style_dict(style: dict) -> None:
+        if not isinstance(style, dict): return
+        for key in ("font_size", "letter_spacing",
+                    "min_font_size", "max_font_size"):
+            if key in style and isinstance(style[key], (int, float)):
+                style[key] = float(style[key]) * _PT_TO_MM
+
+    def _conv_stroke_dict(s: dict) -> None:
+        if not isinstance(s, dict): return
+        if "width" in s and isinstance(s["width"], (int, float)):
+            s["width"] = float(s["width"]) * _PT_TO_MM
+
+    def _conv_runs(runs) -> None:
+        if not isinstance(runs, list): return
+        for r in runs:
+            if isinstance(r, dict) and "font_size" in r and isinstance(r["font_size"], (int, float)):
+                r["font_size"] = float(r["font_size"]) * _PT_TO_MM
+
+    def _walk_object(obj: dict) -> None:
+        if not isinstance(obj, dict): return
+        # style
+        if "style" in obj: _conv_style_dict(obj["style"])
+        # runs (textbox)
+        if "runs" in obj:  _conv_runs(obj["runs"])
+        # border / stroke / table_border
+        for k in ("border", "stroke", "table_border"):
+            if k in obj: _conv_stroke_dict(obj[k])
+        # Tables
+        if "cells" in obj and isinstance(obj["cells"], list):
+            for row in obj["cells"]:
+                if not isinstance(row, list): continue
+                for cell in row:
+                    if isinstance(cell, dict):
+                        if "style" in cell: _conv_style_dict(cell["style"])
+                        if "runs"  in cell: _conv_runs(cell["runs"])
+        # Groups / nested objects
+        if "objects" in obj and isinstance(obj["objects"], list):
+            for child in obj["objects"]: _walk_object(child)
+
+    # Top-level walk
+    for page in doc_dict.get("pages", []):
+        for obj in page.get("objects", []):
+            _walk_object(obj)
+    # Master pages (if any)
+    for mp in doc_dict.get("master_pages", []) or []:
+        for obj in mp.get("objects", []):
+            _walk_object(obj)
+    return doc_dict
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -184,7 +298,8 @@ def _save_full(doc, prot) -> bytes:
     return outer.getvalue()
 
 
-def _load_full(zf, names, protection_block, password, recovery_key):
+def _load_full(zf, names, protection_block, password, recovery_key,
+               *, file_version: str = "0.0.0"):
     from edof.format.document import Document
     from edof.crypto.encryption import (decrypt_payload, EdofPasswordRequired,
                                           EdofWrongPassword,
@@ -218,6 +333,10 @@ def _load_full(zf, names, protection_block, password, recovery_key):
         if DOCUMENT_FILE not in inner_names:
             raise EdofVersionError("Corrupt encrypted payload.")
         doc_dict = json.loads(iz.read(DOCUMENT_FILE))
+        # v4.1.17: pt → mm migration for legacy encrypted documents
+        from edof.version import is_legacy_pt_format
+        if is_legacy_pt_format(file_version):
+            doc_dict = _migrate_pt_to_mm(doc_dict)
         resource_data: Dict[str, bytes] = {}
         for n in inner_names:
             if n.startswith(RESOURCE_DIR) and n != RESOURCE_DIR:
@@ -285,7 +404,8 @@ def _save_partial(doc, prot) -> bytes:
     return outer.getvalue()
 
 
-def _load_partial(zf, names, protection_block, password, recovery_key):
+def _load_partial(zf, names, protection_block, password, recovery_key,
+                  *, file_version: str = "0.0.0"):
     from edof.format.document import Document
     from edof.crypto.encryption import (decrypt_payload, EdofPasswordRequired,
                                           EdofWrongPassword,
@@ -294,6 +414,10 @@ def _load_partial(zf, names, protection_block, password, recovery_key):
     if DOCUMENT_FILE not in names:
         raise EdofVersionError("Corrupt partial .edof (document.json missing).")
     redacted_dict = json.loads(zf.read(DOCUMENT_FILE))
+    # v4.1.17: pt → mm migration for legacy partial-encrypted documents
+    from edof.version import is_legacy_pt_format
+    if is_legacy_pt_format(file_version):
+        redacted_dict = _migrate_pt_to_mm(redacted_dict)
 
     plain_resources: Dict[str, bytes] = {}
     for n in names:

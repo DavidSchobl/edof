@@ -1,0 +1,72 @@
+site_name: EDOF
+site_description: "Easy Document Format — programmatic document creation, editing and export"
+site_url: "https://davidschobl.github.io/edof/"
+repo_url: "https://github.com/DavidSchobl/edof"
+repo_name: "DavidSchobl/edof"
+copyright: "© 2025 DavidSchobl — MIT License"
+
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - search.suggest
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+
+nav:
+  - Home: README.md
+  - Getting started:
+      - Install: INSTALL.md
+      - Quickstart: QUICKSTART.md
+  - Reference:
+      - Document model: reference/01-document.md
+      - Objects: reference/02-objects.md
+      - Styles: reference/03-styles.md
+      - Variables: reference/04-variables.md
+      - Export: reference/05-export.md
+      - Import (PDF / RTF): reference/06-import.md
+      - Word (.docx): reference/11-docx.md
+      - Encryption: reference/07-encryption.md
+      - Desktop editor: reference/08-editor.md
+      - CLI: reference/09-cli.md
+      - Helpers: reference/10-helpers.md
+      - Full API: reference/API.md
+  - Cookbook:
+      - Invoice: cookbook/invoice.md
+      - Certificate: cookbook/certificate.md
+      - Batch PDF: cookbook/batch-pdf.md
+      - PDF import & edit: cookbook/pdf-import-edit.md
+      - Encrypted template: cookbook/encrypted-template.md
+  - Advanced:
+      - Extending: advanced/extending.md
+      - File format: advanced/file-format.md
+      - Troubleshooting: advanced/troubleshooting.md

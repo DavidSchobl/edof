@@ -226,6 +226,9 @@ class PdfWriter:
         self._page_resources: List[dict] = []   # {fonts:{name:obj_num}, xobjects:{name:obj_num}}
         self._fonts: Dict[str, int]   = {}      # font_name → obj_num
         self._images: Dict[str, int]  = {}      # image_id  → obj_num
+        # v4.1.17.4: attached files (PDF embedded files / file attachments)
+        # Each tuple: (filename, mime_type, raw_bytes, description)
+        self._attachments: List[Tuple[str, str, bytes, str]] = []
         self._title    = title
         self._author   = author
         self._subject  = subject
@@ -238,6 +241,20 @@ class PdfWriter:
         n = self._next_obj_num()
         self._objects.append(_Obj(n, body))
         return n
+
+    # ── Attached files (PDF embedded files) ─────────────────────────────────
+
+    def attach_file(self, filename: str, data: bytes,
+                    mime_type: str = "application/octet-stream",
+                    description: str = "") -> None:
+        """v4.1.17.4: Attach a file inside the PDF. The file appears in the
+        viewer's Attachments / Paperclip panel and can be extracted with any
+        standard tool (Adobe Reader, qpdf, pdfdetach).
+
+        Typical use: embed the source .edof so the document can be re-edited
+        from the PDF later.
+        """
+        self._attachments.append((filename, mime_type, data, description))
 
     # ── Pages ────────────────────────────────────────────────────────────────
 
@@ -399,8 +416,60 @@ class PdfWriter:
         info_body = b"<< " + b" ".join(info_parts) + b" >>"
         info_num = self._add_object(info_body)
 
-        # 6. Catalog
-        catalog_body = (b"<< /Type /Catalog /Pages " + str(pages_obj_num).encode() + b" 0 R >>")
+        # 6. Catalog (with optional embedded files name tree)
+        # v4.1.17.4: emit any attached files (EF streams + Filespec dicts) and
+        # link them through /Names /EmbeddedFiles name tree on the catalog so
+        # PDF viewers expose them in their Attachments panel.
+        ef_name_tree_ref = None
+        if self._attachments:
+            file_specs: List[Tuple[bytes, int]] = []   # (pdf_name_string, filespec_obj_num)
+            for fname, mime, data, descr in self._attachments:
+                # Compress with flate
+                compressed = zlib.compress(data, 9)
+                # MD5 checksum (raw bytes per PDF spec)
+                import hashlib
+                md5 = hashlib.md5(data).digest()
+                # EmbeddedFile stream object
+                ef_body = (
+                    b"<< /Type /EmbeddedFile " +
+                    b"/Subtype /" + mime.replace("/", "#2F").encode() + b" " +
+                    b"/Filter /FlateDecode " +
+                    f"/Length {len(compressed)} ".encode() +
+                    b"/Params << " +
+                    f"/Size {len(data)} ".encode() +
+                    b"/CheckSum <" + md5.hex().encode() + b"> " +
+                    b">> >>\n" +
+                    b"stream\n" + compressed + b"\nendstream"
+                )
+                ef_num = self._add_object(ef_body)
+                # Filespec dictionary
+                fs_body = (
+                    b"<< /Type /Filespec /F " + _pdf_string(fname) + b" " +
+                    b"/UF " + _pdf_string(fname) + b" " +
+                    (b"/Desc " + _pdf_string(descr) + b" " if descr else b"") +
+                    b"/EF << /F " + str(ef_num).encode() + b" 0 R " +
+                    b"/UF " + str(ef_num).encode() + b" 0 R >> >>"
+                )
+                fs_num = self._add_object(fs_body)
+                file_specs.append((_pdf_string(fname), fs_num))
+            # /Names sub-tree: { /Names [ name1, ref1, name2, ref2, ... ] }
+            names_kids = b" ".join(
+                fs_name + b" " + str(fs_num).encode() + b" 0 R"
+                for fs_name, fs_num in file_specs
+            )
+            ef_tree_body = b"<< /Names [ " + names_kids + b" ] >>"
+            ef_name_tree_ref = self._add_object(ef_tree_body)
+
+        catalog_parts = [b"/Type /Catalog",
+                          b"/Pages " + str(pages_obj_num).encode() + b" 0 R"]
+        if ef_name_tree_ref is not None:
+            catalog_parts.append(
+                b"/Names << /EmbeddedFiles " + str(ef_name_tree_ref).encode() +
+                b" 0 R >>"
+            )
+            # Hint to viewers: show attachments panel by default
+            catalog_parts.append(b"/PageMode /UseAttachments")
+        catalog_body = b"<< " + b" ".join(catalog_parts) + b" >>"
         catalog_num  = self._add_object(catalog_body)
 
         # 7. Build the file
@@ -450,7 +519,14 @@ class PdfPage:
         self._writer_save = self._save_to_writer
 
     def _save_to_writer(self):
+        # v4.1.0 CRITICAL FIX: append the new content, then RESET the buffer.
+        # Previously the buffer was never cleared, so every subsequent emit
+        # (text, shape, image) would re-append all previously emitted operations
+        # cumulatively, leading to N(N+1)/2 stream growth and massive duplicate
+        # text in the PDF text layer. Reported by user @4.0.3.
         self.writer.append_content(self._idx, self._buf.getvalue())
+        self._buf.seek(0)
+        self._buf.truncate(0)
 
     def _mm_to_pt(self, mm: float) -> float:
         return mm / 25.4 * 72
@@ -458,6 +534,35 @@ class PdfPage:
     def _y_pdf(self, y_mm: float) -> float:
         """Convert top-left-origin y (mm) to bottom-left-origin y (pt)."""
         return self.h_pt - self._mm_to_pt(y_mm)
+
+    # ── v4.1.17: transform state for rotated objects ────────────────────────
+    def save_state(self):
+        """Push graphics state (q operator)."""
+        self._buf.write(b"q\n")
+        self._save_to_writer()
+
+    def restore_state(self):
+        """Pop graphics state (Q operator)."""
+        self._buf.write(b"Q\n")
+        self._save_to_writer()
+
+    def rotate_at(self, angle_deg: float, cx_mm: float, cy_mm: float):
+        """Apply rotation around the given centre. Affects subsequent draws
+        until restore_state(). Angle in degrees CW (matches Transform.rotation)."""
+        import math as _m
+        # In PDF, y is flipped relative to mm. Our angle convention is CW in
+        # top-left coords → CCW in bottom-left PDF coords. Negate angle.
+        a = _m.radians(-float(angle_deg))
+        c = _m.cos(a); s = _m.sin(a)
+        cx_pt = self._mm_to_pt(cx_mm)
+        cy_pt = self._y_pdf(cy_mm)
+        # Combined matrix: T(cx,cy) × R(a) × T(-cx,-cy)
+        # = [c -s  cx*(1-c)+cy*s]
+        #   [s  c  cy*(1-c)-cx*s]
+        e = cx_pt * (1 - c) + cy_pt * s
+        f = cy_pt * (1 - c) - cx_pt * s
+        self._buf.write(f"{c:.6f} {s:.6f} {-s:.6f} {c:.6f} {e:.6f} {f:.6f} cm\n".encode())
+        self._save_to_writer()
 
     def _color_op(self, color, op_fill: bool) -> bytes:
         """Generate PDF color operator. color = (r,g,b) or (r,g,b,a) 0-255."""

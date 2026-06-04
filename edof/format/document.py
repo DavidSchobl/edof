@@ -294,8 +294,8 @@ class Page:
         accent_color: tuple = (83, 74, 183, 255),
         bg_color: tuple = (255, 255, 255, 255),
         border_color: tuple = (220, 220, 230, 255),
-        title_font_size: float = 14,
-        body_font_size: float = 10,
+        title_font_size: float = 4.939,
+        body_font_size: float = 3.528,
         unit: str = "mm",
     ) -> Group:
         """Card widget: rounded background + accent header + title + body text."""
@@ -304,7 +304,7 @@ class Page:
         # Background
         bg = Shape(shape_type="rect")
         bg.transform = Transform(x=x, y=y, width=w, height=h)
-        bg.fill.color = bg_color; bg.stroke.color = border_color; bg.stroke.width = 0.5
+        bg.fill.color = bg_color; bg.stroke.color = border_color; bg.stroke.width = 0.176
         bg.corner_radius = 2.0
         g.children.append(bg)
         # Accent bar
@@ -354,14 +354,14 @@ class Page:
         # Label
         tl = TextBox(text=label)
         tl.transform = Transform(x=x, y=y+val_h, width=w, height=h*0.25)
-        tl.style.font_size = 9; tl.style.alignment = "center"
+        tl.style.font_size = 3.175; tl.style.alignment = "center"
         tl.style.color = (100, 100, 120); tl.style.padding = 0.5
         g.children.append(tl)
         # Subtitle
         if subtitle:
             ts = TextBox(text=subtitle)
             ts.transform = Transform(x=x, y=y+val_h+h*0.25, width=w, height=h*0.2)
-            ts.style.font_size = 8; ts.style.alignment = "center"
+            ts.style.font_size = 2.822; ts.style.alignment = "center"
             ts.style.color = (160, 160, 180); ts.style.padding = 0.5
             g.children.append(ts)
         return self.add_object(g)  # type: ignore[return-value]
@@ -376,7 +376,7 @@ class Page:
         header_color: tuple = (83, 74, 183, 255),
         alt_color: tuple = (245, 245, 252, 255),
         border_color: tuple = (200, 200, 215, 255),
-        font_size: float = 9.0,
+        font_size: float = 3.175,
         unit: str = "mm",
     ) -> Group:
         """Simple table widget."""
@@ -399,7 +399,7 @@ class Page:
                 bg.fill.color = alt_color
             else:
                 bg.fill.color = (255, 255, 255, 255)
-            bg.stroke.color = border_color; bg.stroke.width = 0.3
+            bg.stroke.color = border_color; bg.stroke.width = 0.106
             g.children.append(bg)
             # Cells
             for ci, cell in enumerate(row):
@@ -423,7 +423,7 @@ class Page:
         key_width_frac: float = 0.4,
         key_color: tuple = (100, 100, 130),
         value_color: tuple = (20, 20, 40),
-        font_size: float = 9.0,
+        font_size: float = 3.175,
         unit: str = "mm",
     ) -> Group:
         """Key-value definition list widget."""
@@ -616,6 +616,12 @@ class Document:
         # Used by the editor as snap targets; not enforced at render/export.
         # None = no margins set.
         self.margins:  Optional[tuple] = None
+        # v4.1.0: document mode — "empty" (default) or "document" (word-style flow)
+        self.mode: str = "empty"
+        # v4.1.19: when mode == "document", body holds the flow data structures.
+        # When mode != "document", body is None and pages[] holds free-form objects.
+        from edof.format.document_body import DocumentBody
+        self.body: Optional[DocumentBody] = None
 
     # ── Error state ───────────────────────────────────────────────────────────
 
@@ -725,6 +731,24 @@ class Document:
             dpi=dpi, color_space=color_space,
             bit_depth=bit_depth, format=format,
         )
+
+    def export_all_pages(self, path_pattern: str = "page_{n}.png",
+                          dpi: Optional[int] = None,
+                          color_space: Optional[str] = None,
+                          bit_depth: Optional[int] = None,
+                          format: str = "PNG",
+                          jpeg_quality: int = 95) -> List[str]:
+        """v4.1.0: Export every page to a separate file.
+
+        path_pattern can contain {n} (0-based) and {page} (1-based). E.g.
+        "out/page_{n}.png" or "doc-page-{page}.jpg".
+
+        Returns list of written file paths.
+        """
+        from edof.export.bitmap import export_all_pages as _export_all
+        return _export_all(self, path_pattern, dpi=dpi,
+                            color_space=color_space, bit_depth=bit_depth,
+                            format=format, jpeg_quality=jpeg_quality)
 
     def export_pdf(self, path: str, vector: bool = True,
                     dpi: Optional[int] = None) -> None:
@@ -975,6 +999,9 @@ class Document:
             "variables": self.variables.to_dict(),
             "resources": self.resources.index_dict(),
             "margins":   list(self.margins) if self.margins else None,
+            "mode":      self.mode,
+            # v4.1.19: document-mode body (only present when mode == "document")
+            "body":      self.body.to_dict() if self.body else None,
         }
 
     @classmethod
@@ -1004,6 +1031,13 @@ class Document:
         margins = d.get("margins")
         if margins and isinstance(margins, (list, tuple)) and len(margins) == 4:
             doc.margins = tuple(float(x) for x in margins)
+        # v4.1.0
+        doc.mode = d.get("mode", "empty")
+        # v4.1.19: deserialize body when document mode is set
+        body_dict = d.get("body")
+        if body_dict and doc.mode == "document":
+            from edof.format.document_body import DocumentBody
+            doc.body = DocumentBody.from_dict(body_dict)
         return doc
 
     def __repr__(self) -> str:

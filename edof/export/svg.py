@@ -73,9 +73,10 @@ def _color(c):
 
 
 def _emit(obj, ctx):
-    from edof.format.objects import (TextBox, ImageBox, Shape, QRCode, Group, Table)
+    from edof.format.objects import (TextBox, ImageBox, Shape, QRCode, Group, Table, SvgBox)
     if isinstance(obj, TextBox):  return _emit_textbox(obj, ctx)
     if isinstance(obj, ImageBox): return _emit_imagebox(obj, ctx)
+    if isinstance(obj, SvgBox):   return _emit_svgbox(obj, ctx)
     if isinstance(obj, Shape):    return _emit_shape(obj, ctx)
     if isinstance(obj, QRCode):   return _emit_qrcode(obj, ctx)
     if isinstance(obj, Table):    return _emit_table(obj, ctx)
@@ -87,6 +88,41 @@ def _emit(obj, ctx):
                 out.extend(_emit(child, ctx))
         return out
     return []
+
+
+def _emit_svgbox(obj, ctx):
+    """v4.1.13: Embed an SvgBox's original SVG XML as a nested <g> with
+    appropriate transforms. We strip the outer <svg> tag to inline the
+    contents into the parent <svg>."""
+    import re as _re
+    t = obj.transform
+    xml = obj.svg_xml or ""
+    if not xml: return []
+    # Extract inner content between <svg ...> and </svg>
+    m = _re.search(r"<svg\b[^>]*>(.*)</svg>", xml, _re.DOTALL | _re.IGNORECASE)
+    if not m: return []
+    inner = m.group(1)
+    # Extract viewBox / width / height from the outer svg
+    head_m = _re.search(r"<svg\b([^>]*)>", xml, _re.IGNORECASE)
+    head = head_m.group(1) if head_m else ""
+    vb_m = _re.search(r'viewBox="([^"]+)"', head)
+    if vb_m:
+        try:
+            vx, vy, vw, vh = (float(x) for x in vb_m.group(1).split())
+        except Exception:
+            vx, vy, vw, vh = 0, 0, 100, 100
+    else:
+        vx, vy, vw, vh = 0, 0, 100, 100
+    if vw <= 0: vw = 100
+    if vh <= 0: vh = 100
+    sx = t.width / vw
+    sy = t.height / vh
+    return [
+        f'<g transform="translate({t.x},{t.y}) scale({sx},{sy}) '
+        f'translate({-vx},{-vy})">',
+        inner,
+        '</g>',
+    ]
 
 
 def _emit_textbox(obj, ctx):
@@ -119,8 +155,8 @@ def _emit_textbox(obj, ctx):
         if obj.style.underline:     deco.append("underline")
         if obj.style.strikethrough: deco.append("line-through")
 
-        # Approximate vertical alignment
-        font_size_mm = obj.style.font_size / 72 * 25.4
+        # v4.1.17: obj.style.font_size is now in mm directly
+        font_size_mm = obj.style.font_size
         if   obj.style.vertical_align == "middle": y_text = t.y + t.height/2 + font_size_mm * 0.35
         elif obj.style.vertical_align == "bottom": y_text = t.y + t.height - pad
         else:                                       y_text = t.y + pad + font_size_mm * 0.8
@@ -138,7 +174,7 @@ def _emit_textbox(obj, ctx):
             out.append(
                 f'<text x="{x_text}" y="{line_y}" '
                 f'font-family="{_xml.escape(obj.style.font_family)}" '
-                f'font-size="{obj.style.font_size}pt" '
+                f'font-size="{font_size_mm}mm" '
                 f'font-weight="{font_w}" font-style="{font_s}"'
                 f'{deco_attr} '
                 f'fill="{_color(obj.style.color)}" '
@@ -151,9 +187,9 @@ def _emit_runs(obj, x_mm, y_mm, w_mm, h_mm):
     """Emit rich-text runs as <tspan> elements within a <text>."""
     out = []
     parent = obj.style
-    # Approximate baseline
-    line_h_mm = parent.font_size / 72 * 25.4 * parent.line_height
-    base_y = y_mm + parent.font_size / 72 * 25.4 * 0.8
+    # v4.1.17: parent.font_size is now mm
+    line_h_mm = parent.font_size * parent.line_height
+    base_y = y_mm + parent.font_size * 0.8
 
     # Build single <text> element with multiple <tspan>s
     spans = []
@@ -167,7 +203,7 @@ def _emit_runs(obj, x_mm, y_mm, w_mm, h_mm):
         deco_attr = f' text-decoration="{" ".join(deco)}"' if deco else ""
         color = rs["color"] if rs["color"] else (0, 0, 0)
         span = (f'<tspan font-family="{_xml.escape(rs["font_family"])}" '
-                f'font-size="{rs["font_size"]}pt" '
+                f'font-size="{rs["font_size"]}mm" '
                 f'font-weight="{weight}" font-style="{style}"'
                 f'{deco_attr} '
                 f'fill="{_color(color)}">{_xml.escape(run.text)}</tspan>')
@@ -226,23 +262,31 @@ def _emit_shape(obj, ctx):
                        f'fill="{fill_attr}" stroke="{stroke_str}" stroke-width="{sw}" />')
     elif obj.shape_type == SHAPE_PATH:
         if obj.path_data:
-            d = _path_to_svg_d(obj.path_data)
+            # v4.1.13.2: path_data is in LOCAL coords (relative to
+            # transform.x/y). For correct SVG positioning, we need to
+            # shift by (t.x, t.y) so the path appears at the same place
+            # in the exported SVG.
+            d = _path_to_svg_d(obj.path_data, dx=t.x, dy=t.y)
             out.append(f'<path d="{d}" '
                        f'fill="{fill_attr}" stroke="{stroke_str}" stroke-width="{sw}" />')
     return out
 
 
-def _path_to_svg_d(path_data):
+def _path_to_svg_d(path_data, dx=0.0, dy=0.0):
+    """v4.1.13.2: optionally shift all coords by (dx, dy) on output."""
     parts = []
     for cmd in path_data:
         if not cmd: continue
         op = cmd[0]
         if op in ("M", "L"):
-            parts.append(f"{op}{cmd[1]} {cmd[2]}")
+            parts.append(f"{op}{cmd[1]+dx} {cmd[2]+dy}")
         elif op == "C":
-            parts.append(f"C{cmd[1]} {cmd[2]} {cmd[3]} {cmd[4]} {cmd[5]} {cmd[6]}")
+            parts.append(f"C{cmd[1]+dx} {cmd[2]+dy} "
+                          f"{cmd[3]+dx} {cmd[4]+dy} "
+                          f"{cmd[5]+dx} {cmd[6]+dy}")
         elif op == "Q":
-            parts.append(f"Q{cmd[1]} {cmd[2]} {cmd[3]} {cmd[4]}")
+            parts.append(f"Q{cmd[1]+dx} {cmd[2]+dy} "
+                          f"{cmd[3]+dx} {cmd[4]+dy}")
         elif op == "Z":
             parts.append("Z")
     return " ".join(parts)
@@ -351,13 +395,13 @@ def _emit_table(obj, ctx):
                     if v is not None:
                         cell_text = cell_text.replace("{" + name + "}", str(v))
             if cell_text:
-                font_size_mm = cell.style.font_size / 72 * 25.4
+                font_size_mm = cell.style.font_size  # v4.1.17: already mm
                 ty = cy + ch/2 + font_size_mm * 0.35
                 tx = cx + cw/2
                 out.append(
                     f'<text x="{tx}" y="{ty}" text-anchor="middle" '
                     f'font-family="{_xml.escape(cell.style.font_family)}" '
-                    f'font-size="{cell.style.font_size}pt" '
+                    f'font-size="{font_size_mm}mm" '
                     f'font-weight="{"bold" if cell.style.bold else "normal"}" '
                     f'fill="{_color(cell.style.color)}">{_xml.escape(cell_text)}</text>'
                 )

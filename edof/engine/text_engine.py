@@ -220,30 +220,54 @@ def find_fitting_size(text: str, max_w_px: int, max_h_px: int,
                       wrap: bool = True, shrink_only: bool = True) -> float:
     if not text: return style.font_size
 
-    def _pt_px(pt): return max(1, int(pt * dpi / 72.0))
+    # v4.1.17: font_size is in mm now; convert mm → px for font loading
+    def _mm_px(mm): return max(1, int(mm * dpi / 25.4))
 
-    if load_font(style.font_family, style.bold, style.italic, _pt_px(12), font_data) is None:
+    if load_font(style.font_family, style.bold, style.italic, _mm_px(4.233), font_data) is None:
         return style.font_size
 
-    lo = max(1.0, style.min_font_size)
-    hi = style.font_size if shrink_only else style.max_font_size
+    lo = max(0.1, style.min_font_size)
+    # v4.1.19.6: cap binary-search upper bound for font growth.
+    # Three cases for auto_fill (shrink_only=False):
+    #   1. User checked "∞ no limit" → max_font_size = 1e6. Loading a font at
+    #      1e6 mm fails (PIL can't rasterise glyphs that huge), so search
+    #      aborted and returned min_font_size. Fix: use container-based cap.
+    #   2. User set an explicit cap (e.g. 50 mm) → respect it strictly.
+    #   3. Default 70.555 mm (~200 pt) on a fresh textbox → respect it.
+    # Final hi is also clamped at 1000 mm (= 2834 pt) so font loading
+    # always succeeds (font rasteriser limits).
+    if shrink_only:
+        hi = style.font_size
+    else:
+        container_h_mm = max_h_px * 25.4 / dpi if dpi else 100.0
+        container_w_mm = max_w_px * 25.4 / dpi if dpi else 100.0
+        container_cap = max(container_h_mm, container_w_mm) * 1.5
+        if style.max_font_size >= 9999:
+            # "∞ no limit" → grow until the container is full
+            hi = min(container_cap, 1000.0)
+        else:
+            # Explicit cap → respect it (clamp to font-loader hard limit)
+            hi = min(float(style.max_font_size), 1000.0)
 
     if shrink_only:
-        probe = load_font(style.font_family, style.bold, style.italic, _pt_px(hi), font_data)
+        probe = load_font(style.font_family, style.bold, style.italic, _mm_px(hi), font_data)
         if probe and _fits(text, probe, max_w_px, max_h_px, style.line_height, wrap):
             return hi
 
     best = lo
     for _ in range(28):
         mid = (lo + hi) / 2.0
-        f   = load_font(style.font_family, style.bold, style.italic, _pt_px(mid), font_data)
+        f   = load_font(style.font_family, style.bold, style.italic, _mm_px(mid), font_data)
         if f is None: break
         if _fits(text, f, max_w_px, max_h_px, style.line_height, wrap):
             best = mid; lo = mid
         else:
             hi = mid
-        if hi - lo < 0.02: break
-    return best
+        if hi - lo < 0.005: break
+    # v4.1.19.9: safety margin (see find_fitting_scale comment) — avoids
+    # the last character being pushed to a new line by rounding mismatch
+    # between fit check and final layout.
+    return best * 0.995
 
 # ── Auto-height helper (item 6) ───────────────────────────────────────────────
 
@@ -251,13 +275,18 @@ def measure_text_height(text: str, style: TextStyle, width_mm: float,
                         dpi: float = 96,
                         font_data: Optional[bytes] = None) -> float:
     """Height in mm needed to render text at given style inside width_mm."""
-    pad_mm = getattr(style, 'padding', 1.0)
-    iw_px  = max(1, int(mm_to_px(max(0, width_mm - 2 * pad_mm), dpi)))
-    sz_px  = max(1, int(style.font_size * dpi / 72.0))
+    # v4.1.0: per-side padding
+    if hasattr(style, 'get_padding'):
+        pt_mm, pr_mm, pb_mm, pl_mm = style.get_padding()
+    else:
+        pad_mm = getattr(style, 'padding', 1.0)
+        pt_mm = pr_mm = pb_mm = pl_mm = pad_mm
+    iw_px  = max(1, int(mm_to_px(max(0, width_mm - pl_mm - pr_mm), dpi)))
+    sz_px  = max(1, int(style.font_size * dpi / 25.4))
     font   = load_font_safe(style.font_family, style.bold, style.italic, sz_px, font_data)
     lines  = wrap_lines(text, font, iw_px if style.wrap else None) if text else ['']
     lh_px  = _lh(font, style.line_height)
-    total  = lh_px * len(lines) + 2 * mm_to_px(pad_mm, dpi)
+    total  = lh_px * len(lines) + mm_to_px(pt_mm + pb_mm, dpi)
     return total / (dpi / 25.4)
 
 # ── Rendering ─────────────────────────────────────────────────────────────────
@@ -267,27 +296,45 @@ def render_text_onto(draw, text: str, style: TextStyle,
                      dpi: float, font_data: Optional[bytes] = None) -> None:
     if not text: return
 
-    pad_mm = getattr(style, 'padding', 1.0)   # item 1
-    pad    = mm_to_px(pad_mm, dpi)
-    ix = x_px + pad; iy = y_px + pad
-    iw = max(1.0, w_px - 2 * pad); ih = max(1.0, h_px - 2 * pad)
+    # v4.1.0: per-side padding (item 4 from user feedback)
+    if hasattr(style, 'get_padding'):
+        pt_mm, pr_mm, pb_mm, pl_mm = style.get_padding()
+    else:
+        pad_mm = getattr(style, 'padding', 1.0)
+        pt_mm = pr_mm = pb_mm = pl_mm = pad_mm
+    pt = mm_to_px(pt_mm, dpi); pr = mm_to_px(pr_mm, dpi)
+    pb = mm_to_px(pb_mm, dpi); pl = mm_to_px(pl_mm, dpi)
+    ix = x_px + pl; iy = y_px + pt
+    iw = max(1.0, w_px - pl - pr); ih = max(1.0, h_px - pt - pb)
 
     if style.auto_fill:
-        fs_pt = find_fitting_size(text, int(iw), int(ih), style,
+        fs_mm = find_fitting_size(text, int(iw), int(ih), style,
                                    dpi=dpi, font_data=font_data,
                                    wrap=style.wrap, shrink_only=False)
     elif style.auto_shrink:
-        fs_pt = find_fitting_size(text, int(iw), int(ih), style,
+        fs_mm = find_fitting_size(text, int(iw), int(ih), style,
                                    dpi=dpi, font_data=font_data,
                                    wrap=style.wrap, shrink_only=True)
     else:
-        fs_pt = style.font_size
+        fs_mm = style.font_size
 
-    sz_px = max(1, int(fs_pt * dpi / 72.0))
+    # v4.1.17: font_size is in mm; convert to px via mm × dpi / 25.4
+    sz_px = max(1, int(fs_mm * dpi / 25.4))
     font  = load_font_safe(style.font_family, style.bold, style.italic, sz_px, font_data)
     lines = wrap_lines(text, font, int(iw) if style.wrap else None)
     lh    = _lh(font, style.line_height)
     total = lh * len(lines)
+
+    # v4.1.0: warn (once per box) if text doesn't fit and auto_shrink is off
+    if total > ih and not style.auto_shrink and not style.auto_fill:
+        import warnings
+        warnings.warn(
+            f"Text overflows textbox: {len(lines)} line(s) at {fs_mm:.2f}mm need "
+            f"{total:.0f}px but box has only {ih:.0f}px inner height. "
+            f"Set style.auto_shrink=True to fit, or increase box height. "
+            f"Set style.overflow_hidden=True to clip.",
+            RuntimeWarning, stacklevel=3
+        )
 
     if   style.vertical_align == 'middle': ty = iy + (ih - total) / 2.0
     elif style.vertical_align == 'bottom': ty = iy + ih - total
@@ -315,7 +362,7 @@ def render_text_onto(draw, text: str, style: TextStyle,
 
 def _run_to_font(run_style: dict, dpi: float):
     """Load a font for a resolved run style dict."""
-    sz_px = max(1, int(run_style["font_size"] * dpi / 72.0))
+    sz_px = max(1, int(run_style["font_size"] * dpi / 25.4))
     return load_font_safe(run_style["font_family"], run_style["bold"],
                           run_style["italic"], sz_px), sz_px
 
@@ -394,8 +441,8 @@ def _layout_runs(runs, parent_style, max_w_px: int, dpi: float,
     line_metrics = []
     for line in lines:
         max_asc = max((seg[4] for seg in line), default=10)
-        max_lh  = max((int(seg[5]["font_size"] * dpi / 72.0 * parent_style.line_height)
-                       for seg in line), default=int(parent_style.font_size * dpi / 72.0 * parent_style.line_height))
+        max_lh  = max((int(seg[5]["font_size"] * dpi / 25.4 * parent_style.line_height)
+                       for seg in line), default=int(parent_style.font_size * dpi / 25.4 * parent_style.line_height))
         line_metrics.append((max_asc, max_lh))
 
     total_h = sum(lh for _, lh in line_metrics)
@@ -415,6 +462,14 @@ def find_fitting_scale(runs, parent_style, max_w_px: int, max_h_px: int,
                        shrink_only: bool = True) -> float:
     """v4.0: For runs, find a global scale factor that fits the box.
     Preserves relative font_size ratios between runs.
+
+    v4.1.19.7: when growing (shrink_only=False, i.e. auto_fill), the upper
+    bound for the scale is derived from style.max_font_size (or the
+    container's own dimensions when the user enabled "∞ no limit"
+    via max_font_size = 1e6). Previously hi was hard-coded to 5.0,
+    which capped text at 5× the natural font size regardless of the
+    user's settings — making both the max_font_size spinbox and the
+    ∞ checkbox effectively non-functional for the runs render path.
     """
     if not runs:
         return 1.0
@@ -424,7 +479,21 @@ def find_fitting_scale(runs, parent_style, max_w_px: int, max_h_px: int,
             return 1.0
         lo, hi = 0.05, 1.0
     else:
-        lo, hi = 0.05, 5.0
+        base_fs = max(0.1, float(parent_style.font_size))
+        container_h_mm = max_h_px * 25.4 / dpi if dpi else 100.0
+        container_w_mm = max_w_px * 25.4 / dpi if dpi else 100.0
+        container_cap_mm = max(container_h_mm, container_w_mm) * 1.5
+        # Three cases:
+        #   1. ∞ no limit (max ≥ 9999 mm sentinel) → grow up to container
+        #   2. Explicit user cap                   → respect it
+        #   3. Default 70.555 mm                    → respect it (legacy)
+        # Hard absolute cap at 1000 mm so font rasterisation always succeeds.
+        if parent_style.max_font_size >= 9999:
+            hi_mm = min(container_cap_mm, 1000.0)
+        else:
+            hi_mm = min(float(parent_style.max_font_size), 1000.0)
+        hi = max(1.0, hi_mm / base_fs)
+        lo = 0.05
 
     best = lo
     for _ in range(28):
@@ -434,7 +503,12 @@ def find_fitting_scale(runs, parent_style, max_w_px: int, max_h_px: int,
         else:
             hi = mid
         if hi - lo < 0.005: break
-    return best
+    # v4.1.19.9: tiny safety margin — the fit check and final layout use
+    # slightly different rounding paths (PIL font metrics quantise to int
+    # pixel widths in places). Without a margin the "just fits" result can
+    # push the last character onto a new line in the actual rendered output.
+    # 0.5% shrink keeps the size visually identical but eliminates the edge.
+    return best * 0.995
 
 
 def render_runs_onto(draw, runs, parent_style,
@@ -474,7 +548,7 @@ def render_runs_onto(draw, runs, parent_style,
             # Baseline alignment: draw at baseline, accounting for ascender
             draw_y = ty + (max_asc - asc)
             draw.text((lx, draw_y), text, font=font, fill=color)
-            sw = max(1, int(rs["font_size"] * dpi / 72.0) // 14)
+            sw = max(1, int(rs["font_size"] * dpi / 25.4) // 14)
             if rs.get("underline"):
                 uy = int(ty + lh * 0.92)
                 draw.line([(lx, uy), (lx + w, uy)], fill=color, width=sw)
