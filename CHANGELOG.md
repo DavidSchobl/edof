@@ -6,6 +6,25 @@ Versioning: SemVer (https://semver.org/)
 
 ================================================================================
 
+## [4.2.4] - 2026-06-05
+
+### Fixed
+- **The Editor and Viewer now show the EDOF icon in the Windows taskbar**
+  (instead of the Python interpreter's icon). Each app sets its own
+  AppUserModelID at startup and an application-level window icon.
+- **File association now always records an absolute path to the real launcher**
+  and never a `.bat`/`.cmd`. Previously the resolver could pick up a launcher
+  `edof-viewer.bat` from the current directory and register it with a relative
+  path (`.\edof-viewer.BAT`), which has no icon and fails on double-click. It
+  now prefers `edof-viewer.exe` / `edof-editor.exe` next to the interpreter,
+  rejects batch files, and falls back to `pythonw -m ...` with absolute paths.
+
+### Changed
+- `edof-editor` and `edof-viewer` are now GUI entry points (no console window
+  flashes on launch); `edof-cli` stays a console command.
+
+================================================================================
+
 ## [4.2.3] - 2026-06-05
 
 ### Changed

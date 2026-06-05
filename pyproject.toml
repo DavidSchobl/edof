@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "edof"
-version         = "4.2.3"
+version         = "4.2.4"
 description     = "Easy Document Format – programmatic document creation, editing and export with vector PDF, rich text, tables and PDF import"
 readme          = "README.md"
 license         = { file = "LICENSE" }
@@ -89,6 +89,8 @@ addopts   = "-v --tb=short"
 source = ["edof"]
 
 [project.scripts]
+edof-cli    = "edof._apps.cli:main"
+
+[project.gui-scripts]
 edof-editor = "edof._apps.editor:main"
 edof-viewer = "edof._apps.viewer:main"
-edof-cli    = "edof._apps.cli:main"

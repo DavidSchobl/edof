@@ -581,9 +581,23 @@ def main():
         print("Install with: pip install edof[viewer]")
         sys.exit(1)
 
+    # v4.2.4: own taskbar identity so Windows shows the EDOF icon, not Python's.
+    try:
+        from edof._apps.assets import set_windows_app_id
+        set_windows_app_id("DavidSchobl.EDOF.Viewer")
+    except Exception:
+        pass
+
     app = QApplication(sys.argv)
     app.setApplicationName("EDOF Viewer")
     app.setApplicationVersion(edof.__version__)
+    try:
+        from edof._apps.assets import icon_path
+        _ip = icon_path("edof-viewer.ico") or icon_path("edof-viewer.png")
+        if _ip:
+            app.setWindowIcon(QIcon(_ip))
+    except Exception:
+        pass
 
     # Optional file argument
     filepath = None

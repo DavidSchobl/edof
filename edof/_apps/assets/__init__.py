@@ -32,3 +32,21 @@ def app_icon_name(kind: str, ext: str = "ico") -> str:
     """Map a logical kind to an icon file name. kind in {editor,viewer,document}."""
     kind = kind if kind in ("editor", "viewer", "document") else "document"
     return f"edof-{kind}.{ext}"
+
+
+def set_windows_app_id(app_id: str) -> None:
+    """Give this process its own Windows taskbar identity.
+
+    Without this, a GUI launched under python/pythonw is grouped under the host
+    interpreter and the taskbar shows the interpreter's icon instead of the
+    app's window icon. Must be called early, before any window is shown. No-op
+    off Windows.
+    """
+    import sys
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(str(app_id))
+    except Exception:
+        pass

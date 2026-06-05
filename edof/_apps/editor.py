@@ -12280,6 +12280,13 @@ def _tpl_invoice():
 
 
 def main():
+    # v4.2.4: own taskbar identity so Windows shows the EDOF icon, not Python's.
+    try:
+        from edof._apps.assets import set_windows_app_id
+        set_windows_app_id("DavidSchobl.EDOF.Editor")
+    except Exception:
+        pass
+
     # Remove Qt image allocation limit (default 256 MB blocks large print jobs)
     try:
         from PyQt6.QtGui import QImageReader
@@ -12321,6 +12328,13 @@ def main():
 
     app=QApplication(sys.argv); app.setApplicationName("EDOF Editor")
     app.setApplicationVersion(edof.__version__)
+    try:
+        from edof._apps.assets import icon_path
+        _ip = icon_path("edof-editor.ico") or icon_path("edof-editor.png")
+        if _ip:
+            app.setWindowIcon(QIcon(_ip))
+    except Exception:
+        pass
     try:
         win=EdofEditor(sys.argv[1] if len(sys.argv)>1 else None)
         win.show()

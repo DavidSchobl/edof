@@ -17,31 +17,46 @@ import subprocess
 from pathlib import Path
 
 
-def _find_viewer_executable():
-    """Locate the edof-viewer command in PATH."""
-    exe = shutil.which("edof-viewer")
-    if exe:
-        return exe
-    # Fallback: try Python module invocation
+def _find_app_executable(cmd_name: str, module: str) -> str:
+    """Locate a GUI launcher as an ABSOLUTE path, never a .bat/.cmd.
+
+    Order: (1) the generated exe next to the interpreter (Scripts/ for pip
+    installs), (2) PATH via shutil.which but rejecting .bat/.cmd and forced to
+    absolute, (3) fall back to running the module with the interpreter
+    (pythonw on Windows so no console appears). This avoids picking up a
+    launcher .bat from the current directory, which has no icon and breaks when
+    invoked with a relative path.
+    """
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if sys.executable else ""
+    names = [cmd_name + ".exe", cmd_name] if os.name == "nt" else [cmd_name]
+    for d in ([os.path.join(exe_dir, "Scripts"), exe_dir] if exe_dir else []):
+        for n in names:
+            p = os.path.join(d, n)
+            if os.path.isfile(p) and not p.lower().endswith((".bat", ".cmd")):
+                return os.path.abspath(p)
+    found = shutil.which(cmd_name)
+    if found and not found.lower().endswith((".bat", ".cmd")):
+        return os.path.abspath(found)
     if sys.executable:
-        return f'"{sys.executable}" -m edof._apps.viewer'
+        py = os.path.abspath(sys.executable)
+        if os.name == "nt":
+            pyw = os.path.join(os.path.dirname(py), "pythonw.exe")
+            if os.path.isfile(pyw):
+                py = pyw
+        return f'"{py}" -m {module}'
     raise RuntimeError(
-        "Could not locate edof-viewer executable. "
-        "Make sure edof[viewer] is installed: pip install 'edof[viewer]'"
+        f"Could not locate {cmd_name}. Install with: pip install 'edof[all]'"
     )
+
+
+def _find_viewer_executable():
+    """Locate the edof-viewer launcher (absolute path, never a .bat)."""
+    return _find_app_executable("edof-viewer", "edof._apps.viewer")
 
 
 def _find_editor_executable():
-    """Locate the edof-editor command in PATH (fallback to module invocation)."""
-    exe = shutil.which("edof-editor")
-    if exe:
-        return exe
-    if sys.executable:
-        return f'"{sys.executable}" -m edof._apps.editor'
-    raise RuntimeError(
-        "Could not locate edof-editor executable. "
-        "Make sure edof[editor] is installed: pip install 'edof[all]'"
-    )
+    """Locate the edof-editor launcher (absolute path, never a .bat)."""
+    return _find_app_executable("edof-editor", "edof._apps.editor")
 
 
 def _cmd_with_arg(exe: str) -> str:
