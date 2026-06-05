@@ -85,7 +85,8 @@ def new(width: float = 210.0, height: float = 297.0, **kwargs) -> Document:
     Example:
         >>> import edof
         >>> doc = edof.new(210, 297, title="Hello", dpi=300)
-        >>> page = doc.pages[0]
+        >>> page = doc.add_page()
+        >>> page.add_textbox(15, 15, 180, 12, "Hello world!")
         >>> doc.save("hello.edof")
     """
     return Document(width=width, height=height, **kwargs)

@@ -6,7 +6,7 @@ The `.edof` file is a ZIP archive. This document describes its internal structur
 - Understand the encryption layout
 - Debug corruption issues
 
-> Format version covered: **4.0.1**
+> Format version covered: **4.2.0**
 
 ---
 
@@ -43,7 +43,7 @@ Top-level metadata. Always cleartext (even in encrypted archives).
 
 ```json
 {
-  "edof_version": "4.0.1",
+  "edof_version": "4.2.0",
   "title": "Certificate",
   "author": "Jan Novák",
   "description": "Internal certificate template",
@@ -148,7 +148,7 @@ The main payload. Schema (simplified):
     }
   },
   "metadata": {
-    "edof_version": "4.0.1",
+    "edof_version": "4.2.0",
     "created_at": "2026-05-04T10:30:00Z",
     "modified_at": "2026-05-04T11:45:00Z"
   }
@@ -179,7 +179,7 @@ secret.edof  (ZIP archive)
 
 ```json
 {
-  "edof_version": "4.0.1",
+  "edof_version": "4.2.0",
   "title": "<encrypted>",
   "author": "<encrypted>",
   "description": "<encrypted>",
@@ -274,7 +274,7 @@ template.edof  (ZIP archive)
 
 ```json
 {
-  "edof_version": "4.0.1",
+  "edof_version": "4.2.0",
   "title": "Confidential Template",
   "pages": 5,
   "id": "abc123-...",
@@ -403,6 +403,7 @@ Future format versions may change `iterations` (the manifest field is honored, s
 
 | Reader version | Plain v4 | Encrypted v4 | v3 | v2 |
 |---|---|---|---|---|
+| 4.2.x | ✅ | ✅ | ✅ (auto-upgrade) | ✅ (auto-migrate) |
 | 4.0.1 | ✅ | ✅ | ✅ (auto-upgrade) | ✅ (auto-migrate) |
 | 4.0.0 | ✅ | ❌ (encryption added in 4.0.1) | ✅ | ✅ |
 | 3.x | ⚠️ (newer-version warning, fields dropped) | ❌ | ✅ | ✅ |
@@ -427,7 +428,7 @@ from edof.format.serializer import EdofSerializer
 manifest = EdofSerializer.peek("secret.edof")
 print(manifest)
 # {
-#   "edof_version": "4.0.1",
+#   "edof_version": "4.2.0",
 #   "pages": 5,
 #   "title": "Confidential" (or "<encrypted>" for full mode),
 #   "protection": {

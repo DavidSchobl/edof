@@ -230,13 +230,28 @@ def _sync_body_from_textboxes(doc) -> None:
     para_runs = _split_runs_at_newlines(all_runs)
     old_paragraphs = doc.body.paragraphs or []
     new_paragraphs: List[Paragraph] = []
+
+    def _runs_align(runs):
+        # v4.2.1: the editor stamps the chosen alignment onto the runs of a
+        # paragraph (set_alignment). Promote that onto Paragraph.alignment so
+        # it is the durable, canonical home: it survives serialization and is
+        # read by the renderer, the .docx exporter and style resolution. Without
+        # this the alignment lived only on the runs / the page-local map and was
+        # lost on save and on export.
+        for _r in runs:
+            a = getattr(_r, 'alignment', None)
+            if a:
+                return a
+        return None
+
     for i, runs in enumerate(para_runs):
+        run_al = _runs_align(runs)
         if i < len(old_paragraphs):
             old = old_paragraphs[i]
             new_p = Paragraph(
                 runs=runs,
                 style_id=old.style_id,
-                alignment=old.alignment,
+                alignment=(run_al if run_al is not None else old.alignment),
                 line_height=old.line_height,
                 space_before_mm=old.space_before_mm,
                 space_after_mm=old.space_after_mm,
@@ -251,7 +266,7 @@ def _sync_body_from_textboxes(doc) -> None:
                 widow_orphan_control=old.widow_orphan_control,
             )
         else:
-            new_p = Paragraph(runs=runs)
+            new_p = Paragraph(runs=runs, alignment=run_al)
         new_paragraphs.append(new_p)
     # v4.1.23.52: once pagination has run, the page bodies' hard-break flags are
     # the authoritative source of truth for page_break_before. Re-apply it so a

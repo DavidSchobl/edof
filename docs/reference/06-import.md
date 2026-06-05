@@ -142,7 +142,7 @@ If you want to inspect a file's version without loading it:
 from edof.format.serializer import EdofSerializer
 
 manifest = EdofSerializer.peek("unknown.edof")
-print(manifest.get("edof_version"))   # e.g. "4.0.1" or "3.1.0"
+print(manifest.get("edof_version"))   # e.g. "4.2.0" or "3.0.0"
 ```
 
 `peek()` reads only the manifest, not the document content. It works on encrypted files too — you'll see the protection block but no actual content.

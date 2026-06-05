@@ -55,7 +55,7 @@ edof-editor
 
 ## Side-by-side version installs
 
-If you need multiple edof versions for testing (or to compare 4.0.1 against an older release without uninstalling the old one), use isolated virtualenvs.
+If you need multiple edof versions for testing (or to compare one release against an older one without uninstalling the old one), use isolated virtualenvs.
 
 **Windows:**
 
@@ -64,7 +64,7 @@ mkdir D:\apps\Edof_V401
 cd D:\apps\Edof_V401
 python -m venv .venv
 .venv\Scripts\activate
-pip install edof[all]==4.0.1
+pip install edof[all]==4.2.2
 deactivate
 ```
 
@@ -73,7 +73,7 @@ A small batch script makes switching painless. Save as `D:\apps\bin\edof401.bat`
 ```bat
 @echo off
 call D:\apps\Edof_V401\.venv\Scripts\activate.bat
-cmd /k prompt [edof v4.0.1] $P$G
+cmd /k prompt [edof v4.2.2] $P$G
 ```
 
 Then `edof401` in any cmd window puts you in that version's environment.
@@ -85,7 +85,7 @@ mkdir -p ~/apps/edof-401
 cd ~/apps/edof-401
 python -m venv .venv
 source .venv/bin/activate
-pip install edof[all]==4.0.1
+pip install edof[all]==4.2.2
 deactivate
 ```
 

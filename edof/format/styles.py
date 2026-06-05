@@ -330,13 +330,15 @@ class TextRun:
         if self.background    is not None: d["background"]    = _rgba_to_hex(self.background)
         if self.line_height   is not None: d["line_height"]   = self.line_height
         if self.letter_spacing is not None: d["letter_spacing"] = self.letter_spacing
+        if self.alignment     is not None: d["alignment"]     = self.alignment
         return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "TextRun":
         r = cls(text=d.get("text", ""))
         for k in ("font_family", "font_size", "bold", "italic",
-                  "underline", "strikethrough", "line_height", "letter_spacing"):
+                  "underline", "strikethrough", "line_height", "letter_spacing",
+                  "alignment"):
             if k in d: setattr(r, k, d[k])
         for k in ("color", "background"):
             if k in d:

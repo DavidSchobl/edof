@@ -25,7 +25,7 @@ Output:
 Title:    Certificate
 Author:   Jan Novák
 Pages:    1
-Format:   4.0.1
+Format:   4.2.0
 Variables: recipient (text, required), score (number, default=0)
 Encrypted: no
 ```

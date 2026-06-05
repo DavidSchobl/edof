@@ -532,6 +532,8 @@ class EdofTextEditor(QWidget):
         # local stacks. Set by the canvas in _start_inline for body editors.
         self._host_undo = None      # callable() -> document-level undo
         self._host_redo = None      # callable() -> document-level redo
+        self._host_save = None      # callable() -> document-level Save (Ctrl+S)
+        self._host_save_as = None   # callable() -> document-level Save As (Ctrl+Shift+S)
         self._on_body_edit = None   # callable() -> checkpoint before an edit burst
         # Idle-overflow auto-commit timer (doc body only)
         self._idle_overflow_timer = QTimer(self)
@@ -1775,6 +1777,16 @@ class EdofTextEditor(QWidget):
                 if k in claim and not ctrl:
                     ev.accept()
                     return True
+                # v4.2.1: in the document body, claim Ctrl+S / Ctrl+Shift+S so
+                # they reach our keyPressEvent (which forwards them to the
+                # window's Save / Save As) instead of being swallowed or, for
+                # Ctrl+Shift+S, triggering the editor's strikethrough action.
+                if (getattr(self, '_is_doc_body', False)
+                        and ctrl and k == Qt.Key.Key_S):
+                    if (self._host_save is not None
+                            or self._host_save_as is not None):
+                        ev.accept()
+                        return True
                 # v4.1.23.38: also claim any Ctrl/Alt combo that maps to a
                 # configured editor action (undo/redo/copy/paste/format/…) so a
                 # window-level QAction (e.g. global Undo on Ctrl+Z) can't eat it
@@ -1860,6 +1872,16 @@ class EdofTextEditor(QWidget):
             # Not in a list → insert a soft 4-space indent so Tab isn't dead.
             self._push_undo("type"); self._insert_text('    '); self._invalidate()
             return
+
+        # v4.2.1: document-level Save / Save As take precedence inside the body
+        # editor, before the configurable dispatch (which maps Ctrl+Shift+S to
+        # strikethrough). Forward to the host window so the standard shortcuts
+        # work while typing.
+        if ctrl and key == Qt.Key.Key_S and getattr(self, '_is_doc_body', False):
+            if shift and self._host_save_as is not None:
+                self._host_save_as(); ev.accept(); return
+            if not shift and self._host_save is not None:
+                self._host_save(); ev.accept(); return
 
         # v4.1.23.37: configurable shortcuts (formatting / clipboard /
         # alignment). Resolved via the user-editable map; unmapped combos

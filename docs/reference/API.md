@@ -1,6 +1,6 @@
 # API reference
 
-_Generated from `edof` 4.2.1 (format 4.2.0)._
+_Generated from `edof` 4.2.2 (format 4.2.0)._
 
 
 This page documents the complete public API exported by `import edof`. It is generated directly from the code with `docs/_gen_api.py`, so the signatures and descriptions match the installed version exactly.
@@ -68,7 +68,8 @@ Args:
 Example:
     >>> import edof
     >>> doc = edof.new(210, 297, title="Hello", dpi=300)
-    >>> page = doc.pages[0]
+    >>> page = doc.add_page()
+    >>> page.add_textbox(15, 15, 180, 12, "Hello world!")
     >>> doc.save("hello.edof")
 
 
@@ -82,7 +83,7 @@ load(path: str, password: str = None, recovery_key: str = None) -> edof.format.d
 
 Load an .edof file and return a Document.
 
-v4.0.1: Automatically detects:
+Automatically detects:
   - Legacy EDOF 2 archives (best-effort, one-way migration)
   - Encrypted EDOF 4 archives (requires password= or recovery_key=)
 Migration warnings appear in doc.errors.
@@ -96,7 +97,7 @@ Migration warnings appear in doc.errors.
 import_pdf(path: str, **kwargs) -> edof.format.document.Document
 ```
 
-v4.0: Import a PDF as an editable EDOF Document.
+Import a PDF as an editable EDOF Document.
 
 Requires pymupdf (`pip install edof[pdf]`).
 
@@ -121,7 +122,7 @@ Example:
 import_rtf(path: str) -> edof.format.document.Document
 ```
 
-v4.0.3: Import an RTF file as an editable EDOF Document.
+Import an RTF file as an editable EDOF Document.
 
 Each non-empty paragraph becomes a TextBox stacked vertically; runs
 preserve bold/italic/underline/size/color. Tables, images, lists, and
@@ -139,7 +140,7 @@ Example:
 import_docx(path: str, return_report: bool = False)
 ```
 
-v4.2.0: Import a Word (.docx) file as a document-mode EDOF Document.
+Import a Word (.docx) file as a document-mode EDOF Document.
 
 Requires python-docx (`pip install edof[docx]`).
 
@@ -172,7 +173,7 @@ Example:
 export_docx(doc: edof.format.document.Document, path: str)
 ```
 
-v4.2.0: Export a document-mode EDOF Document to a Word (.docx) file.
+Export a document-mode EDOF Document to a Word (.docx) file.
 
 Requires python-docx (`pip install edof[docx]`).
 
@@ -204,7 +205,7 @@ make_table(rows: 'List[List[str]]', header: 'bool' = True, header_bg=(83, 74, 18
 
 Quick helper to build a Table from list-of-lists.
 
-v4.1.0: accept x, y, width, col_widths, row_heights — Transform is set
+accept x, y, width, col_widths, row_heights — Transform is set
 accordingly and Table.transform.height is computed from row_heights so
 callers can immediately read tbl.transform.y + tbl.transform.height for
 the next vertical position.
@@ -232,7 +233,7 @@ render_page(page, resources, variables, dpi=None, color_space=None, bit_depth=No
 
 Render a page to an RGBA image.
 
-v4.1.8: ``show_transparency_checker`` controls whether transparent or
+``show_transparency_checker`` controls whether transparent or
 partially-transparent page backgrounds are filled with a checkerboard
 pattern. Default True (user-facing render — Photoshop-like). Set to
 False when rendering pages that will be composited into a larger
@@ -411,7 +412,7 @@ Get and clear the pending recovery key.
 
 #### `Document.export_3x(self, path: 'str') -> 'None'`
 
-v4.0.1: Save a downgraded copy of the document as a v3.x .edof file.
+Save a downgraded copy of the document as a v3.x .edof file.
 
 Best-effort lossy conversion:
   - Tables → Groups of TextBoxes + line shapes
@@ -428,7 +429,7 @@ The original (in-memory) document is not modified.
 
 #### `Document.export_all_pages(self, path_pattern: 'str' = 'page_{n}.png', dpi: 'Optional[int]' = None, color_space: 'Optional[str]' = None, bit_depth: 'Optional[int]' = None, format: 'str' = 'PNG', jpeg_quality: 'int' = 95) -> 'List[str]'`
 
-v4.1.0: Export every page to a separate file.
+Export every page to a separate file.
 
 path_pattern can contain {n} (0-based) and {page} (1-based). E.g.
 "out/page_{n}.png" or "doc-page-{page}.jpg".
@@ -441,7 +442,7 @@ Returns list of written file paths.
 
 #### `Document.export_pdf(self, path: 'str', vector: 'bool' = True, dpi: 'Optional[int]' = None) -> 'None'`
 
-v4.0: Export to PDF.
+Export to PDF.
 
 vector=True (default) uses the built-in pure-Python vector PDF writer
 (searchable text, small files, no reportlab dependency).
@@ -450,7 +451,7 @@ vector=False falls back to raster mode via reportlab.
 
 #### `Document.export_rtf(self, path: 'str') -> 'None'`
 
-v4.0.3: Export the document as RTF (Rich Text Format).
+Export the document as RTF (Rich Text Format).
 
 Best-effort, paragraph-by-paragraph conversion. Each TextBox becomes
 a paragraph; runs preserve bold/italic/underline/size/color.
@@ -462,7 +463,7 @@ content is primarily text.
 
 #### `Document.export_svg(self, path: 'str', page: 'int' = 0) -> 'None'`
 
-v4.0: Export a single page as SVG.
+Export a single page as SVG.
 
 
 #### `Document.fill_variables(self, mapping: 'Dict[str, Any]') -> 'None'`
@@ -627,7 +628,7 @@ Return a column layout context that auto-positions objects top-to-bottom.
 
 #### `Page.repeat_objects(self, template_objs, data_list, gap: 'float' = 2.0, y_start: 'Optional[float]' = None, y_end: 'Optional[float]' = None, new_page_callback=None) -> "List['Page']"`
 
-v4.0: Duplicate template objects for each row in data_list.
+Duplicate template objects for each row in data_list.
 
 For each row in data_list (a list of dicts), the template_objs are
 deep-copied, their {column_name} placeholders in text/runs are
@@ -806,7 +807,7 @@ Two substitution mechanisms:
   2. Otherwise, `{name}` placeholders inside `obj.text` are substituted with
      corresponding variable values.
 
-v4.0.2: bug fix — placeholder substitution now actually happens at render time.
+bug fix — placeholder substitution now actually happens at render time.
 Previously {name} placeholders were only resolved by repeat_objects(), but
 plain rendering left them as literals.
 
@@ -929,7 +930,7 @@ Return True if this object's text/runs can be modified.
 
 #### `Shape.from_svg_path(d_attr: 'str') -> "'Shape'"`
 
-v4.0: Create a Shape with shape_type='path' from an SVG path 'd' string.
+Create a Shape with shape_type='path' from an SVG path 'd' string.
 
 Supports M, L, H, V, C, Q, Z (absolute and relative).
 Coordinates are in mm, relative to the shape's transform origin.
@@ -958,7 +959,7 @@ Coordinates are in mm, relative to the shape's transform origin.
 
 #### `Shape.to_svg_path_d(self) -> 'str'`
 
-v4.1.13: Serialize self.path_data back to SVG 'd' attribute string.
+Serialize self.path_data back to SVG 'd' attribute string.
 Uses absolute coordinates only.
 
 
@@ -1100,7 +1101,7 @@ Return True if this object's text/runs can be modified.
 Table(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, cells: 'List[List[Any]]' = <factory>, row_heights: 'List[float]' = <factory>, col_widths: 'List[float]' = <factory>, table_border: 'Optional[StrokeStyle]' = None) -> None
 ```
 
-v4.0: Formatted table with per-cell styling.
+Formatted table with per-cell styling.
 
 cells is a 2D grid: cells[row_index][col_index].
 Set row_heights or col_widths to 0 to auto-distribute.
@@ -1276,7 +1277,7 @@ Return True if this object's text/runs can be modified.
 SvgBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, svg_xml: 'str' = '', fit_mode: 'str' = 'contain', border: 'Optional[StrokeStyle]' = None, corner_radius: 'float' = 0.0) -> None
 ```
 
-v4.1.13: An SVG file embedded as a rastered image. Stores the original
+An SVG file embedded as a rastered image. Stores the original
 SVG XML inline so loading/saving is lossless. In the editor, double-click
 offers to convert to native EDOF path shapes for editing — at that point
 the SvgBox is replaced by Shape objects and the SVG is discarded.
@@ -1340,7 +1341,7 @@ Return True if this object's text/runs can be modified.
 TextStyle(font_family: 'str' = 'Arial', font_size: 'float' = 4.233, bold: 'bool' = False, italic: 'bool' = False, underline: 'bool' = False, strikethrough: 'bool' = False, color: 'Color' = (0, 0, 0), background: 'Optional[Color]' = None, letter_spacing: 'float' = 0.0, line_height: 'float' = 1.2, alignment: 'str' = 'left', justify_mode: 'str' = 'space', vertical_align: 'str' = 'top', auto_shrink: 'bool' = False, auto_fill: 'bool' = False, min_font_size: 'float' = 1.411, max_font_size: 'float' = 70.555, wrap: 'bool' = True, overflow_hidden: 'bool' = False, padding: 'float' = 1.0, padding_top: 'Optional[float]' = None, padding_right: 'Optional[float]' = None, padding_bottom: 'Optional[float]' = None, padding_left: 'Optional[float]' = None, glyph_scale_x: 'float' = 1.0, glyph_scale_y: 'float' = 1.0) -> None
 ```
 
-v4.1.17: ALL length fields are in millimetres (mm), the canonical
+ALL length fields are in millimetres (mm), the canonical
 unit of EDOF. Typography users can interact with pt via the
 `font_size_pt` / `letter_spacing_pt` accessors below — but on-disk
 and in-memory the canonical unit is mm.
@@ -1359,7 +1360,7 @@ Reference: 12 pt ≈ 4.233 mm; 1 pt = 25.4/72 mm.
 
 #### `TextStyle.get_padding(self)`
 
-v4.1.0: Return (top, right, bottom, left) in mm.
+Return (top, right, bottom, left) in mm.
 Per-side fields override the uniform `padding` if set.
 
 
@@ -1376,7 +1377,7 @@ TextRun(text: 'str' = '', font_family: 'Optional[str]' = None, font_size: 'Optio
 
 A styled segment of text within a TextBox.runs list. v4.0 feature.
 
-v4.1.17: font_size is in millimetres (mm), the canonical EDOF unit.
+font_size is in millimetres (mm), the canonical EDOF unit.
 Use the `font_size_pt` property for typography-style pt values.
 
 Any field set to None inherits from the parent TextStyle.
@@ -1405,7 +1406,7 @@ scale multiplies font_size for auto-shrink/fill.
 StrokeStyle(color: 'Color' = (0, 0, 0), width: 'float' = 0.353, dash: 'list' = <factory>, cap: 'str' = 'butt', join: 'str' = 'miter') -> None
 ```
 
-v4.1.17: width is in millimetres (mm), canonical EDOF unit.
+width is in millimetres (mm), canonical EDOF unit.
 Use `width_pt` property for typography pt access (1 pt ≈ 0.353 mm).
 
 
@@ -1607,7 +1608,7 @@ Return the manifest without loading or decrypting the document.
 
 #### `EdofSerializer.read_preview(path: 'str') -> 'Optional[bytes]'`
 
-v4.1.5: Return PNG thumbnail bytes embedded in an .edof file, or
+Return PNG thumbnail bytes embedded in an .edof file, or
 None if no preview is present (older files / encrypted full mode).
 
 
@@ -1864,7 +1865,7 @@ and a fallback font is used instead.
 | Name | Value |
 |------|-------|
 
-| `__version__` | `'4.2.1'` |
+| `__version__` | `'4.2.2'` |
 
 | `FORMAT_VERSION_STR` | `'4.2.0'` |
 

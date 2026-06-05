@@ -23,7 +23,7 @@ try:
     from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, QSize, pyqtSignal, QObject, QSettings
     from PyQt6.QtGui import (
         QAction, QPainter, QPen, QBrush, QColor, QPixmap, QImage,
-        QPolygonF, QFont, QTransform, QCursor, QKeySequence, QPalette,
+        QPolygonF, QFont, QTransform, QCursor, QKeySequence, QPalette, QIcon,
     )
 except ImportError:
     print("PyQt6 required:  pip install PyQt6"); sys.exit(1)
@@ -233,7 +233,7 @@ QCheckBox::indicator:checked{{background:{ACC};border-color:{ACC}}}
 QRadioButton::indicator{{border-radius:8px}} QRadioButton::indicator:checked{{background:{ACC};border-color:{ACC}}}
 QComboBox::drop-down{{border:none;width:18px}}
 QComboBox QAbstractItemView{{background:{PBG2};color:{FG};selection-background-color:{ACC};font:10pt 'Segoe UI'}}
-QListWidget{{background:#1a1a2e;color:{FG};border:none;outline:none;font:10pt 'Segoe UI'}}
+QListWidget{{background:#1a1a2e;color:{FG};border:none;font:10pt 'Segoe UI'}}
 QListWidget::item{{padding:4px 6px}}
 QListWidget::item:selected{{background:{ACC}}}
 QTableWidget{{background:#1a1a2e;color:{FG};gridline-color:#444;font:10pt 'Segoe UI'}}
@@ -1081,6 +1081,14 @@ class EdofCanvas(QGraphicsView):
                 ed._host_undo = mw._undo
                 ed._host_redo = mw._redo
                 ed._on_body_edit = mw._on_body_touched
+                # v4.2.1: route Ctrl+S / Ctrl+Shift+S to the window's save so
+                # they work while the caret is inside the body text editor
+                # (previously Ctrl+S did nothing and Ctrl+Shift+S toggled
+                # strikethrough instead of Save As).
+                if hasattr(mw, '_save'):
+                    ed._host_save = mw._save
+                if hasattr(mw, '_save_as'):
+                    ed._host_save_as = mw._save_as
         # v4.1.16.4: signals trigger UI cleanup AFTER editor has written
         # data back. Editor.py drives commit/cancel directly; signals are
         # for after-the-fact cleanup only — no recursion possible.
@@ -8200,6 +8208,14 @@ class EdofEditor(QMainWindow):
                 _patch_button_font(btn)
         except Exception: pass
         self.setWindowTitle(f"{t('app_title')} {edof.__version__}")
+        # v4.2.2: window / taskbar icon
+        try:
+            from edof._apps.assets import icon_path
+            _ip = icon_path("edof-editor.ico") or icon_path("edof-editor.png")
+            if _ip:
+                self.setWindowIcon(QIcon(_ip))
+        except Exception:
+            pass
         # v4.0.2/4.1.9.1: restore window geometry, default to maximized on first run
         geom = self._settings.value("geometry")
         if geom is not None:
@@ -8680,7 +8696,7 @@ class EdofEditor(QMainWindow):
         hm.addSeparator()
         # v4.1.0: donate
         # v4.1.1: file association management
-        assoc_act = QAction("Associate .edof files with viewer…", self)
+        assoc_act = QAction("File association (.edof)…", self)
         assoc_act.triggered.connect(self._open_file_assoc_dialog)
         hm.addAction(assoc_act)
         hm.addSeparator()
@@ -10289,7 +10305,7 @@ class EdofEditor(QMainWindow):
         dlg.exec()
 
     def _open_file_assoc_dialog(self):
-        """v4.1.1: Manage .edof file association with edof-viewer."""
+        """Manage the .edof file association (register / remove)."""
         try:
             from edof._apps.file_assoc import (
                 associate_edof_files, unassociate_edof_files,
@@ -10303,10 +10319,12 @@ class EdofEditor(QMainWindow):
         is_assoc = "associated" in status.lower() and "not " not in status.lower()
         msg = (f"<h3>File association</h3>"
                f"<p>Current status: <b>{status}</b></p>"
-               f"<p>When .edof files are associated, double-clicking a "
-               f"<code>.edof</code> file in your file manager opens it in "
-               f"<b>edof-viewer</b> (read-only).</p>"
-               f"<p>{'<b>Currently associated.</b> Click Unassociate to remove.' if is_assoc else 'Click Associate to register .edof files.'}</p>")
+               f"<p>When .edof files are registered, they show the EDOF icon in "
+               f"your file manager and the first time you open one the system "
+               f"lets you choose <b>EDOF Viewer</b> or <b>EDOF Editor</b>. No "
+               f"default is forced, so you stay in control of which app opens "
+               f"them.</p>"
+               f"<p>{'<b>Currently registered.</b> Click OK to remove the association.' if is_assoc else 'Click OK to register .edof files.'}</p>")
         bb_text = "Unassociate" if is_assoc else "Associate"
         ret = QMessageBox.question(self, "File association", msg,
                                      QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)

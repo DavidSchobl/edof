@@ -2,7 +2,7 @@
 
 > Requires `pip install edof[crypto]`
 
-EDOF 4.0.1 supports AES-256-GCM document encryption with multi-level password protection and recovery keys. By default, documents are plain (no encryption) — encryption is opt-in and adds zero friction when you don't use it.
+EDOF supports AES-256-GCM document encryption with multi-level password protection and recovery keys. By default, documents are plain (no encryption) — encryption is opt-in and adds zero friction when you don't use it.
 
 ## Quick example
 

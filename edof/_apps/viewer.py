@@ -90,6 +90,14 @@ class EdofViewer(QMainWindow):
     def __init__(self, filepath: Optional[str] = None):
         super().__init__()
         self.setWindowTitle(f"EDOF Viewer {edof.__version__}")
+        # v4.2.2: window / taskbar icon
+        try:
+            from edof._apps.assets import icon_path
+            _ip = icon_path("edof-viewer.ico") or icon_path("edof-viewer.png")
+            if _ip:
+                self.setWindowIcon(QIcon(_ip))
+        except Exception:
+            pass
         self.resize(1100, 800)
         self.setStyleSheet(VIEWER_QSS)
 
@@ -142,6 +150,12 @@ class EdofViewer(QMainWindow):
         self._act_open.setShortcut(QKeySequence.StandardKey.Open)
         self._act_open.triggered.connect(self._on_open)
         fm.addAction(self._act_open)
+
+        # v4.2.1: open the current document in the editor
+        self._act_edit = QAction("Open in &Editor", self)
+        self._act_edit.setShortcut(QKeySequence("Ctrl+E"))
+        self._act_edit.triggered.connect(self._open_in_editor)
+        fm.addAction(self._act_edit)
 
         self._act_export_pdf = QAction("Export as &PDF…", self)
         self._act_export_pdf.triggered.connect(self._on_export_pdf)
@@ -214,7 +228,7 @@ class EdofViewer(QMainWindow):
         act_about.triggered.connect(self._on_about)
         hm.addAction(act_about)
 
-        act_associate = QAction("Associate .edof files with this viewer…", self)
+        act_associate = QAction("File association (.edof)…", self)
         act_associate.triggered.connect(self._on_associate)
         hm.addAction(act_associate)
 
@@ -520,28 +534,43 @@ class EdofViewer(QMainWindow):
         )
 
     def _on_associate(self):
-        from edof._apps.file_assoc import associate_edof_files, current_association_status
-        status = current_association_status()
-        msg = (
-            "Associate .edof files with edof Viewer?\n\n"
-            "After this, double-clicking any .edof file in your file manager\n"
-            "will open it directly in this viewer.\n\n"
-            f"Current status: {status}"
+        from edof._apps.file_assoc import (
+            associate_edof_files, unassociate_edof_files,
+            current_association_status,
         )
-        reply = QMessageBox.question(self, "Associate .edof files", msg,
+        status = current_association_status()
+        is_assoc = "associated" in status.lower() and "not " not in status.lower()
+        if is_assoc:
+            msg = ("Remove the .edof file association?\n\n"
+                   "Explorer will stop showing the EDOF icon for .edof files "
+                   "and will no longer offer EDOF apps to open them.\n\n"
+                   f"Current status: {status}")
+            title, verb = "Remove association", "remove"
+        else:
+            msg = ("Register .edof files?\n\n"
+                   "Files will show the EDOF icon, and the first time you open "
+                   "one your system will let you choose the Viewer or the "
+                   "Editor (no default is forced).\n\n"
+                   f"Current status: {status}")
+            title, verb = "Register .edof files", "register"
+        reply = QMessageBox.question(self, title, msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes:
             return
         try:
-            associate_edof_files()
-            QMessageBox.information(self, "Done",
-                "Successfully associated .edof files with edof Viewer.\n\n"
-                "On Windows, you may need to log out and back in for the\n"
-                "icons in Explorer to refresh.")
+            ok, info = (unassociate_edof_files() if is_assoc
+                        else associate_edof_files())
+            if ok:
+                QMessageBox.information(self, "Done",
+                    f"{info}\n\n"
+                    "On Windows you may need to log out and back in for the "
+                    "icons in Explorer to refresh.")
+            else:
+                QMessageBox.warning(self, "Could not " + verb, info)
         except Exception as e:
-            QMessageBox.warning(self, "Could not associate",
-                f"Failed to associate file types:\n\n{e}\n\n"
-                f"You may need to run the viewer as Administrator on Windows.")
+            QMessageBox.warning(self, "Could not " + verb,
+                f"Failed to {verb} file types:\n\n{e}\n\n"
+                f"On Windows this is per-user and should not need admin rights.")
 
     def _on_donate(self):
         try:
@@ -549,6 +578,26 @@ class EdofViewer(QMainWindow):
             webbrowser.open("https://ko-fi.com/davidschobl")
         except Exception:
             pass
+
+    def _open_in_editor(self):
+        """v4.2.1: launch edof-editor, opening the currently viewed file."""
+        import shutil, subprocess
+        from PyQt6.QtWidgets import QMessageBox
+        exe = shutil.which("edof-editor")
+        if exe:
+            args = [exe]
+        else:
+            args = [sys.executable, "-m", "edof._apps.editor"]
+        if self._filepath:
+            args.append(self._filepath)
+        try:
+            subprocess.Popen(args, close_fds=True)
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Open in Editor",
+                "Could not launch the editor.\n"
+                "Make sure it is installed: pip install \"edof[all]\"\n\n"
+                f"({e})")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

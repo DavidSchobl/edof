@@ -75,7 +75,14 @@ def _sig(obj) -> str:
 
 def _doc(obj) -> str:
     d = inspect.getdoc(obj)
-    return d.strip() if d else ""
+    if not d:
+        return ""
+    # Strip internal "vX.Y[.Z[.W]]:" changelog tags from docstrings; they are
+    # development noise in a public API reference (and reference release lines
+    # that were never published).
+    import re as _re
+    d = _re.sub(r'v\d+(?:\.\d+){1,3}:\s*', '', d)
+    return d.strip()
 
 
 def _anchor(name: str) -> str:

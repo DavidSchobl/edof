@@ -103,7 +103,7 @@ A `Document` contains pages; each `Page` contains objects. All measurements are 
 | `Table` | Formatted table with per-cell styling | `cells`, `col_widths`, `row_heights`, `table_border` |
 | `Group` | Container with optional clip | `children` |
 
-Common fields on every object: `transform` (position/size/rotation/flip), `opacity`, `layer`, `visible`, `visible_if`, `blend_mode`, `lock_level`, `lock_text`, `lock_position`, `tags`, `shadow`, `effects` (v4.1.0+).
+Common fields on every object: `transform` (position/size/rotation/flip), `opacity`, `layer`, `visible`, `visible_if`, `blend_mode`, `lock_level`, `lock_text`, `lock_position`, `tags`, `shadow`, `effects` (v4.2.0+).
 
 #### Transform fields
 
@@ -125,7 +125,7 @@ All color fields accept tuples in 0–255 range. Both RGB (3-tuple) and RGBA (4-
 obj.style.color    = (74, 144, 226)        # RGB → alpha 255 implied
 obj.fill.color     = (245, 245, 248, 255)  # RGBA — explicit
 obj.stroke.color   = (0, 0, 0, 200)        # RGBA — translucent black
-shape.fill.color   = "#4a90e2"             # v4.1.0+: hex string accepted
+shape.fill.color   = "#4a90e2"             # v4.2.0+: hex string accepted
 ```
 
 When read back, colors come as tuples (`obj.style.color` returns `(74, 144, 226)`, `obj.fill.color` returns `(245, 245, 248, 255)`).
@@ -387,7 +387,7 @@ heading.lock_text  = True       # text never editable until lock_text is cleared
 ### Headings with auto-computed height (no more silent text loss)
 
 ```python
-# v4.1.0+: add_textbox_auto computes height from content and accepts style kwargs
+# v4.2.0+: add_textbox_auto computes height from content and accepts style kwargs
 heading = page.add_textbox_auto(
     20, 20, 170, "MY HEADING",
     font_size=24, bold=True, alignment="center",
@@ -399,7 +399,7 @@ next_y = heading.transform.y + heading.transform.height + 5  # 5 mm gap
 ### Tables with explicit sizing
 
 ```python
-# v4.1.0+: make_table accepts position + size and computes total height
+# v4.2.0+: make_table accepts position + size and computes total height
 tbl = edof.make_table(
     rows=[
         ["Product",    "Qty", "Price"],
@@ -427,7 +427,7 @@ tb.style.color   = edof.as_color("#4a90e2")    # hex via helper
 tb.style.color   = edof.as_color("#4a90e2cc")  # 8-digit hex with alpha
 ```
 
-### Per-side padding (v4.1.0+)
+### Per-side padding (v4.2.0+)
 
 ```python
 tb.style.padding = 2.0           # uniform 2 mm on all sides
@@ -474,7 +474,7 @@ A PyQt6 desktop editor (`edof-editor`) ships with the library. It is a working e
 
 ## Viewer
 
-A lightweight read-only viewer (`edof-viewer`) ships alongside the editor (v4.1.1+). It is designed for the case where someone receives a `.edof` file and just wants to view, print, or convert it — without launching the full editor.
+A lightweight read-only viewer (`edof-viewer`) ships alongside the editor (v4.2.0+). It is designed for the case where someone receives a `.edof` file and just wants to view, print, or convert it — without launching the full editor.
 
 ```bash
 pip install 'edof[viewer]'
@@ -616,7 +616,7 @@ A small `.bat` makes switching painless:
 @echo off
 call D:\apps\Edof_V401\edof-python\.venv\Scripts\activate.bat
 cd /d D:\apps\Edof_V401\edof-python
-cmd /k prompt [edof v4.0.1] $P$G
+cmd /k prompt [edof v4.2.2] $P$G
 ```
 
 Each version's venv is independent. Removing a version is `rmdir /s /q <folder>`; nothing else needs cleanup.

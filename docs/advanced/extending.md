@@ -319,7 +319,7 @@ The editor (`edof._apps.editor`) is a single PyQt6 file. To add menu items, cust
 3. Register the action in `_build_ui()` or one of the menu builders
 4. Run via `python -m edof._apps.editor` instead of the installed `edof-editor` script
 
-There's no formal plugin API as of 4.0.1 — extending the editor means modifying its source. A plugin system might come in future versions.
+There's no formal plugin API yet — extending the editor means modifying its source. A plugin system might come in future versions.
 
 ---
 
