@@ -6,6 +6,20 @@ Versioning: SemVer (https://semver.org/)
 
 ================================================================================
 
+## [4.2.3] - 2026-06-05
+
+### Changed
+- **You now choose the default opener inside EDOF, not in the OS dialog.** The
+  "File association (.edof)" dialog (in both the Editor and the Viewer) lets you
+  pick whether double-clicking a `.edof` file opens the **Viewer** or the
+  **Editor**, and registers that choice as the default. The other app stays
+  available via right-click → Open With, and files keep the EDOF icon. The same
+  choice is available on the command line: `edof-cli associate-files --app
+  editor` (or `--app viewer`, the default). In 4.2.2 the OS prompted you to pick
+  on first open; now the choice is made in the app.
+
+================================================================================
+
 ## [4.2.2] - 2026-06-05
 
 Bug-fix release with application/document icons.
@@ -25,16 +39,13 @@ Bug-fix release with application/document icons.
 
 ### Added
 - **Icons.** The Editor and Viewer windows now use their own icons, `.edof`
-  files show a document icon in Explorer (Windows file association), and the
-  Viewer / Editor appear with their own icons under "Open with". Icons ship
-  inside the package (`edof/_apps/assets/icons/`, `.ico` + `.png` + `.icns` for
-  Windows / Linux / macOS).
-- **File association no longer forces a default app.** Registering `.edof` now
-  sets the EDOF document icon and offers the Viewer and the Editor as the two
-  "Open with" choices; the first time you open a `.edof` file the system asks
-  which one to use, so you pick your own default. The Viewer gained a
-  register / remove toggle to match the Editor, and the Viewer also has
-  **File → Open in Editor (Ctrl+E)**.
+  files show a document icon in Explorer, and the Viewer / Editor appear with
+  their own icons under "Open with". Icons ship inside the package
+  (`edof/_apps/assets/icons/`, `.ico` + `.png` + `.icns` for Windows / Linux /
+  macOS).
+- **File association** that registers the Viewer and the Editor as open-with
+  choices and gives `.edof` files the EDOF icon. The Viewer gained a
+  register / remove toggle and **File → Open in Editor (Ctrl+E)**.
 
 ================================================================================
 

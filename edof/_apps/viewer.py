@@ -534,43 +534,13 @@ class EdofViewer(QMainWindow):
         )
 
     def _on_associate(self):
-        from edof._apps.file_assoc import (
-            associate_edof_files, unassociate_edof_files,
-            current_association_status,
-        )
-        status = current_association_status()
-        is_assoc = "associated" in status.lower() and "not " not in status.lower()
-        if is_assoc:
-            msg = ("Remove the .edof file association?\n\n"
-                   "Explorer will stop showing the EDOF icon for .edof files "
-                   "and will no longer offer EDOF apps to open them.\n\n"
-                   f"Current status: {status}")
-            title, verb = "Remove association", "remove"
-        else:
-            msg = ("Register .edof files?\n\n"
-                   "Files will show the EDOF icon, and the first time you open "
-                   "one your system will let you choose the Viewer or the "
-                   "Editor (no default is forced).\n\n"
-                   f"Current status: {status}")
-            title, verb = "Register .edof files", "register"
-        reply = QMessageBox.question(self, title, msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if reply != QMessageBox.StandardButton.Yes:
-            return
         try:
-            ok, info = (unassociate_edof_files() if is_assoc
-                        else associate_edof_files())
-            if ok:
-                QMessageBox.information(self, "Done",
-                    f"{info}\n\n"
-                    "On Windows you may need to log out and back in for the "
-                    "icons in Explorer to refresh.")
-            else:
-                QMessageBox.warning(self, "Could not " + verb, info)
+            from edof._apps._assoc_dialog import manage_association
         except Exception as e:
-            QMessageBox.warning(self, "Could not " + verb,
-                f"Failed to {verb} file types:\n\n{e}\n\n"
-                f"On Windows this is per-user and should not need admin rights.")
+            QMessageBox.warning(self, "File association",
+                                f"Could not load file association module: {e}")
+            return
+        manage_association(self)
 
     def _on_donate(self):
         try:

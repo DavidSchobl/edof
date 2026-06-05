@@ -58,12 +58,12 @@ def current_association_status() -> str:
             import winreg
             with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, ".edof") as k:
                 cls, _ = winreg.QueryValueEx(k, "")
+            if cls == "edof.Document.Editor":
+                return "associated (opens in EDOF Editor on double-click)"
+            if cls == "edof.Document.Viewer":
+                return "associated (opens in EDOF Viewer on double-click)"
             if cls and cls.startswith("edof.Document"):
-                # Our document type. With the v4.2.2 model the type has no
-                # default opener, so check whether the open-with choices exist.
-                return ("associated (EDOF icon set; Windows asks which app "
-                        "to open with)")
-            # Some other progid claims .edof
+                return "associated (no default app set yet)"
             try:
                 with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
                                     f"{cls}\\shell\\open\\command") as k:
@@ -74,14 +74,18 @@ def current_association_status() -> str:
         except OSError:
             return "not associated"
     elif sys.platform.startswith("linux"):
-        # Check xdg-mime
         try:
             r = subprocess.run(
                 ["xdg-mime", "query", "default", "application/x-edof"],
                 capture_output=True, text=True, timeout=5
             )
-            if r.returncode == 0 and r.stdout.strip():
-                return f"associated with: {r.stdout.strip()}"
+            d = r.stdout.strip() if r.returncode == 0 else ""
+            if d == "edof-editor.desktop":
+                return "associated (opens in EDOF Editor on double-click)"
+            if d == "edof-viewer.desktop":
+                return "associated (opens in EDOF Viewer on double-click)"
+            if d:
+                return f"associated with: {d}"
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
         return "not associated"
@@ -90,12 +94,18 @@ def current_association_status() -> str:
     return "unknown platform"
 
 
-def associate_edof_files():
-    """Register .edof files with edof-viewer for the current user."""
+def associate_edof_files(default_app: str = "viewer"):
+    """Register .edof files for the current user.
+
+    `default_app` selects which app opens a .edof file on double-click and is
+    chosen *inside the EDOF app*, not by the OS picker. Accepts "viewer" or
+    "editor"; falls back to the viewer if the editor is not found.
+    """
+    default_app = "editor" if str(default_app).lower().startswith("e") else "viewer"
     if sys.platform == "win32":
-        return _associate_windows()
+        return _associate_windows(default_app)
     if sys.platform.startswith("linux"):
-        return _associate_linux()
+        return _associate_linux(default_app)
     if sys.platform == "darwin":
         raise NotImplementedError(
             "macOS file association requires building edof-viewer as an .app "
@@ -118,22 +128,19 @@ def unassociate_edof_files():
 # Windows
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _associate_windows():
+def _associate_windows(default_app: str = "viewer"):
     """Register .edof in HKCU\\Software\\Classes (per-user, no admin needed).
 
-    v4.2.2: the association does NOT force a default opener. `.edof` is mapped
-    to a document *type* progid (icon + friendly name, no open command), and the
-    Viewer and Editor are registered as the two "Open with" choices. The first
-    time the user double-clicks a `.edof` file Windows asks which app to use, so
-    the user picks their own default (and can change it any time). Files still
-    show the document icon in Explorer.
+    v4.2.3: the default opener is whatever the user chose *in the EDOF app*
+    (`default_app` = "viewer" or "editor"). That progid is set as the `.edof`
+    default so double-click opens it directly, no OS prompt. Both apps stay in
+    "Open with", and `.edof` files show the EDOF document icon either way.
     """
     import winreg
 
     classes = r"Software\Classes"
-    progid_doc = "edof.Document"          # file type: icon + name, no opener
-    progid_view = "edof.Document.Viewer"  # Open-with choice: Viewer
-    progid_edit = "edof.Document.Editor"  # Open-with choice: Editor
+    progid_view = "edof.Document.Viewer"
+    progid_edit = "edof.Document.Editor"
 
     viewer = _find_viewer_executable()
     cmd_view = _cmd_with_arg(viewer)
@@ -143,6 +150,11 @@ def _associate_windows():
     except RuntimeError:
         editor = None
         cmd_edit = None
+
+    # If the editor was requested but is unavailable, fall back to the viewer.
+    if default_app == "editor" and not editor:
+        default_app = "viewer"
+    default_progid = progid_edit if default_app == "editor" else progid_view
 
     try:
         from edof._apps.assets import icon_path
@@ -157,12 +169,10 @@ def _associate_windows():
                                 0, winreg.KEY_WRITE) as k:
             winreg.SetValueEx(k, "", 0, winreg.REG_SZ, value)
 
-    # 1. .edof → the document TYPE progid (gives icon + name) and the open-with
-    #    list. No "default opener" is set on the type, so Windows prompts the
-    #    user to choose between the Viewer and the Editor.
+    # 1. .edof → the chosen default progid + the open-with list (both apps).
     with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, f"{classes}\\.edof",
                             0, winreg.KEY_WRITE) as k:
-        winreg.SetValueEx(k, "", 0, winreg.REG_SZ, progid_doc)
+        winreg.SetValueEx(k, "", 0, winreg.REG_SZ, default_progid)
         winreg.SetValueEx(k, "Content Type", 0, winreg.REG_SZ, "application/x-edof")
     with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
                             f"{classes}\\.edof\\OpenWithProgids",
@@ -171,31 +181,31 @@ def _associate_windows():
         if editor:
             winreg.SetValueEx(k, progid_edit, 0, winreg.REG_NONE, b"")
 
-    # 2. Document type: friendly name + icon, deliberately NO shell\open\command.
-    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, f"{classes}\\{progid_doc}",
-                            0, winreg.KEY_WRITE) as k:
-        winreg.SetValueEx(k, "", 0, winreg.REG_SZ, "EDOF Document")
-        winreg.SetValueEx(k, "FriendlyTypeName", 0, winreg.REG_SZ,
-                          "Easy Document Format File")
-    if doc_icon and os.path.isfile(doc_icon):
-        _set_default(f"{progid_doc}\\DefaultIcon", f'"{doc_icon}",0')
-
-    # 3. Viewer open-with choice (own name + icon + open command).
+    # 2. Viewer progid: name + open command.
     with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, f"{classes}\\{progid_view}",
                             0, winreg.KEY_WRITE) as k:
         winreg.SetValueEx(k, "", 0, winreg.REG_SZ, "EDOF Viewer")
-    if view_icon and os.path.isfile(view_icon):
-        _set_default(f"{progid_view}\\DefaultIcon", f'"{view_icon}",0')
+        winreg.SetValueEx(k, "FriendlyTypeName", 0, winreg.REG_SZ,
+                          "Easy Document Format File")
     _set_default(f"{progid_view}\\shell\\open\\command", cmd_view)
 
-    # 4. Editor open-with choice.
+    # 3. Editor progid: name + open command.
     if cmd_edit:
         with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, f"{classes}\\{progid_edit}",
                                 0, winreg.KEY_WRITE) as k:
             winreg.SetValueEx(k, "", 0, winreg.REG_SZ, "EDOF Editor")
-        if edit_icon and os.path.isfile(edit_icon):
-            _set_default(f"{progid_edit}\\DefaultIcon", f'"{edit_icon}",0')
+            winreg.SetValueEx(k, "FriendlyTypeName", 0, winreg.REG_SZ,
+                              "Easy Document Format File")
         _set_default(f"{progid_edit}\\shell\\open\\command", cmd_edit)
+
+    # 4. Icons. The DEFAULT progid drives the Explorer file icon, so it gets the
+    #    document icon; the other progid shows its own app icon under "Open with".
+    if doc_icon and os.path.isfile(doc_icon):
+        _set_default(f"{default_progid}\\DefaultIcon", f'"{doc_icon}",0')
+    if default_progid != progid_view and view_icon and os.path.isfile(view_icon):
+        _set_default(f"{progid_view}\\DefaultIcon", f'"{view_icon}",0')
+    if editor and default_progid != progid_edit and edit_icon and os.path.isfile(edit_icon):
+        _set_default(f"{progid_edit}\\DefaultIcon", f'"{edit_icon}",0')
 
     # 5. Notify the shell that associations changed
     try:
@@ -207,12 +217,10 @@ def _associate_windows():
     except Exception:
         pass
 
-    if editor:
-        return True, (".edof registered. Files now show the EDOF icon, and the "
-                      "first time you open one Windows lets you choose the "
-                      "Viewer or the Editor (no default is forced).")
-    return True, (".edof registered with the Viewer as an open-with choice. "
-                  "(Editor not found, so only the Viewer was registered.)")
+    chosen = "Editor" if default_progid == progid_edit else "Viewer"
+    return True, (f".edof registered. Double-click opens the {chosen}; the other "
+                  f"app stays available under right-click \u2192 Open with. "
+                  f"Files show the EDOF icon.")
 
 
 def _unassociate_windows():
@@ -267,12 +275,12 @@ def _unassociate_windows():
 DESKTOP_ENTRY = """\
 [Desktop Entry]
 Type=Application
-Name=EDOF Viewer
-Comment=View EDOF documents
+Name={name}
+Comment={comment}
 Exec={exec_cmd} %f
-Terminal=false
+{icon_line}Terminal=false
 MimeType=application/x-edof;
-Categories=Office;Viewer;
+Categories=Office;
 """
 
 MIME_XML = """\
@@ -286,40 +294,67 @@ MIME_XML = """\
 """
 
 
-def _associate_linux():
+def _associate_linux(default_app: str = "viewer"):
     home = Path.home()
     apps_dir = home / ".local" / "share" / "applications"
     mime_dir = home / ".local" / "share" / "mime" / "packages"
     apps_dir.mkdir(parents=True, exist_ok=True)
     mime_dir.mkdir(parents=True, exist_ok=True)
 
-    viewer = _find_viewer_executable()
+    try:
+        from edof._apps.assets import icon_path
+    except Exception:
+        icon_path = lambda *_a, **_k: None  # noqa: E731
+
+    def _icon_line(name):
+        p = icon_path(name)
+        return f"Icon={p}\n" if p and os.path.isfile(p) else ""
 
     # 1. MIME type
     (mime_dir / "edof.xml").write_text(MIME_XML, encoding="utf-8")
 
-    # 2. .desktop file
-    desktop_path = apps_dir / "edof-viewer.desktop"
-    desktop_path.write_text(
-        DESKTOP_ENTRY.format(exec_cmd=viewer),
-        encoding="utf-8",
-    )
-    desktop_path.chmod(0o755)
+    # 2. .desktop files for BOTH apps (so either can be the default).
+    viewer = _find_viewer_executable()
+    (apps_dir / "edof-viewer.desktop").write_text(
+        DESKTOP_ENTRY.format(name="EDOF Viewer", comment="View EDOF documents",
+                             exec_cmd=viewer, icon_line=_icon_line("edof-viewer.png")),
+        encoding="utf-8")
+    (apps_dir / "edof-viewer.desktop").chmod(0o755)
 
-    # 3. Update database
+    editor_ok = False
+    try:
+        editor = _find_editor_executable()
+        (apps_dir / "edof-editor.desktop").write_text(
+            DESKTOP_ENTRY.format(name="EDOF Editor", comment="Edit EDOF documents",
+                                 exec_cmd=editor, icon_line=_icon_line("edof-editor.png")),
+            encoding="utf-8")
+        (apps_dir / "edof-editor.desktop").chmod(0o755)
+        editor_ok = True
+    except RuntimeError:
+        pass
+
+    if default_app == "editor" and not editor_ok:
+        default_app = "viewer"
+    default_desktop = ("edof-editor.desktop" if default_app == "editor"
+                       else "edof-viewer.desktop")
+
+    # 3. Update databases + set the chosen default handler.
     for cmd in (["update-mime-database", str(home / ".local" / "share" / "mime")],
-                 ["update-desktop-database", str(apps_dir)],
-                 ["xdg-mime", "default", "edof-viewer.desktop", "application/x-edof"]):
+                ["update-desktop-database", str(apps_dir)],
+                ["xdg-mime", "default", default_desktop, "application/x-edof"]):
         try:
             subprocess.run(cmd, check=False, capture_output=True, timeout=10)
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
-    return True, ".edof associated with edof-viewer (Linux desktop entry installed)."
+    chosen = "Editor" if default_desktop.endswith("editor.desktop") else "Viewer"
+    return True, (f".edof associated; double-click opens the {chosen}. "
+                  f"Both apps are available via right-click \u2192 Open With.")
 
 
 def _unassociate_linux():
     home = Path.home()
     for f in (home / ".local" / "share" / "applications" / "edof-viewer.desktop",
+              home / ".local" / "share" / "applications" / "edof-editor.desktop",
               home / ".local" / "share" / "mime" / "packages" / "edof.xml"):
         try:
             f.unlink(missing_ok=True)

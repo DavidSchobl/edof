@@ -796,6 +796,8 @@ Examples:
                      help="Remove the .edof file association instead of adding it")
     pa.add_argument("--status", action="store_true",
                      help="Show current association status and exit")
+    pa.add_argument("--app", choices=["viewer", "editor"], default="viewer",
+                     help="Which app opens .edof on double-click (default: viewer)")
 
     return p
 
@@ -817,9 +819,8 @@ def cmd_associate_files(args):
             sys.exit(1)
     else:
         try:
-            associate_edof_files()
-            print("OK: .edof files now associated with edof-viewer.")
-            print("  Double-clicking a .edof file will now open it in edof-viewer.")
+            ok, info = associate_edof_files(default_app=getattr(args, "app", "viewer"))
+            print(("OK: " if ok else "WARN: ") + info)
             print("  On Windows, you may need to log out and back in for icons to refresh.")
         except Exception as e:
             print(f"ERROR: {e}")

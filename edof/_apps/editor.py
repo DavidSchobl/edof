@@ -10305,44 +10305,14 @@ class EdofEditor(QMainWindow):
         dlg.exec()
 
     def _open_file_assoc_dialog(self):
-        """Manage the .edof file association (register / remove)."""
+        """Manage the .edof file association (choose app in-app, register/remove)."""
         try:
-            from edof._apps.file_assoc import (
-                associate_edof_files, unassociate_edof_files,
-                current_association_status,
-            )
+            from edof._apps._assoc_dialog import manage_association
         except Exception as e:
             QMessageBox.warning(self, "File association",
                                   f"Could not load file association module: {e}")
             return
-        status = current_association_status()
-        is_assoc = "associated" in status.lower() and "not " not in status.lower()
-        msg = (f"<h3>File association</h3>"
-               f"<p>Current status: <b>{status}</b></p>"
-               f"<p>When .edof files are registered, they show the EDOF icon in "
-               f"your file manager and the first time you open one the system "
-               f"lets you choose <b>EDOF Viewer</b> or <b>EDOF Editor</b>. No "
-               f"default is forced, so you stay in control of which app opens "
-               f"them.</p>"
-               f"<p>{'<b>Currently registered.</b> Click OK to remove the association.' if is_assoc else 'Click OK to register .edof files.'}</p>")
-        bb_text = "Unassociate" if is_assoc else "Associate"
-        ret = QMessageBox.question(self, "File association", msg,
-                                     QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
-        if ret != QMessageBox.StandardButton.Ok: return
-        try:
-            if is_assoc:
-                ok, info = unassociate_edof_files()
-            else:
-                ok, info = associate_edof_files()
-            if ok:
-                QMessageBox.information(self, "File association",
-                                          f"<p><b>Success.</b></p><p>{info}</p>")
-            else:
-                QMessageBox.warning(self, "File association",
-                                       f"<p><b>Failed.</b></p><p>{info}</p>")
-        except Exception as e:
-            QMessageBox.critical(self, "File association",
-                                   f"Error: {e}")
+        manage_association(self)
 
     # ─────────────────────────────────────────────────────────────────────
     # v4.1.2: Multi-window support for embedded sub-documents
