@@ -215,6 +215,28 @@ def main():
         f.write(text)
     print(f"Wrote {OUT} ({len(text):,} bytes)")
 
+    # Keep the docs landing page version in sync with the package version.
+    _sync_docs_version()
+
+
+def _sync_docs_version():
+    """Rewrite the 'This documentation is for **edof X**.' line in
+    docs/README.md so the documentation version always matches the package."""
+    import re
+    readme = os.path.join(os.path.dirname(OUT), "..", "README.md")
+    readme = os.path.normpath(readme)
+    if not os.path.isfile(readme):
+        return
+    s = open(readme, encoding="utf-8").read()
+    new = re.sub(
+        r"This documentation is for \*\*edof [^*]+\*\*\.",
+        f"This documentation is for **edof {edof.__version__}**.",
+        s,
+    )
+    if new != s:
+        open(readme, "w", encoding="utf-8").write(new)
+        print(f"Synced docs version -> {edof.__version__} in {readme}")
+
 
 if __name__ == "__main__":
     sys.exit(main())

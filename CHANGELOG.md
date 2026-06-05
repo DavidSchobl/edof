@@ -6,6 +6,27 @@ Versioning: SemVer (https://semver.org/)
 
 ================================================================================
 
+## [4.2.5] - 2026-06-05
+
+### Fixed
+- **New Document now respects the size and DPI you type.** The width / height /
+  DPI fields are the single source of truth: picking a preset (A4, Full HD, ...)
+  just fills those fields, and the document is always created from the fields.
+  Previously, if a preset row stayed selected, the typed width / height / DPI
+  were ignored and you got the preset size (usually A4).
+- **Custom DPI is respected.** Once you set a DPI in New Document, picking a
+  preset no longer overwrites it, and the DPI range is widened (1–9600).
+- **Millimetre fields now keep 0.01 mm precision and no longer jump by 0.5 mm.**
+  The geometry fields step by 0.1 mm on the arrows (was 0.5 mm) and accept two
+  decimals; fields that rounded to 0.1 mm (corner radius, table border, layer
+  effect sizes/distances) now keep hundredths too. Canvas snapping is unchanged.
+
+### Changed
+- The documentation version (docs landing page) is now generated from the
+  package version automatically, so it never goes stale.
+
+================================================================================
+
 ## [4.2.4] - 2026-06-05
 
 ### Fixed

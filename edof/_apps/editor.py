@@ -1232,7 +1232,7 @@ class EdofCanvas(QGraphicsView):
         sp_size = FocusKeepingSpinBox()
         sp_size._editor_ref = self   # canvas — has _refocus_inline()
         sp_size.setRange(0.3, 350.0)
-        sp_size.setSingleStep(0.5)
+        sp_size.setSingleStep(0.1)
         sp_size.setDecimals(2)
         sp_size.setSuffix(" mm")
         sp_size.setMinimumWidth(110); sp_size.setMaximumWidth(140)
@@ -5975,9 +5975,11 @@ class PropPanel(QWidget):
         self._qt.timeout.connect(self._live_qr)
         self._setup()
 
-    def _dspin(self,lo=-99999,hi=99999,dec=2,step=0.5,suffix=""):
+    def _dspin(self,lo=-99999,hi=99999,dec=2,step=0.1,suffix=""):
         # v4.1.14: arrows now painted by our QDoubleSpinBox subclass at the
         # top of this file, so no Fusion-style hack is needed here.
+        # v4.2.5: default to 0.01 mm precision (dec=2) and a 0.1 mm arrow step
+        # (was 0.5) so mm fields no longer jump by half a millimetre.
         s=QDoubleSpinBox(); s.setRange(lo,hi); s.setDecimals(dec); s.setSingleStep(step)
         if suffix: s.setSuffix(suffix)
         return s
@@ -6368,7 +6370,7 @@ class PropPanel(QWidget):
         hs.addWidget(self.btn_stroke); hs.addWidget(self.sp_sw); hs.addStretch()
         fl.addRow(t('prop_stroke'),rs)
 
-        self.sp_cr=self._dspin(lo=0,hi=200,dec=1,suffix=" mm")
+        self.sp_cr=self._dspin(lo=0,hi=200,dec=2,suffix=" mm")
         self.sp_cr.editingFinished.connect(lambda:self._aa_obj('corner_radius',self.sp_cr.value()))
         fl.addRow("Corner radius:",self.sp_cr)
 
@@ -6614,7 +6616,7 @@ class PropPanel(QWidget):
         self.btn_table_border_color = QPushButton(); self.btn_table_border_color.setFixedSize(28, 22)
         self.btn_table_border_color.setToolTip("Border color")
         self.btn_table_border_color.clicked.connect(self._pick_table_border_color)
-        self.sp_table_border_w = self._dspin(lo=0.1, hi=20, dec=1, step=0.1, suffix=" mm")
+        self.sp_table_border_w = self._dspin(lo=0.1, hi=20, dec=2, step=0.1, suffix=" mm")
         self.sp_table_border_w.setFixedWidth(80)
         self.sp_table_border_w.setToolTip("Border width")
         self.sp_table_border_w.editingFinished.connect(self._on_table_border_change)
@@ -7491,7 +7493,7 @@ class PropPanel(QWidget):
             s.setMinimumWidth(160)
             return s
 
-        def _spin(lo, hi, val, suffix='', dec=1):
+        def _spin(lo, hi, val, suffix='', dec=2):
             sp = QDoubleSpinBox(); sp.setRange(lo, hi); sp.setValue(val); sp.setDecimals(dec); sp.setSuffix(suffix)
             sp.setFixedWidth(110)
             return sp
@@ -8946,7 +8948,7 @@ class EdofEditor(QMainWindow):
         v.addWidget(mode_grp)
 
         # Preset selection
-        pres_grp=QGroupBox("Size")
+        pres_grp=QGroupBox("Size (a preset just fills the W / H / DPI fields below)")
         pl=QVBoxLayout(pres_grp)
         list_presets=QListWidget()
         # Paper sizes
@@ -9005,11 +9007,43 @@ class EdofEditor(QMainWindow):
         cust_w=QWidget(); hcw=QHBoxLayout(cust_w); hcw.setContentsMargins(8,0,0,0)
         sp_cw=QDoubleSpinBox(); sp_cw.setRange(1, 5000); sp_cw.setValue(210); sp_cw.setSuffix(" mm")
         sp_ch=QDoubleSpinBox(); sp_ch.setRange(1, 5000); sp_ch.setValue(297); sp_ch.setSuffix(" mm")
-        sp_dpi=QSpinBox(); sp_dpi.setRange(72, 1200); sp_dpi.setValue(300); sp_dpi.setSuffix(" DPI")
+        sp_dpi=QSpinBox(); sp_dpi.setRange(1, 9600); sp_dpi.setValue(300); sp_dpi.setSuffix(" DPI")
+        sp_dpi.setToolTip("Custom DPI is respected: once you change it, picking a "
+                          "preset will not overwrite it.")
         hcw.addWidget(QLabel("W:")); hcw.addWidget(sp_cw)
         hcw.addWidget(QLabel("H:")); hcw.addWidget(sp_ch)
         hcw.addWidget(QLabel("DPI:")); hcw.addWidget(sp_dpi)
         v.addWidget(cust_w)
+
+        # v4.2.5: presets just PREFILL these fields; the document is always
+        # created from the W/H/DPI fields below, so whatever the user types
+        # wins (previously a preset row overrode the typed values). The DPI is
+        # only suggested by a preset until the user sets their own value, then
+        # it is left untouched so a custom DPI sticks.
+        _dpi_touched = [False]
+        _prog = [False]
+        def _on_dpi_changed(_v):
+            if not _prog[0]:
+                _dpi_touched[0] = True
+        sp_dpi.valueChanged.connect(_on_dpi_changed)
+
+        def _prefill_from_preset(cur, _prev=None):
+            if cur is None:
+                return
+            data = cur.data(Qt.ItemDataRole.UserRole)
+            if not data:
+                return
+            kind, pw, ph = data
+            if kind == "custom":
+                return  # keep whatever the user has typed
+            _prog[0] = True
+            sp_cw.setValue(round(float(pw), 2))
+            sp_ch.setValue(round(float(ph), 2))
+            if not _dpi_touched[0]:
+                sp_dpi.setValue(300 if kind == "paper" else 72)
+            _prog[0] = False
+        list_presets.currentItemChanged.connect(_prefill_from_preset)
+        _prefill_from_preset(list_presets.currentItem())
 
         # v4.1.3: Background option
         from PyQt6.QtWidgets import QGroupBox as _QGB
@@ -9041,19 +9075,13 @@ class EdofEditor(QMainWindow):
         bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); v.addWidget(bb)
         if dlg.exec()!=QDialog.DialogCode.Accepted: return
 
-        # Resolve size
+        # Resolve size — ALWAYS from the W/H/DPI fields (presets only prefill
+        # them), so the user's typed values are never silently overridden.
         item = list_presets.currentItem()
-        if not item:
+        w = sp_cw.value(); h = sp_ch.value()
+        dpi = sp_dpi.value()
+        if w <= 0 or h <= 0:
             return
-        data = item.data(Qt.ItemDataRole.UserRole)
-        if not data:
-            return
-        kind, w, h = data
-        if kind == "custom":
-            w = sp_cw.value(); h = sp_ch.value()
-            dpi = sp_dpi.value()
-        else:
-            dpi = 300 if kind == "paper" else 72   # video defaults to 72 DPI
 
         title = "Untitled"
         new_doc = edof.new(width=w, height=h, title=title, dpi=dpi)

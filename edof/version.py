@@ -9,7 +9,7 @@ typography values in pt and are migrated on load.
 """
 
 from __future__ import annotations
-__version__ = "4.2.4"
+__version__ = "4.2.5"
 FORMAT_MAJOR        = 4
 FORMAT_MINOR        = 2
 FORMAT_PATCH        = 0
