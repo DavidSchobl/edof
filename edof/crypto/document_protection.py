@@ -10,7 +10,7 @@ slot list, current session permission, and the recovery key.
 from __future__ import annotations
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
-from edof.crypto.permissions import Permission, VIEW, FILL, EDIT, DESIGN, ADMIN, can
+from edof.crypto.permissions import Permission, VIEW, ADMIN, can
 from edof.crypto.encryption import (
     HAS_CRYPTO, EdofCryptoUnavailable, EdofWrongPassword,
     generate_content_key, generate_recovery_key,

@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 
-from edof.format.styles import TextRun, TextStyle
+from edof.format.styles import TextRun
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -272,6 +272,22 @@ class DocumentBody:
     footer_runs:      List["TextRun"]           = field(default_factory=list)
     footer_height_mm: float                     = 12.0
 
+    # v4.2.11.46 (format 17): box-level style of the header/footer band
+    # (vertical align, default font, ...) persisted as a TextStyle dict so it
+    # survives repagination and applies on every page. None = engine default.
+    header_style:     Optional[dict]            = None
+    footer_style:     Optional[dict]            = None
+    # v4.2.11.46 (format 17): the page number shown on the first page
+    # ({page_number} = page index + page_number_start).
+    page_number_start: int                      = 1
+    # v4.2.11.46 (format 17): different header/footer for even pages. When
+    # enabled, pages whose PAGE NUMBER is even use the *_even templates.
+    hf_odd_even:       bool                     = False
+    header_runs_even:  List["TextRun"]          = field(default_factory=list)
+    footer_runs_even:  List["TextRun"]          = field(default_factory=list)
+    header_style_even: Optional[dict]           = None
+    footer_style_even: Optional[dict]           = None
+
     # Deprecated paragraph-style header/footer — kept for backward compat
     # with files saved by v4.1.22.x and earlier. New code reads/writes
     # *_runs above.
@@ -289,6 +305,14 @@ class DocumentBody:
             "footer_enabled":   self.footer_enabled,
             "footer_runs":      [r.to_dict() for r in (self.footer_runs or [])],
             "footer_height_mm": self.footer_height_mm,
+            "header_style":      self.header_style,
+            "footer_style":      self.footer_style,
+            "page_number_start": int(self.page_number_start),
+            "hf_odd_even":       bool(self.hf_odd_even),
+            "header_runs_even":  [r.to_dict() for r in (self.header_runs_even or [])],
+            "footer_runs_even":  [r.to_dict() for r in (self.footer_runs_even or [])],
+            "header_style_even": self.header_style_even,
+            "footer_style_even": self.footer_style_even,
         }
 
     @classmethod
@@ -311,6 +335,14 @@ class DocumentBody:
         footer_enabled = bool(d.get("footer_enabled", False))
         footer_runs = [TextRun.from_dict(rd) for rd in d.get("footer_runs", [])]
         footer_height_mm = float(d.get("footer_height_mm", 12.0))
+        header_style = d.get("header_style") or None
+        footer_style = d.get("footer_style") or None
+        page_number_start = int(d.get("page_number_start", 1) or 1)
+        hf_odd_even = bool(d.get("hf_odd_even", False))
+        header_runs_even = [TextRun.from_dict(rd) for rd in d.get("header_runs_even", [])]
+        footer_runs_even = [TextRun.from_dict(rd) for rd in d.get("footer_runs_even", [])]
+        header_style_even = d.get("header_style_even") or None
+        footer_style_even = d.get("footer_style_even") or None
         return cls(
             paragraphs=paragraphs,
             styles=styles,
@@ -321,4 +353,12 @@ class DocumentBody:
             footer_enabled=footer_enabled,
             footer_runs=footer_runs,
             footer_height_mm=footer_height_mm,
+            header_style=header_style,
+            footer_style=footer_style,
+            page_number_start=page_number_start,
+            hf_odd_even=hf_odd_even,
+            header_runs_even=header_runs_even,
+            footer_runs_even=footer_runs_even,
+            header_style_even=header_style_even,
+            footer_style_even=footer_style_even,
         )

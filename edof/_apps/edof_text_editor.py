@@ -29,7 +29,7 @@ transform handles zoom — this widget always works in scene-pixel units
 """
 from __future__ import annotations
 import copy, io
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, QMimeData, pyqtSignal, QEvent
@@ -1194,21 +1194,28 @@ class EdofTextEditor(QWidget):
     def _invalidate(self):
         self._needs_render = True
         self._cursor_visible = True
-        self._blink_timer.stop()
-        self._blink_timer.start()
-        # v4.1.16.3: debounce repaint — PIL render is expensive; batch
-        # rapid keystrokes by deferring update() ~20ms after the last
-        # invalidation so we don't render 60+ times for a fast typist.
-        if not hasattr(self, '_render_timer') or self._render_timer is None:
-            self._render_timer = QTimer(self)
-            self._render_timer.setSingleShot(True)
-            self._render_timer.timeout.connect(self.update)
-        self._render_timer.stop()
-        self._render_timer.start(20)
-        # Also issue an immediate cursor-only repaint so the cursor
-        # follows keystrokes without 20ms lag (cursor draws on top of
-        # the cached pixmap, doesn't need re-render).
-        super().update()
+        # v4.2.11.37: every Qt access below can hit a deleted C++ object when a
+        # stale Python reference calls in after the widget was torn down (page
+        # hop / repagination rebuilds the editor). A RuntimeError escaping a
+        # slot aborts the whole app in PyQt6, so guard the Qt parts.
+        try:
+            self._blink_timer.stop()
+            self._blink_timer.start()
+            # v4.1.16.3: debounce repaint — PIL render is expensive; batch
+            # rapid keystrokes by deferring update() ~20ms after the last
+            # invalidation so we don't render 60+ times for a fast typist.
+            if not hasattr(self, '_render_timer') or self._render_timer is None:
+                self._render_timer = QTimer(self)
+                self._render_timer.setSingleShot(True)
+                self._render_timer.timeout.connect(self.update)
+            self._render_timer.stop()
+            self._render_timer.start(20)
+            # Also issue an immediate cursor-only repaint so the cursor
+            # follows keystrokes without 20ms lag (cursor draws on top of
+            # the cached pixmap, doesn't need re-render).
+            super().update()
+        except RuntimeError:
+            return   # underlying widget already destroyed -- nothing to paint
         # v4.1.22.2: tell the canvas the cursor may have moved
         try: self.cursor_changed.emit()
         except Exception: pass
@@ -1216,7 +1223,10 @@ class EdofTextEditor(QWidget):
     def _toggle_blink(self):
         self._cursor_visible = not self._cursor_visible
         # Cursor blink doesn't need a re-render of the PIL pixmap.
-        super().update()
+        try:
+            super().update()
+        except RuntimeError:
+            pass
 
     def selectAll(self):
         """Select all text (compatibility with existing editor.py code)."""
@@ -1806,6 +1816,22 @@ class EdofTextEditor(QWidget):
         return super().event(ev)
 
     def keyPressEvent(self, ev: QKeyEvent):
+        # v4.2.11.37: an exception escaping a key handler kills the whole app
+        # in PyQt6 (qFatal). Catch, log, and keep the editor alive instead.
+        try:
+            return self._key_press_impl(ev)
+        except Exception:
+            import traceback as _tb
+            _tb.print_exc()
+            try:
+                from edof.engine.debug_log import log as _dlog
+                _dlog("edof_text_editor.keyPressEvent EXCEPTION",
+                      err=_tb.format_exc()[-1500:])
+            except Exception:
+                pass
+            return
+
+    def _key_press_impl(self, ev: QKeyEvent):
         key = ev.key()
         mods = ev.modifiers()
         ctrl  = bool(mods & Qt.KeyboardModifier.ControlModifier)
@@ -2309,6 +2335,24 @@ class EdofTextEditor(QWidget):
                 v = getattr(r, k, None)
                 if v is not None:
                     d[k] = v
+            # v4.2.11.48: KEEP SOURCE FORMATTING. Attributes the run inherits
+            # from its box style (typical for header/footer bands, which have
+            # their own base style) used to round-trip as "inherit" -- pasting
+            # into a box with a different base style visibly changed the text.
+            # Resolve the identity attributes from the source box style at copy
+            # time so the pasted text looks like what was copied, anywhere.
+            try:
+                base = getattr(self.tb, 'style', None)
+                if base is not None:
+                    if 'font_family' not in d and getattr(base, 'font_family', None):
+                        d['font_family'] = base.font_family
+                    if 'font_size' not in d and getattr(base, 'font_size', None):
+                        d['font_size'] = float(base.font_size)
+                    if 'color' not in d and getattr(r, 'color', None) is None \
+                            and getattr(base, 'color', None):
+                        d['color'] = list(base.color)
+            except Exception:
+                pass
             if r.color is not None:
                 d['color'] = list(r.color)
             if getattr(r, 'background', None) is not None:

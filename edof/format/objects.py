@@ -404,7 +404,9 @@ class Shape(EdofObject):
     fill:          FillStyle   = field(default_factory=FillStyle)
     stroke:        StrokeStyle = field(default_factory=StrokeStyle)
     corner_radius: float       = 0.0
-    # Relative points for POLYGON / LINE (mm, relative to transform origin)
+    # v4.2.7.1: per-corner radii [top-left, top-right, bottom-right, bottom-left]
+    # in mm. Empty list = use uniform corner_radius for all four corners.
+    corner_radii:  List[float] = field(default_factory=list)
     points:        List[Any]   = field(default_factory=list)
     # v4.0: SVG-style path data when shape_type == SHAPE_PATH
     # Format: [["M", 10.0, 20.0], ["L", 30.0, 40.0], ["C", x1, y1, x2, y2, x, y], ["Z"]]
@@ -426,6 +428,7 @@ class Shape(EdofObject):
             "fill":          self.fill.to_dict(),
             "stroke":        self.stroke.to_dict(),
             "corner_radius": self.corner_radius,
+            "corner_radii":  self.corner_radii,
             "points":        self.points,
             "path_data":     self.path_data,
             "path_point_types": self.path_point_types,
@@ -439,6 +442,7 @@ class Shape(EdofObject):
         base.fill          = FillStyle.from_dict(d.get("fill", {}))
         base.stroke        = StrokeStyle.from_dict(d.get("stroke", {}))
         base.corner_radius = float(d.get("corner_radius", 0.0))
+        base.corner_radii  = [float(x) for x in d.get("corner_radii", [])]
         base.points        = list(d.get("points", []))
         base.path_data     = list(d.get("path_data", []))
         base.path_point_types = list(d.get("path_point_types", []))

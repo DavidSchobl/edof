@@ -31,7 +31,7 @@ are migrated to DocumentTextBox in the document loader (see Document.from_dict).
 """
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from edof.format.objects import TextBox
 

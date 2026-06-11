@@ -1,0 +1,232 @@
+{
+  "cursors": [
+    {
+      "name": "move",
+      "state": "default",
+      "file": "cur-move.png",
+      "action": "Select / move objects",
+      "hotspot": [
+        7,
+        4
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "pen",
+      "state": "default",
+      "file": "cur-pen.png",
+      "action": "Pen: place anchor point",
+      "hotspot": [
+        7,
+        4
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "pen_close",
+      "state": "default",
+      "file": "cur-pen_close.png",
+      "action": "Pen: close path",
+      "hotspot": [
+        7,
+        4
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "add_point",
+      "state": "default",
+      "file": "cur-add_point.png",
+      "action": "Add point on path",
+      "hotspot": [
+        7,
+        4
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "remove_point",
+      "state": "default",
+      "file": "cur-remove_point.png",
+      "action": "Remove point from path",
+      "hotspot": [
+        7,
+        4
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "tangent",
+      "state": "default",
+      "file": "cur-tangent.png",
+      "action": "Drag bezier handle / tangent",
+      "hotspot": [
+        7,
+        4
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "rotate",
+      "state": "default",
+      "file": "cur-rotate.png",
+      "action": "Rotate object",
+      "hotspot": [
+        16,
+        16
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "resize_nwse",
+      "state": "default",
+      "file": "cur-resize_nwse.png",
+      "action": "Resize diagonal NW-SE",
+      "hotspot": [
+        16,
+        16
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "resize_nesw",
+      "state": "default",
+      "file": "cur-resize_nesw.png",
+      "action": "Resize diagonal NE-SW",
+      "hotspot": [
+        16,
+        16
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "resize_ns",
+      "state": "default",
+      "file": "cur-resize_ns.png",
+      "action": "Resize vertical",
+      "hotspot": [
+        16,
+        16
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "resize_ew",
+      "state": "default",
+      "file": "cur-resize_ew.png",
+      "action": "Resize horizontal",
+      "hotspot": [
+        16,
+        16
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "hand",
+      "state": "default",
+      "file": "cur-hand.png",
+      "action": "Pan canvas (idle)",
+      "hotspot": [
+        16,
+        20
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "hand_grab",
+      "state": "default",
+      "file": "cur-hand_grab.png",
+      "action": "Pan canvas (dragging)",
+      "hotspot": [
+        16,
+        20
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "crosshair",
+      "state": "default",
+      "file": "cur-crosshair.png",
+      "action": "Draw shape / rectangle / ellipse / line",
+      "hotspot": [
+        16,
+        16
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "text",
+      "state": "default",
+      "file": "cur-text.png",
+      "action": "Text I-beam (edit text)",
+      "hotspot": [
+        16,
+        16
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "eyedropper",
+      "state": "default",
+      "file": "cur-eyedropper.png",
+      "action": "Pick colour",
+      "hotspot": [
+        8,
+        5
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "zoom_in",
+      "state": "default",
+      "file": "cur-zoom_in.png",
+      "action": "Zoom in",
+      "hotspot": [
+        14,
+        13
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "zoom_out",
+      "state": "default",
+      "file": "cur-zoom_out.png",
+      "action": "Zoom out",
+      "hotspot": [
+        14,
+        13
+      ],
+      "size": 32,
+      "stroke": true
+    },
+    {
+      "name": "not_allowed",
+      "state": "default",
+      "file": "cur-not_allowed.png",
+      "action": "Action not allowed",
+      "hotspot": [
+        16,
+        16
+      ],
+      "size": 32,
+      "stroke": true
+    }
+  ]
+}

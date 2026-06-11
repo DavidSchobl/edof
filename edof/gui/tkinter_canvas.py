@@ -18,7 +18,6 @@ Features:
 from __future__ import annotations
 import math
 import tkinter as tk
-from tkinter import ttk
 from typing import Callable, List, Optional, Tuple, TYPE_CHECKING
 
 try:

@@ -7,7 +7,7 @@ Colours are stored as (R,G,B) or (R,G,B,A) tuples, values 0-255.
 from __future__ import annotations
 import copy
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 Color = Tuple[int, ...]
 
@@ -424,10 +424,85 @@ class LayerEffect:
     size: float = 2.0                       # mm — blur/glow radius, bevel size
     distance: float = 2.0                   # mm — shadow offset, used with direction
     direction: float = 135.0                # degrees, 0=right, 90=up, etc.
+    # v4.2.7: Photoshop-style Spread (shadow/outer glow) / Choke (inner) — 0..1.
+    # Fraction of Size that is a solid matte expansion before the blur; at 1.0
+    # the soft edge becomes a hard, stroke-like outline.
+    spread: float = 0.0
     # Stroke-specific
     stroke_position: str = "outside"        # outside | center | inside
     # Bevel-specific
-    bevel_kind: str = "outer"               # outer | inner | smooth
+    bevel_kind: str = "outer"               # outer | inner | smooth | emboss
+    # v4.2.7: fuller Photoshop-style bevel controls
+    bevel_technique: str = "smooth"         # smooth | chisel_hard | chisel_soft
+    bevel_depth: float = 100.0              # % (strength of the shading)
+    bevel_dir: str = "up"                   # up | down
+    soften: float = 0.0                     # mm — blur of the bevel shading
+    altitude: float = 45.0                  # deg — light height (0=flat, 90=top)
+    highlight_opacity: float = 0.75         # 0..1
+    shadow_opacity: float = 0.75            # 0..1
+    # v4.2.7: new effects
+    # long_shadow (flat-design): uses color, direction, opacity
+    ls_length: float = 10.0                 # mm — shadow throw length
+    ls_fade: bool = True                    # fade to transparent along the throw
+    # v4.2.7.10: taper (0..2, 1=100% uniform) + soft mode
+    ls_taper: float = 1.0                   # width scale at the tip (1.0 = no taper)
+    ls_mode: str = "solid"                  # solid | soft
+    ls_blur_mode: str = "linear"            # linear | constant (soft mode blur ramp)
+    ls_color_grad: bool = False             # color/alpha gradient color -> color2 along length
+    ls_light_angle: float = 45.0            # cast mode: light elevation 1..90 deg (lower = longer)
+    ls_light_size: float = 0.0              # cast mode: light disk = penumbra width (mm; 0 = use size)
+    # v4.2.11.56: Photoshop-style multi-stop gradients along the ray progression
+    # t in [0, 1]. Empty list = legacy behaviour (fade flag, color->color2,
+    # blur mode/gamma). Stops are [t, ...] rows, linearly interpolated.
+    ls_grad_colors: List[List[float]] = field(default_factory=list)  # [t, r, g, b]
+    ls_grad_alphas: List[List[float]] = field(default_factory=list)  # [t, a01]
+    ls_grad_blurs: List[List[float]] = field(default_factory=list)   # [t, blur_mm]
+    # v4.2.11.57: three independent mode selectors (taper + cast removed).
+    # Empty string = derive from the legacy fields (ls_mode/ls_fade/
+    # ls_color_grad), so old documents keep rendering unchanged.
+    ls_alpha_mode: str = ""                 # "" | solid | fade | custom
+    ls_color_mode: str = ""                 # "" | solid | custom
+    # chromatic_aberration: RGB channel split
+    ca_offset: float = 0.5                  # mm — channel offset (legacy/global)
+    ca_angle: float = 0.0                   # deg — split direction (legacy/global)
+    # v4.2.7.12: rich per-channel control + radial (lens) distortion
+    ca_mode: str = "linear"                 # linear | radial
+    ca_r_color: Color = (255, 0, 0, 255)
+    ca_g_color: Color = (0, 255, 0, 255)
+    ca_b_color: Color = (0, 0, 255, 255)
+    ca_r_offset: float = 0.5                # mm
+    ca_r_angle: float = 0.0                 # deg
+    ca_g_offset: float = 0.0
+    ca_g_angle: float = 0.0
+    ca_b_offset: float = 0.5
+    ca_b_angle: float = 180.0
+    ca_r_distort: float = 2.0               # % radial scale (radial mode)
+    ca_g_distort: float = 0.0
+    ca_b_distort: float = -2.0
+    # halftone: per-channel shaped-dot screen (RGB additive / CMYK multiply)
+    ht_dot: float = 1.5                     # mm — grid cell size
+    ht_angle: float = 72.0                  # deg — per-channel screen rotation step
+    ht_shape: str = "circle"                # circle|diamond|square|ring|cross|line|triangle|hex
+    ht_color_mode: str = "cmyk"             # rgb | cmyk
+    ht_render_mode: str = "size"            # size | transparency
+    ht_size_factor: float = 115.0           # % — overall dot scale
+    ht_overlay_scale: float = 1.5           # max dot diameter vs cell (overlap)
+    ht_decentralization: float = 0.0        # % — per-channel screen offset
+    ht_hex: bool = True                     # hex grid (vs square)
+    ht_random_rotate: bool = False          # randomly rotate each dot/pattern
+    ht_pattern_mode: str = "shape"          # shape | single | per_channel (UI hint)
+    ht_patterns: List[str] = field(default_factory=list)  # base64 PNG: 0/1/3/4 imgs
+    ht_keep_background: bool = False         # (legacy) keep layer content under dots
+    ht_background: str = "transparent"       # transparent | native | layer
+    ht_clip: str = "whole"                   # whole | hard | soft (edge clipping)
+    ht_extra_channel: bool = False           # optional achromatic key channel (RGB+black / CMYK+white)
+    ht_extra_color: str = "auto"             # auto | white | black (auto: black for RGB, white for CMYK)
+    ht_channels_enabled: List[bool] = field(
+        default_factory=lambda: [True, True, True, True, True])  # per-channel on/off
+    # light_sweep (glossy specular streak): uses color2, opacity
+    lsw_pos: float = 0.5                    # 0..1 — position across the object
+    lsw_width: float = 0.3                  # 0..1 — streak width (fraction)
+    lsw_angle: float = 45.0                 # deg — streak angle
     # Gradient-specific
     gradient_start: Color = (0, 0, 0, 255)
     gradient_end: Color = (255, 255, 255, 255)
@@ -451,8 +526,61 @@ class LayerEffect:
             "size": self.size,
             "distance": self.distance,
             "direction": self.direction,
+            "spread": self.spread,
             "stroke_position": self.stroke_position,
             "bevel_kind": self.bevel_kind,
+            "bevel_technique": self.bevel_technique,
+            "bevel_depth": self.bevel_depth,
+            "bevel_dir": self.bevel_dir,
+            "soften": self.soften,
+            "altitude": self.altitude,
+            "highlight_opacity": self.highlight_opacity,
+            "shadow_opacity": self.shadow_opacity,
+            "ls_length": self.ls_length,
+            "ls_fade": self.ls_fade,
+            "ls_taper": self.ls_taper,
+            "ls_mode": self.ls_mode,
+            "ls_blur_mode": self.ls_blur_mode,
+            "ls_color_grad": self.ls_color_grad,
+            "ls_light_angle": self.ls_light_angle,
+            "ls_light_size": self.ls_light_size,
+            "ls_grad_colors": [list(s) for s in self.ls_grad_colors],
+            "ls_grad_alphas": [list(s) for s in self.ls_grad_alphas],
+            "ls_grad_blurs": [list(s) for s in self.ls_grad_blurs],
+            "ls_alpha_mode": self.ls_alpha_mode,
+            "ls_color_mode": self.ls_color_mode,
+            "ca_offset": self.ca_offset,
+            "ca_angle": self.ca_angle,
+            "ca_mode": self.ca_mode,
+            "ca_r_color": _rgba_to_hex(self.ca_r_color),
+            "ca_g_color": _rgba_to_hex(self.ca_g_color),
+            "ca_b_color": _rgba_to_hex(self.ca_b_color),
+            "ca_r_offset": self.ca_r_offset, "ca_r_angle": self.ca_r_angle,
+            "ca_g_offset": self.ca_g_offset, "ca_g_angle": self.ca_g_angle,
+            "ca_b_offset": self.ca_b_offset, "ca_b_angle": self.ca_b_angle,
+            "ca_r_distort": self.ca_r_distort, "ca_g_distort": self.ca_g_distort,
+            "ca_b_distort": self.ca_b_distort,
+            "ht_dot": self.ht_dot,
+            "ht_angle": self.ht_angle,
+            "ht_shape": self.ht_shape,
+            "ht_color_mode": self.ht_color_mode,
+            "ht_render_mode": self.ht_render_mode,
+            "ht_size_factor": self.ht_size_factor,
+            "ht_overlay_scale": self.ht_overlay_scale,
+            "ht_decentralization": self.ht_decentralization,
+            "ht_hex": self.ht_hex,
+            "ht_random_rotate": self.ht_random_rotate,
+            "ht_pattern_mode": self.ht_pattern_mode,
+            "ht_patterns": self.ht_patterns,
+            "ht_keep_background": self.ht_keep_background,
+            "ht_background": self.ht_background,
+            "ht_clip": self.ht_clip,
+            "ht_extra_channel": self.ht_extra_channel,
+            "ht_extra_color": self.ht_extra_color,
+            "ht_channels_enabled": list(self.ht_channels_enabled),
+            "lsw_pos": self.lsw_pos,
+            "lsw_width": self.lsw_width,
+            "lsw_angle": self.lsw_angle,
             "gradient_start": _rgba_to_hex(self.gradient_start),
             "gradient_end": _rgba_to_hex(self.gradient_end),
             "gradient_angle": self.gradient_angle,
@@ -465,7 +593,8 @@ class LayerEffect:
     @classmethod
     def from_dict(cls, d: dict) -> "LayerEffect":
         obj = cls()
-        color_keys = {"color", "color2", "gradient_start", "gradient_end"}
+        color_keys = {"color", "color2", "gradient_start", "gradient_end",
+                      "ca_r_color", "ca_g_color", "ca_b_color"}
         for k, v in d.items():
             if k in color_keys and isinstance(v, str):
                 v = _hex_to_rgba(v)

@@ -50,7 +50,7 @@ to v2. All migration warnings are appended to doc.errors.
 from __future__ import annotations
 import json
 import zipfile
-from typing import TYPE_CHECKING, Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional, Dict
 
 if TYPE_CHECKING:
     from edof.format.document import Document

@@ -9,10 +9,10 @@ typography values in pt and are migrated on load.
 """
 
 from __future__ import annotations
-__version__ = "4.2.5"
+__version__ = "4.3.0"
 FORMAT_MAJOR        = 4
 FORMAT_MINOR        = 2
-FORMAT_PATCH        = 0
+FORMAT_PATCH        = 19
 FORMAT_VERSION_STR  = f"{FORMAT_MAJOR}.{FORMAT_MINOR}.{FORMAT_PATCH}"
 
 # Oldest format version this library can read. Files with version

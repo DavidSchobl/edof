@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "edof"
-version         = "4.2.5"
+version         = "4.3.0"
 description     = "Easy Document Format – programmatic document creation, editing and export with vector PDF, rich text, tables and PDF import"
 readme          = "README.md"
 license         = { file = "LICENSE" }
@@ -37,6 +37,10 @@ dependencies = [
 #   - reportlab for legacy raster PDF fallback (vector=False mode)
 pdf    = ["pymupdf>=1.23", "pdfplumber>=0.10", "reportlab>=4.0"]
 qr     = ["qrcode[pil]>=7.4"]
+# v4.2.11.0: optional GPU acceleration (Build 5). moderngl provides a
+# standalone GL context for shader-based effects (blur, ...). The app runs
+# fine without it: GPU paths fall back to CPU when moderngl/GPU is absent.
+gpu    = ["moderngl>=5.8"]
 pyqt6  = ["PyQt6>=6.6"]
 # v4.1.1: viewer (read-only .edof viewer, lightweight standalone)
 viewer = ["PyQt6>=6.6"]
@@ -67,6 +71,8 @@ include = ["edof*"]
 [tool.setuptools.package-data]
 edof = ["py.typed", "editor_lang/*.json"]
 "edof._apps.assets.icons" = ["*.ico", "*.png", "*.icns"]
+"edof._apps.assets.cursors" = ["*.png", "*.json"]
+"edof._apps.assets.ui_icons" = ["*.png", "*.json"]
 
 [tool.black]
 line-length    = 100
@@ -90,6 +96,7 @@ source = ["edof"]
 
 [project.scripts]
 edof-cli    = "edof._apps.cli:main"
+edof-gpu-selftest = "edof.engine.gpu:_cli"
 
 [project.gui-scripts]
 edof-editor = "edof._apps.editor:main"

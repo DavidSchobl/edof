@@ -266,11 +266,17 @@ def test_editor_has_panel_persistence(editor_src):
 
 
 def test_editor_has_subpixel_render_fix(editor_src):
-    """v4.1.15.7: oversampling removed (caused text-position jumps at
-    different zoom levels). Render is now at canvas DPI directly."""
-    assert ("render at canvas DPI directly" in editor_src or
-            "thin text strokes" in editor_src or
-            "multiplier = min" in editor_src)
+    """v4.1.15.7: oversampling that shifted the scene basis caused text-position
+    jumps at different zoom levels. v4.2.9.1: rendering may use a higher DPI when
+    zoomed in for crispness, but the rendered pixmap is scaled back onto a
+    base-DPI scene (via _apply_page_pixmap), so scene coordinates — and therefore
+    text/overlay positions — stay fixed regardless of render DPI."""
+    assert (
+        "render at canvas DPI directly" in editor_src or
+        "thin text strokes" in editor_src or
+        "multiplier = min" in editor_src or
+        ("def _apply_page_pixmap" in editor_src and "base-DPI scene" in editor_src)
+    )
 
 
 # ── Backward compat ─────────────────────────────────────────────────────────

@@ -302,3 +302,7 @@ Constants:
 - `BD_16 = 16` — 16 bits per channel (high precision)
 
 These are passed through to Pillow at export time. Most users stick with the defaults.
+
+## LayerEffect
+
+Photoshop-style layer effects (`drop_shadow`, `long_shadow`, `stroke`, `bevel`, `halftone`, `chromatic_aberration`, ...) live on the object's `effects` list, not inside the style objects above. They have their own reference page: [12 — Layer effects](12-effects.md).

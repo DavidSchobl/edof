@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Optional, List
+from typing import Optional
 
 try:
     from PyQt6.QtCore import Qt, QSize, QTimer

@@ -16,8 +16,7 @@ coordinates by applying the same dpi-to-pixel conversion.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
-from PIL import ImageFont
+from typing import List, Tuple
 
 from edof.engine.text_engine import (
     load_font_safe, _run_to_font, _lw, _lh,
@@ -637,31 +636,132 @@ def layout_runs(runs, parent_style,
 
 # ── Rendering ──────────────────────────────────────────────────────────────────
 
+_GLYPH_MASK_CACHE: dict = {}
+_GLYPH_FAST = None   # None = not yet self-checked; True/False afterwards
+
+
+def clear_glyph_cache():
+    _GLYPH_MASK_CACHE.clear()
+
+
+def _fast_char(draw, x, y, ch, font, color):
+    """Replicate ImageDraw.text() for the plain case (no stroke, no embedded
+    colour, no direction/features), reusing a cached FreeType mask. PIL's text()
+    boils down to: coord=(int(x),int(y)); mask,off=font.getmask2(ch, fontmode,
+    start=(frac(x),frac(y)), ...); draw_bitmap(coord+off, mask, ink). Only the
+    expensive getmask2 (FreeType rasterisation) is cached; the final blend is
+    PIL's own draw_bitmap, so the output is bit-identical by construction."""
+    import math as _math
+    mode = draw.fontmode
+    ink, fill_ink = draw._getink(color)
+    if ink is None:
+        ink = fill_ink
+    if ink is None:
+        return
+    cx, cy = int(x), int(y)
+    fx = _math.modf(x)[0]; fy = _math.modf(y)[0]
+    key = (id(font), ch, mode, ink, fx, fy)
+    ent = _GLYPH_MASK_CACHE.get(key)
+    if ent is None:
+        mask, offset = font.getmask2(ch, mode, stroke_width=0,
+                                     stroke_filled=True, anchor=None,
+                                     ink=ink, start=(fx, fy))
+        if len(_GLYPH_MASK_CACHE) > 60000:
+            _GLYPH_MASK_CACHE.clear()
+        ent = (font, mask, offset)        # strong font ref pins id(font)
+        _GLYPH_MASK_CACHE[key] = ent
+    _, mask, offset = ent
+    draw.draw.draw_bitmap((cx + offset[0], cy + offset[1]), mask, ink)
+
+
+def _glyph_fast_ok():
+    """One-time self-check: render a probe string char-by-char via draw.text
+    and via _fast_char at integer AND fractional positions on transparent,
+    opaque and semi-transparent backgrounds. The fast path is enabled ONLY if
+    every byte matches, so a different Pillow internals version can never
+    change the rendering -- it just falls back to plain draw.text."""
+    global _GLYPH_FAST
+    if _GLYPH_FAST is not None:
+        return _GLYPH_FAST
+    try:
+        from PIL import Image as _I, ImageDraw as _ID
+        from edof.engine.text_engine import load_font_safe
+        font = load_font_safe("Arial", False, False, 23, None)
+        if font is None:
+            _GLYPH_FAST = False
+            return False
+        probe = "Ayg9ěQ.;W"
+        ok = True
+        for bg in ((0, 0, 0, 0), (255, 255, 255, 255), (10, 200, 30, 128)):
+            for x0, y0 in ((7, 5), (7.55, 5.3)):
+                a = _I.new("RGBA", (220, 40), bg); da = _ID.Draw(a)
+                b = _I.new("RGBA", (220, 40), bg); db = _ID.Draw(b)
+                xa = x0
+                for ch in probe:
+                    da.text((xa, y0), ch, font=font, fill=(20, 40, 200))
+                    xa += max(4, font.getbbox(ch)[2])
+                xb = x0
+                for ch in probe:
+                    _fast_char(db, xb, y0, ch, font, (20, 40, 200))
+                    xb += max(4, font.getbbox(ch)[2])
+                if a.tobytes() != b.tobytes():
+                    ok = False
+        _GLYPH_FAST = ok
+    except Exception:
+        _GLYPH_FAST = False
+    return _GLYPH_FAST
+
+
 def render_layout_onto(draw, layout: Layout, runs, parent_style,
                        dpi: float, scale: float = 1.0,
                        clip_to_inner: bool = True) -> None:
     """Draw a previously-computed layout onto a PIL ImageDraw."""
+    # v4.2.11.36: resolve each RUN once instead of once per character.
+    # run.resolve + font lookup + colour unpacking were executed for every
+    # glyph (thousands of times on a document page) although they only depend
+    # on the run. The draw calls themselves are unchanged (bit-identical).
+    _rcache = {}
+
+    def _run_ctx(run_idx):
+        ctx = _rcache.get(run_idx)
+        if ctx is None:
+            run = runs[run_idx] if 0 <= run_idx < len(runs) else None
+            if run is None:
+                ctx = None
+            else:
+                rs = run.resolve(parent_style, scale)
+                font, _ = _run_to_font(rs, dpi)
+                color = tuple(rs["color"][:3]) if rs["color"] else (0, 0, 0)
+                bg = rs.get("background")
+                sw = max(1, int(rs["font_size"] * dpi / 25.4) // 14)
+                ctx = (rs, font, color, bg, sw)
+            _rcache[run_idx] = ctx
+        return ctx
+
+    _fast = _glyph_fast_ok()
     for line in layout.lines:
         for c in line.chars:
             if c.is_newline:
                 continue
-            run = runs[c.run_idx] if 0 <= c.run_idx < len(runs) else None
-            if run is None:
+            ctx = _run_ctx(c.run_idx)
+            if ctx is None:
                 continue
-            rs = run.resolve(parent_style, scale)
-            # font load
-            font, _ = _run_to_font(rs, dpi)
-            color = tuple(rs["color"][:3]) if rs["color"] else (0, 0, 0)
-            bg    = rs.get("background")
+            rs, font, color, bg, sw = ctx
             # baseline draw position: line_top + (line_ascender - char_asc)
             draw_y = c.line_top + (line.ascender - c.ascender)
             # background highlight
             if bg and len(bg) >= 4 and bg[3] > 0:
                 draw.rectangle([c.x, c.line_top, c.x + c.w, c.line_top + c.line_h], fill=bg)
-            # draw char
-            draw.text((c.x, draw_y), c.char, font=font, fill=color)
+            # draw char (cached FreeType mask when the self-check passed;
+            # bit-identical -- otherwise plain draw.text)
+            if _fast:
+                try:
+                    _fast_char(draw, c.x, draw_y, c.char, font, color)
+                except Exception:
+                    draw.text((c.x, draw_y), c.char, font=font, fill=color)
+            else:
+                draw.text((c.x, draw_y), c.char, font=font, fill=color)
             # underline / strikethrough per char
-            sw = max(1, int(rs["font_size"] * dpi / 25.4) // 14)
             if rs.get("underline"):
                 uy = int(c.line_top + c.line_h * 0.92)
                 draw.line([(c.x, uy), (c.x + c.w, uy)], fill=color, width=sw)

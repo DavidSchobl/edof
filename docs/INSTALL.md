@@ -60,19 +60,19 @@ If you need multiple edof versions for testing (or to compare one release agains
 **Windows:**
 
 ```cmd
-mkdir D:\apps\Edof_V401
-cd D:\apps\Edof_V401
+mkdir C:\edof
+cd C:\edof
 python -m venv .venv
 .venv\Scripts\activate
 pip install edof[all]==4.2.2
 deactivate
 ```
 
-A small batch script makes switching painless. Save as `D:\apps\bin\edof401.bat`:
+A small batch script makes switching painless. Save as `C:\edof\bin\edof.bat`:
 
 ```bat
 @echo off
-call D:\apps\Edof_V401\.venv\Scripts\activate.bat
+call C:\edof\.venv\Scripts\activate.bat
 cmd /k prompt [edof v4.2.2] $P$G
 ```
 

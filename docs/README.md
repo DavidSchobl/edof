@@ -19,6 +19,9 @@ If you have a specific task in mind, jump straight to:
 - [Cookbook: Batch generate PDFs from data](cookbook/batch-pdf.md)
 - [Cookbook: Encrypted templates with multi-level passwords](cookbook/encrypted-template.md)
 - [Cookbook: Import a PDF, edit, and re-export](cookbook/pdf-import-edit.md)
+- [Cookbook: Flat-design poster with layer effects](cookbook/effects-poster.md)
+
+Runnable end-to-end scripts live in [`examples/`](../examples/README.md).
 
 ## Reference
 
@@ -36,6 +39,8 @@ Complete API reference, organized by topic:
 | [08 — Editor](reference/08-editor.md) | The PyQt6 desktop editor — features, shortcuts, dialogs |
 | [09 — CLI](reference/09-cli.md) | `edof-cli` and all its subcommands |
 | [10 — Helpers](reference/10-helpers.md) | `add_card`, `add_metric`, `add_kv_list`, `row()`, `column()`, `make_table`, `measure_text_height` |
+| [11 — DOCX interop](reference/11-docx.md) | Word import / export — `import_docx`, `export_docx`, mapping and limitations |
+| [12 — Layer effects](reference/12-effects.md) | `LayerEffect` — shadows, glows, stroke, overlays, bevel, chromatic aberration, halftone, long shadow with gradient stops |
 
 ## Advanced
 
@@ -57,4 +62,4 @@ Complete API reference, organized by topic:
 
 ## Version
 
-This documentation is for **edof 4.2.5**.
+This documentation is for **edof 4.3.0**.

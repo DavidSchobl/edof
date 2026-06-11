@@ -6,7 +6,7 @@ Requires:  pip install edof[qr]
 
 from __future__ import annotations
 import io
-from typing import Optional, Tuple
+from typing import Tuple
 
 Color = Tuple[int, int, int]
 

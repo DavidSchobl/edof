@@ -2,10 +2,12 @@
 """v4.0: rich text, tables, vector paths, gradients, blend modes, conditional visibility."""
 from __future__ import annotations
 import io, os, math
-from typing import Optional, TYPE_CHECKING
+import logging
+import hashlib as _hashlib
+import collections as _collections
 from PIL import Image, ImageDraw, ImageChops
 from edof.engine.color import convert_image
-from edof.engine.transform import mm_to_px, rotate_point
+from edof.engine.transform import mm_to_px
 from edof.engine.text_engine import render_text_onto, render_runs_onto, find_fitting_scale
 from edof.format.objects import (EdofObject, TextBox, ImageBox, Shape,
                                   QRCode, Group, Table, SubDocumentBox, SvgBox,
@@ -20,9 +22,26 @@ def _rgba(c, default=(0, 0, 0, 255)) -> tuple:
     return (*t, 255) if len(t) == 3 else t[:4]
 
 
+def _make_page_canvas(page, w_px, h_px, dpi_r, show_transparency_checker):
+    """Build the base page canvas (background only), shared by render_page and
+    render_page_active so they are pixel-identical."""
+    bg = _rgba(page.background, (255, 255, 255, 255))
+    if bg[3] == 0:
+        if show_transparency_checker:
+            return _make_checker_canvas(w_px, h_px, dpi_r)
+        return Image.new("RGBA", (w_px, h_px), (0, 0, 0, 0))
+    elif bg[3] < 255:
+        if show_transparency_checker:
+            checker = _make_checker_canvas(w_px, h_px, dpi_r)
+            overlay = Image.new("RGBA", (w_px, h_px), bg[:4])
+            return Image.alpha_composite(checker, overlay)
+        return Image.new("RGBA", (w_px, h_px), bg[:4])
+    return Image.new("RGBA", (w_px, h_px), bg[:4])
+
+
 def render_page(page, resources, variables,
                 dpi=None, color_space=None, bit_depth=None,
-                show_transparency_checker=True) -> Image.Image:
+                show_transparency_checker=True, use_cache=False) -> Image.Image:
     """Render a page to an RGBA image.
 
     v4.1.8: ``show_transparency_checker`` controls whether transparent or
@@ -37,25 +56,14 @@ def render_page(page, resources, variables,
     w_px  = max(1, int(mm_to_px(page.width,  dpi_r)))
     h_px  = max(1, int(mm_to_px(page.height, dpi_r)))
     bg    = _rgba(page.background, (255, 255, 255, 255))
-    # v4.1.3/4.1.8: transparent / partial-transparent background
-    if bg[3] == 0:
-        if show_transparency_checker:
-            canvas = _make_checker_canvas(w_px, h_px, dpi_r)
-        else:
-            # Pure transparent — used when this page will be composited elsewhere
-            canvas = Image.new("RGBA", (w_px, h_px), (0, 0, 0, 0))
-    elif bg[3] < 255:
-        if show_transparency_checker:
-            checker = _make_checker_canvas(w_px, h_px, dpi_r)
-            overlay = Image.new("RGBA", (w_px, h_px), bg[:4])
-            canvas = Image.alpha_composite(checker, overlay)
-        else:
-            canvas = Image.new("RGBA", (w_px, h_px), bg[:4])
-    else:
-        canvas = Image.new("RGBA", (w_px, h_px), bg[:4])
+    canvas = _make_page_canvas(page, w_px, h_px, dpi_r, show_transparency_checker)
+    res_fp = _res_fp(resources) if use_cache else None
     for obj in page.sorted_objects():
         if is_visible(obj, variables):
-            _render_object(obj, canvas, resources, variables, dpi_r)
+            if use_cache:
+                _render_object_cached(obj, canvas, resources, variables, dpi_r, res_fp)
+            else:
+                _render_object(obj, canvas, resources, variables, dpi_r)
     # v4.1.8: if bg is transparent and caller wants real alpha, force RGBA
     # mode (otherwise convert_image to "RGB" would strip the alpha)
     if not show_transparency_checker and bg[3] < 255 and cs_r == "RGB":
@@ -78,119 +86,90 @@ def _make_checker_canvas(w_px, h_px, dpi):
     return canvas
 
 
+def render_page_active(page, resources, variables, active_id,
+                       dpi=None, color_space=None, bit_depth=None,
+                       show_transparency_checker=True, active_scale=1.0):
+    """Fast re-render while a SINGLE object (active_id) is being edited.
+
+    Caches the static background split into 'below' (page bg + every object
+    under the active one) and 'above' (objects over it), keyed on a signature of
+    every non-active object. Each call only re-renders the active object and
+    composites it between the two cached layers, so dragging / tweaking one
+    object on a dense page no longer re-renders the whole page every frame.
+
+    Returns an RGBA-or-converted Image, or None when the fast path can't be used
+    safely (active not on page, or an 'above' object uses a non-normal blend —
+    flattening that group on transparency would not match a full render). The
+    caller should fall back to render_page() on None.
+    """
+    dpi_r = dpi or page.dpi
+    cs_r  = color_space or page.color_space
+    bd_r  = bit_depth or page.bit_depth
+    w_px  = max(1, int(mm_to_px(page.width,  dpi_r)))
+    h_px  = max(1, int(mm_to_px(page.height, dpi_r)))
+    size  = (w_px, h_px)
+
+    objs = list(page.sorted_objects())
+    act_idx = None
+    for i, o in enumerate(objs):
+        if getattr(o, 'id', None) == active_id:
+            act_idx = i; break
+    if act_idx is None:
+        return None
+    active = objs[act_idx]
+    below  = objs[:act_idx]
+    above  = objs[act_idx + 1:]
+
+    # 'above' is flattened onto transparency then composited; only equivalent to
+    # a full render when every above object uses normal blend.
+    for o in above:
+        if (getattr(o, 'blend_mode', 'normal') or 'normal') != 'normal':
+            return None
+
+    res_fp = _res_fp(resources)
+    bg = _rgba(page.background, (255, 255, 255, 255))
+    parts = [repr(bg), str(dpi_r), str(size), repr(_vars_fp(variables)),
+             repr(res_fp), str(bool(show_transparency_checker)), str(act_idx)]
+    for o in (below + above):
+        parts.append(_obj_sig(o, variables, dpi_r, size, res_fp)
+                     or repr(getattr(o, 'id', '?')))
+    static_key = _hashlib.sha1('|'.join(parts).encode('utf-8', 'ignore')).hexdigest()
+
+    ent = _ACTIVE_BG_CACHE.get(static_key)
+    if ent is None:
+        below_img = _make_page_canvas(page, w_px, h_px, dpi_r,
+                                      show_transparency_checker)
+        for o in below:
+            if is_visible(o, variables):
+                _render_object(o, below_img, resources, variables, dpi_r)
+        above_img = Image.new("RGBA", size, (0, 0, 0, 0))
+        for o in above:
+            if is_visible(o, variables):
+                _render_object(o, above_img, resources, variables, dpi_r)
+        _ACTIVE_BG_CACHE.clear()   # keep only the current active context
+        _ACTIVE_BG_CACHE[static_key] = (below_img, above_img)
+        ent = _ACTIVE_BG_CACHE[static_key]
+    below_img, above_img = ent
+
+    result = below_img.copy()
+    if is_visible(active, variables):
+        _composite_active_cached(active, result, resources, variables,
+                                 dpi_r, size, res_fp, active_scale)
+    result.alpha_composite(above_img)
+
+    if not show_transparency_checker and bg[3] < 255 and cs_r == "RGB":
+        cs_r = "RGBA"
+    out = convert_image(result, cs_r, bd_r)
+    out.info["dpi"] = (dpi_r, dpi_r)
+    return out
+
+
 def render_document(doc, dpi=None, color_space=None, bit_depth=None):
     return [render_page(p, doc.resources, doc.variables, dpi, color_space, bit_depth)
             for p in doc.pages]
 
 
 # ── Blend modes ──────────────────────────────────────────────────────────────
-
-def _composite_with_blend(canvas, layer, pos, blend):
-    if blend in ("normal", "", None):
-        canvas.alpha_composite(layer, pos); return
-    x, y = pos; w, h = layer.size; cw, ch = canvas.size
-    x0, y0 = max(0, x), max(0, y); x1, y1 = min(cw, x + w), min(ch, y + h)
-    if x1 <= x0 or y1 <= y0: return
-    bg = canvas.crop((x0, y0, x1, y1)).convert("RGBA")
-    fg = layer.crop((x0 - x, y0 - y, x1 - x, y1 - y)).convert("RGBA")
-    fr, fg_, fb, fa = fg.split(); br, bg_, bb, ba = bg.split()
-    try:
-        # ── Basic chops ──────────────────────────────────────────────────────
-        if   blend == "multiply": rc = (ImageChops.multiply(fr, br), ImageChops.multiply(fg_, bg_), ImageChops.multiply(fb, bb))
-        elif blend == "screen":   rc = (ImageChops.screen(fr, br),   ImageChops.screen(fg_, bg_),   ImageChops.screen(fb, bb))
-        elif blend == "darken":   rc = (ImageChops.darker(fr, br),   ImageChops.darker(fg_, bg_),   ImageChops.darker(fb, bb))
-        elif blend == "lighten":  rc = (ImageChops.lighter(fr, br),  ImageChops.lighter(fg_, bg_),  ImageChops.lighter(fb, bb))
-        elif blend == "difference":
-            rc = (ImageChops.difference(fr, br), ImageChops.difference(fg_, bg_), ImageChops.difference(fb, bb))
-        elif blend == "exclusion":
-            # B + F - 2*B*F/255
-            import numpy as np
-            B = np.array(bg, dtype=np.float32)
-            F = np.array(fg, dtype=np.float32)
-            out = B + F - 2 * B * F / 255.0
-            out = np.clip(out, 0, 255).astype(np.uint8)
-            blended = Image.fromarray(out, "RGBA")
-            blended.putalpha(fa)
-            final = Image.alpha_composite(bg, blended)
-            canvas.paste(final, (x0, y0))
-            return
-        # ── Numpy-based composite for advanced modes ────────────────────────
-        elif blend in ("overlay", "color_dodge", "color_burn", "hard_light",
-                        "soft_light", "hue", "saturation", "color", "luminosity"):
-            import numpy as np
-            B = np.array(bg, dtype=np.float32)[..., :3] / 255.0
-            F = np.array(fg, dtype=np.float32)[..., :3] / 255.0
-            FA = np.array(fg, dtype=np.float32)[..., 3:4] / 255.0
-            if   blend == "overlay":
-                out = np.where(B < 0.5, 2 * B * F, 1 - 2 * (1 - B) * (1 - F))
-            elif blend == "color_dodge":
-                out = np.where(F >= 1.0, 1.0, np.minimum(1.0, B / np.maximum(1 - F, 1e-6)))
-            elif blend == "color_burn":
-                out = np.where(F <= 0.0, 0.0, 1 - np.minimum(1.0, (1 - B) / np.maximum(F, 1e-6)))
-            elif blend == "hard_light":
-                out = np.where(F < 0.5, 2 * F * B, 1 - 2 * (1 - F) * (1 - B))
-            elif blend == "soft_light":
-                # Pegtop's formula
-                out = (1 - 2 * F) * B * B + 2 * F * B
-            elif blend in ("hue", "saturation", "color", "luminosity"):
-                # Convert to HSL
-                from colorsys import rgb_to_hls, hls_to_rgb
-                H, W = B.shape[:2]
-                # Vectorized HLS conversion
-                def rgb_to_hls_arr(arr):
-                    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
-                    mx = np.max(arr, axis=-1)
-                    mn = np.min(arr, axis=-1)
-                    L = (mx + mn) / 2
-                    diff = mx - mn
-                    S = np.where(L < 0.5, diff / np.maximum(mx + mn, 1e-9),
-                                  diff / np.maximum(2 - mx - mn, 1e-9))
-                    S = np.where(diff < 1e-9, 0, S)
-                    Hh = np.zeros_like(L)
-                    Hh = np.where(np.logical_and(diff > 1e-9, mx == r),
-                                   (g - b) / np.maximum(diff, 1e-9), Hh)
-                    Hh = np.where(np.logical_and(diff > 1e-9, mx == g),
-                                   2 + (b - r) / np.maximum(diff, 1e-9), Hh)
-                    Hh = np.where(np.logical_and(diff > 1e-9, mx == b),
-                                   4 + (r - g) / np.maximum(diff, 1e-9), Hh)
-                    Hh = (Hh / 6.0) % 1.0
-                    return Hh, L, S
-                def hls_to_rgb_arr(H_, L_, S_):
-                    def hue_to_rgb(p, q, t):
-                        t = t % 1.0
-                        return np.where(t < 1/6, p + (q - p) * 6 * t,
-                                np.where(t < 1/2, q,
-                                  np.where(t < 2/3, p + (q - p) * (2/3 - t) * 6, p)))
-                    q = np.where(L_ < 0.5, L_ * (1 + S_), L_ + S_ - L_ * S_)
-                    p = 2 * L_ - q
-                    r = hue_to_rgb(p, q, H_ + 1/3)
-                    g = hue_to_rgb(p, q, H_)
-                    b = hue_to_rgb(p, q, H_ - 1/3)
-                    return np.stack([r, g, b], axis=-1)
-                bH, bL, bS = rgb_to_hls_arr(B)
-                fH, fL, fS = rgb_to_hls_arr(F)
-                if   blend == "hue":        out = hls_to_rgb_arr(fH, bL, bS)
-                elif blend == "saturation": out = hls_to_rgb_arr(bH, bL, fS)
-                elif blend == "color":      out = hls_to_rgb_arr(fH, bL, fS)
-                else:                       out = hls_to_rgb_arr(bH, fL, bS)  # luminosity
-            out = np.clip(out * 255, 0, 255).astype(np.uint8)
-            blended_rgb = out
-            # Composite via alpha
-            B_full = np.array(bg, dtype=np.float32)
-            FA_flat = FA.squeeze(-1)
-            final_arr = B_full.copy()
-            final_arr[..., :3] = (1 - FA_flat[..., None]) * B_full[..., :3] + FA_flat[..., None] * blended_rgb
-            final_arr[..., 3] = np.maximum(B_full[..., 3], FA_flat * 255)
-            final = Image.fromarray(np.clip(final_arr, 0, 255).astype(np.uint8), "RGBA")
-            canvas.paste(final, (x0, y0))
-            return
-        else: canvas.alpha_composite(layer, pos); return
-    except Exception:
-        canvas.alpha_composite(layer, pos); return
-    blended = Image.merge("RGBA", (*rc, fa))
-    final = Image.alpha_composite(bg, blended)
-    canvas.paste(final, (x0, y0))
-
 
 def _apply_blend(canvas, layer, pos, blend_mode):
     if blend_mode and blend_mode != "normal":
@@ -201,6 +180,204 @@ def _apply_blend(canvas, layer, pos, blend_mode):
 
 # ── Dispatcher ───────────────────────────────────────────────────────────────
 
+_OBJ_CACHE = _collections.OrderedDict()
+_OBJ_CACHE_CAP = 512
+
+# v4.2.10.9: dirty-region cache for editing a single object. Holds the static
+# background split around the active object: (below_img, above_img). Only one
+# context is kept at a time (the current active object); a changed static set
+# yields a new key and a rebuild.
+_ACTIVE_BG_CACHE = _collections.OrderedDict()
+
+# v4.2.10.10: translation cache for the active object itself. Keyed on the
+# object's signature WITHOUT translation, so a pure move (only transform.x/y
+# changes) is a cache hit: the rendered crop is re-composited at the new pixel
+# offset instead of re-rendering the object (and its expensive effects). Keeps
+# only the current active object.
+_ACTIVE_OBJ_CACHE = _collections.OrderedDict()
+
+
+def _alpha_composite_clipped(canvas, crop, px, py):
+    """alpha_composite that tolerates a paste position partly off the top/left
+    (alpha_composite itself requires a non-negative dest)."""
+    cropx = -px if px < 0 else 0
+    cropy = -py if py < 0 else 0
+    if cropx >= crop.width or cropy >= crop.height:
+        return
+    if cropx or cropy:
+        crop = crop.crop((cropx, cropy, crop.width, crop.height))
+    if crop.width <= 0 or crop.height <= 0:
+        return
+    canvas.alpha_composite(crop, (max(0, px), max(0, py)))
+
+
+def _obj_sig_no_translation(obj, variables, dpi, size, res_fp):
+    """Signature of an object EXCLUDING its translation, so a pure move keeps the
+    same key. Rotation / flip / size / content all remain in the key."""
+    try:
+        d = dict(obj.to_dict())
+        tr = d.get('transform')
+        if isinstance(tr, dict):
+            tr = dict(tr); tr.pop('x', None); tr.pop('y', None)
+            d['transform'] = tr
+        raw = (repr(d) + repr(_vars_fp(variables))
+               + str(dpi) + str(size) + repr(res_fp))
+        return _hashlib.sha1(raw.encode('utf-8', 'ignore')).hexdigest()
+    except Exception:
+        return None
+
+
+def _composite_active_cached(obj, canvas, resources, variables, dpi, size, res_fp,
+                             active_scale=1.0):
+    """Composite the active object, reusing its raster across pure moves. Only
+    used for normal-blend objects (a non-normal blend must blend against the
+    live backdrop); those render directly.
+
+    When active_scale < 1 the active object is rendered at a reduced internal
+    resolution and upscaled with NEAREST (so the dragged object pixelates for
+    speed) while its POSITION stays full-dpi exact, so nothing shifts relative to
+    the full-resolution static background.
+    """
+    blend = getattr(obj, 'blend_mode', 'normal') or 'normal'
+
+    if active_scale < 0.999 and blend == 'normal':
+        dl = max(24.0, dpi * active_scale)
+        s = dl / dpi
+        size_l = (max(1, int(round(size[0] * s))), max(1, int(round(size[1] * s))))
+        sig = _obj_sig_no_translation(obj, variables, dl, size_l, res_fp)
+        if sig is not None:
+            tx = int(mm_to_px(obj.transform.x, dpi))   # full-dpi position (exact)
+            ty = int(mm_to_px(obj.transform.y, dpi))
+            ent = _ACTIVE_OBJ_CACHE.get(sig)
+            if ent is not None:
+                crop, base_pos, ref_tx, ref_ty = ent
+                if crop is not None:
+                    _alpha_composite_clipped(canvas, crop,
+                                             base_pos[0] + (tx - ref_tx),
+                                             base_pos[1] + (ty - ref_ty))
+                return
+            iso = Image.new("RGBA", size_l, (0, 0, 0, 0))
+            _render_object(obj, iso, resources, variables, dl)
+            bbox = iso.getbbox()
+            _ACTIVE_OBJ_CACHE.clear()
+            if bbox is None:
+                _ACTIVE_OBJ_CACHE[sig] = (None, (0, 0), tx, ty)
+                return
+            crop_l = iso.crop(bbox)
+            fw = max(1, int(round(crop_l.width / s)))
+            fh = max(1, int(round(crop_l.height / s)))
+            crop = crop_l.resize((fw, fh), Image.NEAREST)   # pixelate the preview
+            pos = (int(round(bbox[0] / s)), int(round(bbox[1] / s)))
+            _ACTIVE_OBJ_CACHE[sig] = (crop, pos, tx, ty)
+            canvas.alpha_composite(crop, pos)
+            return
+        # sig unavailable -> fall through to a normal full-dpi render
+
+    sig = (_obj_sig_no_translation(obj, variables, dpi, size, res_fp)
+           if blend == 'normal' else None)
+    if sig is None:
+        _render_object(obj, canvas, resources, variables, dpi)
+        return
+    tx = int(mm_to_px(obj.transform.x, dpi))
+    ty = int(mm_to_px(obj.transform.y, dpi))
+    ent = _ACTIVE_OBJ_CACHE.get(sig)
+    if ent is not None:
+        crop, base_pos, ref_tx, ref_ty = ent
+        if crop is not None:
+            _alpha_composite_clipped(canvas, crop,
+                                     base_pos[0] + (tx - ref_tx),
+                                     base_pos[1] + (ty - ref_ty))
+        return
+    iso = Image.new("RGBA", size, (0, 0, 0, 0))
+    _render_object(obj, iso, resources, variables, dpi)
+    bbox = iso.getbbox()
+    _ACTIVE_OBJ_CACHE.clear()   # keep only the current active object
+    if bbox is None:
+        _ACTIVE_OBJ_CACHE[sig] = (None, (0, 0), tx, ty)
+    else:
+        crop = iso.crop(bbox); pos = (bbox[0], bbox[1])
+        _ACTIVE_OBJ_CACHE[sig] = (crop, pos, tx, ty)
+        canvas.alpha_composite(crop, pos)
+
+
+def clear_object_cache():
+    """Drop all cached per-object rasters (call when resources change)."""
+    _OBJ_CACHE.clear()
+    _ACTIVE_BG_CACHE.clear()
+    _ACTIVE_OBJ_CACHE.clear()
+
+
+def _res_fp(resources):
+    try:
+        items = []
+        for k, v in (resources or {}).items():
+            sz = getattr(v, 'size', None)
+            if sz is None:
+                sz = len(v) if hasattr(v, '__len__') else id(v)
+            items.append((str(k), str(sz)))
+        return tuple(sorted(items))
+    except Exception:
+        return ()
+
+
+def _vars_fp(variables):
+    if variables is None:
+        return ()
+    if hasattr(variables, 'to_dict'):
+        try:
+            return tuple(sorted(variables.to_dict().items()))
+        except Exception:
+            pass
+    if isinstance(variables, dict):
+        try:
+            return tuple(sorted(variables.items()))
+        except Exception:
+            pass
+    try:
+        return repr(variables)
+    except Exception:
+        return ()
+
+
+def _obj_sig(obj, variables, dpi, size, res_fp):
+    try:
+        raw = (repr(obj.to_dict()) + repr(_vars_fp(variables))
+               + str(dpi) + str(size) + repr(res_fp))
+        return _hashlib.sha1(raw.encode('utf-8', 'ignore')).hexdigest()
+    except Exception:
+        return None
+
+
+def _render_object_cached(obj, canvas, resources, variables, dpi, res_fp):
+    """Pixel-identical wrapper around _render_object that reuses an isolated
+    raster for unchanged objects. Only used for normal-blend objects (a
+    non-normal blend blends against the objects beneath it, so it can't be
+    rendered in isolation); those fall back to a direct render."""
+    blend = getattr(obj, 'blend_mode', 'normal') or 'normal'
+    sig = _obj_sig(obj, variables, dpi, canvas.size, res_fp) if blend == 'normal' else None
+    if sig is None:
+        _render_object(obj, canvas, resources, variables, dpi)
+        return
+    ent = _OBJ_CACHE.get(sig)
+    if ent is not None:
+        crop, pos = ent
+        if crop is not None:
+            canvas.alpha_composite(crop, pos)
+        _OBJ_CACHE.move_to_end(sig)
+        return
+    iso = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    _render_object(obj, iso, resources, variables, dpi)
+    bbox = iso.getbbox()
+    if bbox is None:
+        _OBJ_CACHE[sig] = (None, (0, 0))
+    else:
+        crop = iso.crop(bbox); pos = (bbox[0], bbox[1])
+        _OBJ_CACHE[sig] = (crop, pos)
+        canvas.alpha_composite(crop, pos)
+    while len(_OBJ_CACHE) > _OBJ_CACHE_CAP:
+        _OBJ_CACHE.popitem(last=False)
+
+
 def _render_object(obj, canvas, resources, variables, dpi):
     # v4.1.0: Render layer effects efficiently using bbox-based buffers.
     effects_below = []
@@ -208,7 +385,7 @@ def _render_object(obj, canvas, resources, variables, dpi):
     if hasattr(obj, 'effects') and obj.effects:
         for e in obj.effects:
             if not e.enabled: continue
-            if e.type in ('drop_shadow', 'outer_glow') or \
+            if e.type in ('drop_shadow', 'outer_glow', 'long_shadow') or \
                (e.type == 'stroke' and getattr(e, 'stroke_position', 'outside') == 'outside') or \
                (e.type == 'bevel' and getattr(e, 'bevel_kind', 'outer') == 'outer'):
                 effects_below.append(e)
@@ -223,7 +400,17 @@ def _render_object(obj, canvas, resources, variables, dpi):
     # ── Render the object onto a full-size temp canvas first ─────────────────
     from PIL import Image
     temp = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    _render_object_dispatch(obj, temp, resources, variables, dpi)
+    # v4.2.7.13: render the body with NORMAL blending into the temp buffer. The
+    # object's own blend mode is applied later, when the whole layer is put onto
+    # the canvas — otherwise it would blend against the empty temp and be lost
+    # (the "blending doesn't work for shapes/curves that have effects" bug).
+    _obj_blend = getattr(obj, 'blend_mode', 'normal') or 'normal'
+    _saved_blend = getattr(obj, 'blend_mode', 'normal')
+    try:
+        obj.blend_mode = 'normal'
+        _render_object_dispatch(obj, temp, resources, variables, dpi)
+    finally:
+        obj.blend_mode = _saved_blend
 
     # Compute the actual object bbox from alpha (where the object pixels are)
     bbox = temp.getbbox()
@@ -236,6 +423,28 @@ def _render_object(obj, canvas, resources, variables, dpi):
     margin_px = 20
     for e in effects_below + effects_above:
         em = mm_to_px(e.size, dpi) * 3 + mm_to_px(abs(getattr(e, 'distance', 0)), dpi)
+        if e.type == 'long_shadow':
+            # the long-shadow soft blur is a BOX (reach ~ size_px), not a 3-sigma
+            # Gaussian, so it needs far less margin than the generic size*3 base.
+            _bmax = float(e.size or 0.0)
+            for _s in (getattr(e, 'ls_grad_blurs', []) or []):
+                try:
+                    _bmax = max(_bmax, float(_s[1]))
+                except Exception:
+                    pass
+            em = (mm_to_px(abs(getattr(e, 'ls_length', 10.0)), dpi)
+                  + mm_to_px(_bmax, dpi) * 1.3 + 10)
+        elif e.type == 'chromatic_aberration':
+            ca_off = max(abs(getattr(e, 'ca_offset', 0.5)),
+                         abs(getattr(e, 'ca_r_offset', 0.0)),
+                         abs(getattr(e, 'ca_g_offset', 0.0)),
+                         abs(getattr(e, 'ca_b_offset', 0.0)))
+            em = max(em, mm_to_px(ca_off, dpi) + 6)
+            if getattr(e, 'ca_mode', 'linear') == 'radial':
+                dmax = max(abs(getattr(e, 'ca_r_distort', 0.0)),
+                           abs(getattr(e, 'ca_g_distort', 0.0)),
+                           abs(getattr(e, 'ca_b_distort', 0.0))) / 100.0
+                em = max(em, int((max(x1 - x0, y1 - y0) * 0.5 * dmax)) + 6)
         margin_px = max(margin_px, int(em + 10))
 
     # Crop a working buffer around the object plus margin
@@ -254,25 +463,36 @@ def _render_object(obj, canvas, resources, variables, dpi):
     for e in effects_below:
         _apply_layer_effect_below(canvas, obj_buf, e, dpi, paste_pos)
 
+    # v4.2.7.20: a halftone screen in "just patterns" mode (ht_keep_background
+    # False) replaces the layer content — skip compositing the body so only the
+    # screened dots show (the body is still available to the effect via obj_buf
+    # for sampling). If keep_background is on, the body is drawn as usual.
+    def _ht_bg(e):
+        b = (getattr(e, 'ht_background', '') or '').lower()
+        if not b:
+            b = 'layer' if getattr(e, 'ht_keep_background', False) else 'native'
+        return b
+    _skip_body = any(
+        getattr(e, 'enabled', True) and getattr(e, 'type', '') == 'halftone'
+        and _ht_bg(e) != 'layer'
+        for e in effects_above)
+
     # v4.1.1: Composite the actual object pixels at fill_opacity
+    # v4.2.7.13: ...and with the object's blend mode (against the real canvas,
+    # i.e. the background + any below-effects already drawn).
     fill_op = getattr(obj, 'fill_opacity', 1.0)
     if fill_op < 1.0:
-        # Scale the alpha channel of `temp` by fill_opacity
         r, g, b, a = temp.split()
         a = a.point(lambda v, fo=fill_op: int(v * fo))
-        temp_with_fillop = Image.merge("RGBA", (r, g, b, a))
-        canvas.alpha_composite(temp_with_fillop)
+        body = Image.merge("RGBA", (r, g, b, a))
     else:
-        canvas.alpha_composite(temp)
+        body = temp
+    if not _skip_body:
+        _composite_with_blend(canvas, body, (0, 0), _obj_blend)
 
     # Apply effects-above (inner shadow, inner glow, color overlay, gradient)
     for e in effects_above:
         _apply_layer_effect_above(canvas, obj_buf, e, dpi, paste_pos)
-
-
-def _render_object_raw(obj, canvas, resources, variables, dpi, offset=(0,0)):
-    """Backward-compatible alias for _render_object_dispatch."""
-    _render_object_dispatch(obj, canvas, resources, variables, dpi)
 
 
 def _render_object_dispatch(obj, canvas, resources, variables, dpi):
@@ -361,7 +581,7 @@ def _render_subdocument(obj, canvas, resources, variables, dpi):
             from edof.format.serializer import EdofSerializer
             sub_doc = EdofSerializer().load(obj.source_path)
     except Exception as e:
-        print(f"[render_subdocument] Could not load sub-document: {e}")
+        logging.getLogger(__name__).warning("render_subdocument: could not load sub-document: %s", e)
         return
 
     if not sub_doc or not sub_doc.pages:
@@ -425,6 +645,495 @@ def _render_subdocument(obj, canvas, resources, variables, dpi):
         canvas.alpha_composite(bbox_buf, (max(0, x_px), max(0, y_px)))
 
 
+def _blur_L(img, radius_px):
+    """v4.2.11.2: Gaussian-blur an 'L' matte on the GPU when GPU effects are
+    enabled AND available, otherwise on the CPU (PIL). Per-call fallback: any
+    GPU miss (unavailable, radius over budget, error) silently uses the CPU, so
+    output is always produced and is visually identical (validated parity:
+    mean diff ~0.35). This backs drop/inner shadow, outer/inner glow and the
+    bevel soften, which all share this Gaussian."""
+    from PIL import ImageFilter
+    if radius_px is None or radius_px <= 0:
+        return img
+    try:
+        from edof.engine import gpu as _gpu
+        if _gpu.is_enabled():
+            res = _gpu.gpu_gaussian_blur_L(img, radius_px)
+            if res is not None:
+                _gpu.blur_gpu_count += 1
+                return res
+            _gpu.blur_cpu_count += 1
+    except Exception:
+        pass
+    return img.filter(ImageFilter.GaussianBlur(radius_px))
+
+
+def _variable_box_blur(A, rmap):
+    """4-pass per-pixel-radius box blur (the long-shadow variable blur core).
+
+    Tries the GPU SAT-scan implementation when enabled, otherwise runs the CPU
+    summed-area-table path. The CPU gather uses flat take() indices (about 1.9x
+    faster than 2D fancy indexing, bit-identical output).
+    """
+    import numpy as _np
+    H, W = A.shape
+    try:
+        from edof.engine import gpu as _gpu
+        if _gpu.is_enabled():
+            res = _gpu.gpu_variable_box_blur(A, rmap)
+            if res is not None:
+                _gpu.blur_gpu_count += 1
+                return res
+    except Exception:
+        pass
+    yy, xx = _np.mgrid[0:H, 0:W]
+    y1b = _np.clip(yy - rmap, 0, H); y2b = _np.clip(yy + rmap + 1, 0, H)
+    x1b = _np.clip(xx - rmap, 0, W); x2b = _np.clip(xx + rmap + 1, 0, W)
+    area = ((y2b - y1b) * (x2b - x1b)).astype(_np.float32).ravel()
+    Wp = W + 1
+    i22 = (y2b * Wp + x2b).ravel(); i12 = (y1b * Wp + x2b).ravel()
+    i21 = (y2b * Wp + x1b).ravel(); i11 = (y1b * Wp + x1b).ravel()
+    out = A
+    for _ in range(4):
+        sat = _np.zeros((H + 1, W + 1), _np.float32)
+        _np.cumsum(_np.cumsum(out, axis=0), axis=1, out=sat[1:, 1:])
+        f = sat.ravel()
+        out = ((f.take(i22) - f.take(i12) - f.take(i21) + f.take(i11))
+               / area).reshape(H, W)
+    return out
+
+
+def _ls_slide_min_sym(A, r, axis=0):
+    """min over the symmetric window [i-r, i+r] along `axis` (doubling shifts)."""
+    import numpy as _np
+    r = int(r)
+    if r <= 0:
+        return A.copy()
+    out = A.copy()
+    cov = 0
+    step = 1
+    while cov < r:
+        d = min(step, r - cov)
+        a = _np.empty_like(out)
+        b = _np.empty_like(out)
+        if axis == 0:
+            a[:-d, :] = out[d:, :]; a[-d:, :] = out[-d:, :]
+            b[d:, :] = out[:-d, :]; b[:d, :] = out[:d, :]
+        else:
+            a[:, :-d] = out[:, d:]; a[:, -d:] = out[:, -d:]
+            b[:, d:] = out[:, :-d]; b[:, :d] = out[:, :d]
+        out = _np.minimum(_np.minimum(out, a), b)
+        cov += d; step = cov
+    return out
+
+
+def _ls_slide_max_x(A, w):
+    """max over the trailing window [x-w+1, x] along X (doubling shifts)."""
+    import numpy as _np
+    if w <= 1:
+        return A
+    out = A.copy()
+    cov = 1
+    while cov < w:
+        d = min(cov, w - cov)
+        out[:, d:] = _np.maximum(out[:, d:], out[:, :-d])
+        cov += d
+    return out
+
+
+def _ls_stops_interp(stops, t, default):
+    """piecewise-linear lookup of [[t, v...], ...] stops at t (array)."""
+    import numpy as _np
+    if not stops:
+        return None
+    st = sorted((list(s) for s in stops), key=lambda s: s[0])
+    xs = _np.array([s[0] for s in st], _np.float32)
+    nvals = len(st[0]) - 1
+    outs = []
+    for k in range(nvals):
+        ys = _np.array([s[1 + k] for s in st], _np.float32)
+        outs.append(_np.interp(_np.clip(t, 0.0, 1.0), xs, ys).astype(_np.float32))
+    return outs[0] if nvals == 1 else outs
+
+
+def _long_shadow_matte(alpha, dxu, dyu, length_px,
+                       color_stops, alpha_stops, blur_stops):
+    """Long shadow: per-point rays, per-row exact (no taper -> 1D model).
+
+    Every silhouette point emits a ray of length L along the throw; the source
+    point's alpha scales its ray; the shadow is the max-union of all rays.
+    With taper gone the union is exactly per-row in the rotated frame
+    (throw = +X):  field(y, x) = max over d in [0, L] of R(y, x - d) * a(d/L).
+
+    Stops (already resolved by the dispatcher, never empty):
+      color_stops [[t, r, g, b], ...]   colour c(t), applied in page frame
+      alpha_stops [[t, a01], ...]       alpha a(t) along each ray
+      blur_stops  [[t, radius_px], ...] blur r(t), 0 keeps the contact sharp
+
+    Fast paths: constant a(t) -> the field is ONE doubling smear (no segment
+    loop); the GPU computes the EXACT max-convolution in a single kernel when
+    enabled; the CPU fallback uses the youngest-ray term + a segment pass
+    (windowed max-decomposition), allocation-free in the hot loop. The blur
+    radius is FRACTIONAL: two integer-radius variable box blurs lerped per
+    pixel, which removes the radius-quantisation rings ("checkerboard") the
+    integer map produced. Everything stays float32 until the final compose."""
+    import numpy as _np
+    from PIL import ImageFilter
+    W, H = alpha.size
+    L = max(1, int(length_px))
+
+    # ---- STAGE 1: project (rotate the throw to +X) --------------------------
+    A_deg = math.degrees(math.atan2(dyu, dxu))
+    if abs(((A_deg + 45.0) % 90.0) - 45.0) > 0.5:
+        alpha = alpha.filter(ImageFilter.GaussianBlur(0.6))
+    rot = alpha.rotate(A_deg, resample=Image.BILINEAR, expand=True, fillcolor=0)
+    R = _np.asarray(rot, dtype=_np.float32)
+    _full_shape = R.shape
+    max_blur = max(float(s[1]) for s in blur_stops)
+    _ys0, _xs0 = _np.where(R > 40.0)
+    if len(_xs0):
+        _mY = int(max_blur * 1.15) + 6
+        x_lo = max(0, int(_xs0.min()) - int(max_blur * 1.15) - 6)
+        x_hi = min(R.shape[1], int(_xs0.max()) + L + int(max_blur * 1.15) + 6)
+        y_lo = max(0, int(_ys0.min()) - _mY)
+        y_hi = min(R.shape[0], int(_ys0.max()) + _mY)
+        R = _np.ascontiguousarray(R[y_lo:y_hi, x_lo:x_hi])
+    else:
+        x_lo = y_lo = 0
+    rh, rw = R.shape
+    objm = R > 40.0
+
+    # ---- youngest-ray t (continuous, per row) --------------------------------
+    colsr = _np.broadcast_to(_np.arange(rw, dtype=_np.float32), (rh, rw))
+    idx = _np.where(objm, colsr, -1.0)
+    last = _np.maximum.accumulate(idx, axis=1)
+    dist = colsr - last
+    dist[last < 0] = float(L + 1)
+    dist[objm] = 0.0
+    g = _np.clip(dist / float(L), 0.0, 1.0).astype(_np.float32)
+    # the faint leading AA fringe (R in 2..40, upstream of any objm source)
+    # SELF-emits at t = 0 -- it must not inherit the no-upstream sentinel
+    # (t = 1), which gave the silhouette's leading rim the MAXIMUM blur
+    # radius and painted a dark crescent / hard cut at the start.
+    g = _np.where((R > 2.0) & (last < 0.0), 0.0, g).astype(_np.float32)
+
+    # ---- STAGE 2: per-ray alpha field ----------------------------------------
+    a_vals = _np.array([s[1] for s in alpha_stops], _np.float32)
+    a_const = float(a_vals.max() - a_vals.min()) <= 1e-4
+
+    def _smear_max(A0, span):
+        out = A0.copy()
+        cov = 1
+        while cov < span:
+            d = min(cov, span - cov)
+            _np.maximum(out[:, d:], out[:, :-d], out=out[:, d:])
+            cov += d
+        return out
+
+    field = None
+    if not a_const:
+        try:
+            from edof.engine import gpu as _gpu
+            if _gpu.is_enabled() and _gpu.gpu_available():
+                lut = _ls_stops_interp(alpha_stops,
+                                       _np.linspace(0.0, 1.0, 1024), 1.0)
+                field = _gpu.gpu_long_shadow_field(R, L, lut)
+        except Exception:
+            field = None
+
+    if field is None:
+        # youngest-ray term: the value OF the nearest upstream emitter (not a
+        # running max -- pairing the strongest upstream value with the nearest
+        # distance overestimated behind semi-transparent emitters), times a(g).
+        # This is a true single-ray contribution, so it never overestimates.
+        if a_const:
+            # constant a: the exact max-convolution is the plain smear (every
+            # ray has the same weight, the strongest upstream emitter wins).
+            field = _smear_max(R, L) * float(a_vals[0])
+            field[g >= 1.0] = 0.0
+        else:
+            last_i = _np.clip(last, 0, rw - 1).astype(_np.int64)
+            v_last = _np.take_along_axis(R, last_i, axis=1)
+            v_last[last < 0] = 0.0
+            a_of = _ls_stops_interp(alpha_stops, g, 1.0)
+            field = v_last * a_of
+            field[g >= 1.0] = 0.0
+            # segment pass: secondary contributions the youngest ray misses
+            # (strong old emitters through faint young ones, non-monotone
+            # alpha). Allocation-free hot loop over a shared buffer.
+            mono = bool(_np.all(_np.diff(_ls_stops_interp(
+                alpha_stops, _np.linspace(0, 1, 65), 1.0)) <= 1e-6))
+            N = 32 if mono else 64
+            N = int(min(N, max(8, L)))
+            w0 = max(1, int(math.ceil(L / float(N))))
+            SM = _ls_slide_max_x(R, w0 + 1)
+            ts = _np.linspace(0.0, 1.0, N + 1)
+            a_s = _ls_stops_interp(alpha_stops,
+                                   _np.linspace(0.0, 1.0, 4 * N + 1), 1.0)
+            buf = _np.empty_like(R)
+            for i in range(N):
+                d0 = int(round(ts[i] * L))
+                a_seg = float(a_s[4 * i: 4 * i + 5].max())
+                if a_seg <= 0.002 or d0 >= rw:
+                    continue
+                nb = rw - d0
+                _np.multiply(SM[:, :nb], a_seg, out=buf[:, :nb])
+                _np.maximum(field[:, d0:], buf[:, :nb], out=field[:, d0:])
+
+    # ---- STAGE 3: ONE variable blur (fractional radius) ----------------------
+    A = field.astype(_np.float32, copy=False)
+    if max_blur >= 0.5:
+        # blur radius driver: youngest t inside the shadow. OUTSIDE (the soft
+        # halo the blur itself creates) the driver must be LOCAL: each halo
+        # pixel takes the t of the nearby shadow it belongs to, propagated
+        # vertically out of the field over the blur reach, plus the row's own
+        # g for the downstream end cap. (The previous driver was anchored to
+        # the GLOBAL trailing object column, so any shadow cast before it --
+        # e.g. one glyph's shadow passing beside another in text -- got a ZERO
+        # outside radius: blurred inward, razor-sharp outward.) The root flank
+        # stays sharp because the propagated t near the contact is ~0. Pixels
+        # with no shadow within reach get t = 1; their gather windows are
+        # empty, the SAT gather is O(1) per pixel, so it costs nothing.
+        # Float de-stair smooth (no uint8 quantisation -> no radius rings).
+        t_in = _np.where(A > 2.0, g, 2.0).astype(_np.float32)
+        reach = int(math.ceil(max_blur)) + 2
+        # propagate "the t of the NEAREST shadow", not "the smallest t in a
+        # 2D window": (1) the perpendicular halo takes the LOCAL body t from
+        # the Y-only pass -- a composed 2D window min pulled smaller t from
+        # up to `reach` px upstream and visibly tightened the side halo;
+        # (2) ONLY where the Y pass found nothing (sentinel) does the X pass
+        # fill in: the BACKWARD halo past the leading edge (body t ~ 0 in the
+        # same row -> radius = blur(0): constant/custom soften backward,
+        # linear stays root-sharp) and the corners (the X pass reads the
+        # already-filled perpendicular strips, so the halo wraps corners
+        # roundly instead of leaving notches).
+        tY = _ls_slide_min_sym(t_in, reach, axis=0)
+        tX = _ls_slide_min_sym(tY, reach, axis=1)
+        t_halo = _np.where(tY > 1.5, tX, tY)
+        g_row = _np.where(last >= 0.0, g, 2.0).astype(_np.float32)
+        tdist = _np.minimum(t_halo, g_row)
+        tdist = _np.where(A > 2.0, g, tdist)
+        # sentinel = no shadow within reach (e.g. UPSTREAM of the leading
+        # edge): radius 0, NOT max -- clipping the sentinel to t = 1 gave
+        # those pixels the maximum radius, which grew a spurious halo
+        # BACKWARD past the silhouette's leading edge that the rotated-frame
+        # crop box then cut into a hard diagonal line at the start.
+        tdist = _np.where(tdist > 1.5, 0.0, tdist)
+        tdist = _np.clip(tdist, 0.0, 1.0)
+        tdist = _ls_gauss_f32(tdist, 0.8)
+        rpx = _ls_stops_interp(blur_stops, tdist, 0.0)
+        rq = _np.clip(rpx / 4.0, 0.0, max(1, min(rh, rw) // 2)).astype(_np.float32)
+        r0 = _np.floor(rq).astype(_np.int64)
+        frac = (rq - r0).astype(_np.float32)
+        if int(r0.max()) >= 1 or float(frac.max()) > 0.01:
+            b0 = _variable_box_blur(A, r0)
+            b1 = _variable_box_blur(A, r0 + 1)
+            out = b0 * (1.0 - frac) + b1 * frac
+        else:
+            out = A
+    else:
+        out = A
+
+    # ---- STAGE 4: rotate back, trim bleed, colour ----------------------------
+    def _unshear(arr2d):
+        if arr2d.shape != _full_shape:
+            full = _np.zeros(_full_shape, _np.float32)
+            full[y_lo:y_lo + rh, x_lo:x_lo + rw] = arr2d
+            arr2d = full
+        im = Image.fromarray(_np.clip(arr2d, 0, 255).astype('uint8'), 'L').rotate(
+            -A_deg, resample=Image.BILINEAR, expand=True, fillcolor=0)
+        a = _np.asarray(im, dtype=_np.float32)
+        bh2, bw2 = a.shape
+        yy = max(0, (bh2 - H) // 2); xx = max(0, (bw2 - W) // 2)
+        c = a[yy:yy + H, xx:xx + W]
+        if c.shape != (H, W):
+            cc = _np.zeros((H, W), _np.float32)
+            ch, cw = min(H, c.shape[0]), min(W, c.shape[1]); cc[:ch, :cw] = c[:ch, :cw]; c = cc
+        return c
+    cov_p = _unshear(out)
+    t_p = _unshear(_np.clip(g, 0.0, 1.0) * 255.0) / 255.0
+    vmask = _unshear((out > 0.5).astype(_np.float32) * 255.0)
+    cov_p = _np.where(vmask >= 128.0, cov_p, 0.0)
+
+    t = _np.clip(t_p, 0.0, 1.0)
+    cr, cg_, cb = _ls_stops_interp(color_stops, t, 0.0)
+    rgb = _np.dstack([cr, cg_, cb])
+    alpha_ch = _np.clip(cov_p, 0, 255)
+    rgba = _np.dstack([_np.clip(rgb, 0, 255), alpha_ch]).astype('uint8')
+    return Image.fromarray(rgba, 'RGBA')
+
+
+def _ls_gauss_f32(arr01, sigma):
+    """small separable float32 Gaussian on a 0..1 field (no 8-bit roundtrip)."""
+    import numpy as _np
+    rad = max(1, int(math.ceil(sigma * 2.5)))
+    xs = _np.arange(-rad, rad + 1, dtype=_np.float32)
+    k = _np.exp(-(xs * xs) / (2.0 * sigma * sigma))
+    k /= k.sum()
+    p = _np.pad(arr01, ((0, 0), (rad, rad)), mode='edge')
+    h = _np.zeros_like(arr01)
+    for i, kv in enumerate(k):
+        h += kv * p[:, i:i + arr01.shape[1]]
+    p = _np.pad(h, ((rad, rad), (0, 0)), mode='edge')
+    v = _np.zeros_like(arr01)
+    for i, kv in enumerate(k):
+        v += kv * p[i:i + arr01.shape[0], :]
+    return v
+
+def _dilate_L(img, radius_px):
+    """Grow an 'L' matte by ~radius_px (Photoshop Spread/Choke)."""
+    from PIL import ImageFilter
+    r = int(radius_px)
+    if r <= 0:
+        return img
+    r = min(r, 75)  # cap kernel for performance
+    return img.filter(ImageFilter.MaxFilter(r * 2 + 1))
+
+
+def _box1d(a, r, axis):
+    import numpy as np
+    a = np.swapaxes(a, axis, -1)
+    ap = np.pad(a, [(0, 0)] * (a.ndim - 1) + [(r, r)], mode='edge')
+    C = np.cumsum(ap, axis=-1)
+    C = np.concatenate([np.zeros(C.shape[:-1] + (1,), dtype=C.dtype), C], axis=-1)
+    win = C[..., 2 * r + 1:] - C[..., :-(2 * r + 1)]
+    return np.swapaxes(win / (2 * r + 1), axis, -1)
+
+
+def _box_blur_np(a, r, passes=3):
+    """Fast separable box blur (≈ Gaussian after a few passes), kept fully in
+    float so the result has no 8-bit quantization stair-steps. Used for the
+    bevel height map to avoid concentric contour-ring artifacts."""
+    r = int(r)
+    if r < 1:
+        return a
+    for _ in range(passes):
+        a = _box1d(a, r, 1)
+        a = _box1d(a, r, 0)
+    return a
+
+
+def _edt_1d(f1, INF):
+    import numpy as np
+    n = len(f1); d = np.empty(n); v = np.zeros(n, dtype=np.int64); z = np.empty(n + 1)
+    k = 0; v[0] = 0; z[0] = -INF; z[1] = INF
+    for q in range(1, n):
+        denom = (2.0 * q - 2.0 * v[k])
+        s = ((f1[q] + q * q) - (f1[v[k]] + v[k] * v[k])) / denom
+        while s <= z[k]:
+            k -= 1
+            denom = (2.0 * q - 2.0 * v[k])
+            s = ((f1[q] + q * q) - (f1[v[k]] + v[k] * v[k])) / denom
+        k += 1; v[k] = q; z[k] = s; z[k + 1] = INF
+    k = 0
+    for q in range(n):
+        while z[k + 1] < q:
+            k += 1
+        d[q] = (q - v[k]) * (q - v[k]) + f1[v[k]]
+    return d
+
+
+def _edt(mask):
+    """Euclidean distance (in px) from each True pixel to the nearest False
+    pixel. Uses scipy when available, else a pure-numpy Felzenszwalb transform
+    so EDOF has no hard scipy dependency."""
+    import numpy as np
+    try:
+        from scipy import ndimage
+        return ndimage.distance_transform_edt(mask)
+    except Exception:
+        H0, W0 = mask.shape
+        scale = 1
+        while (H0 // scale) * (W0 // scale) > 200000 and scale < 16:
+            scale += 1
+        if scale > 1:
+            from PIL import Image as _I
+            sm = _I.fromarray((mask.astype('uint8') * 255)).resize(
+                (max(1, W0 // scale), max(1, H0 // scale)), _I.Resampling.NEAREST)
+            small = np.asarray(sm) > 128
+        else:
+            small = mask
+        INF = 1e20
+        f = np.where(small, INF, 0.0)
+        for j in range(f.shape[1]):
+            f[:, j] = _edt_1d(f[:, j], INF)
+        for i in range(f.shape[0]):
+            f[i, :] = _edt_1d(f[i, :], INF)
+        d = np.sqrt(f) * scale
+        if scale > 1:
+            from PIL import Image as _I
+            d = np.asarray(_I.fromarray(d.astype('float32'), 'F').resize(
+                (W0, H0), _I.Resampling.BILINEAR))
+        return d
+
+
+def _render_bevel_shaded(canvas, alpha, effect, dpi, px, py, bw, bh, outer):
+    """Photoshop-style bevel: build a height ramp from the edge, derive surface
+    normals, and light them (azimuth = direction, elevation = altitude) so the
+    sloped bevel band gets a smooth highlight on the lit side and shadow on the
+    other. Confined to the bevel band (the flat face stays untouched)."""
+    import numpy as np
+    from PIL import Image, ImageFilter
+    import math as _m
+    size_px = max(2, int(mm_to_px(effect.size, dpi)))
+    tech = getattr(effect, 'bevel_technique', 'smooth') or 'smooth'
+    depth = max(0.0, getattr(effect, 'bevel_depth', 100.0) / 100.0)
+    bdir = getattr(effect, 'bevel_dir', 'up') or 'up'
+    soften_px = mm_to_px(max(0.0, getattr(effect, 'soften', 0.0)), dpi)
+    altitude = max(0.0, min(90.0, getattr(effect, 'altitude', 45.0)))
+    hl_op = getattr(effect, 'highlight_opacity', 0.75)
+    sh_op = getattr(effect, 'shadow_opacity', 0.75)
+    op = effect.opacity
+    a = np.asarray(alpha, dtype=np.float32) / 255.0
+    # Height map from a distance transform: ramps 0 -> 1 over the bevel width and
+    # then stays flat (plateau) in the interior, so the flat face has zero slope
+    # and gets no shading (no concentric-ring banding). For an outer bevel the
+    # ramp lives just outside the silhouette.
+    if outer:
+        dist = _edt(a <= 0.5)
+    else:
+        dist = _edt(a > 0.5)
+    t = np.clip(dist / float(max(1, size_px)), 0.0, 1.0)
+    if tech == 'chisel_hard':
+        prof = t
+    elif tech == 'chisel_soft':
+        prof = np.clip(t * 1.15, 0.0, 1.0) ** 0.85
+    else:  # smooth -> rounded profile
+        prof = np.sin(t * (np.pi / 2.0))
+    # light float smoothing of the plateau kink (small radius: no dome)
+    H = _box_blur_np(prof.astype(np.float64), max(1, int(size_px * 0.18)), passes=2).astype(np.float32)
+    gy, gx = np.gradient(H)
+    amp = size_px * 1.6 * (0.4 + depth)
+    if bdir == 'down':
+        gx = -gx; gy = -gy
+    nx = -gx * amp; ny = -gy * amp; nz = np.ones_like(H)
+    ln = np.sqrt(nx * nx + ny * ny + nz * nz) + 1e-6
+    nx /= ln; ny /= ln; nz /= ln
+    az = _m.radians(effect.direction); alt = _m.radians(altitude)
+    lx = _m.cos(alt) * _m.cos(az); ly = -_m.cos(alt) * _m.sin(az); lz = _m.sin(alt)
+    lam = nx * lx + ny * ly + nz * lz
+    slope = np.sqrt(gx * gx + gy * gy)
+    band = np.clip(slope * (size_px * 3.0), 0.0, 1.0)
+    if outer:
+        band = band * np.clip(1.0 - a, 0.0, 1.0)
+    else:
+        band = band * a
+    hi = np.clip(lam, 0.0, 1.0) * band * (hl_op * op)
+    sh = np.clip(-lam, 0.0, 1.0) * band * (sh_op * op)
+
+    def _to_L(arr):
+        im = Image.fromarray(np.clip(arr * 255.0, 0, 255).astype('uint8'), 'L')
+        if soften_px > 0:
+            im = _blur_L(im, soften_px)
+        return im
+    c2 = effect.color2
+    hl = Image.new("RGBA", (bw, bh), (c2[0], c2[1], c2[2], 0)); hl.putalpha(_to_L(hi))
+    c1 = effect.color
+    sh_img = Image.new("RGBA", (bw, bh), (c1[0], c1[1], c1[2], 0)); sh_img.putalpha(_to_L(sh))
+    _composite_with_blend(canvas, sh_img, (px, py), getattr(effect, 'blend_mode', 'multiply') or 'multiply')
+    _composite_with_blend(canvas, hl, (px, py), getattr(effect, 'blend_mode2', 'screen') or 'screen')
+
+
 def _apply_layer_effect_below(canvas, obj_buf, effect, dpi, paste_pos):
     """Apply effects that go BEHIND the object: drop shadow, outer glow,
     outside stroke, outer bevel.
@@ -445,11 +1154,17 @@ def _apply_layer_effect_below(canvas, obj_buf, effect, dpi, paste_pos):
         dx = int(mm_to_px(effect.distance, dpi) * math.cos(rad))
         dy = -int(mm_to_px(effect.distance, dpi) * math.sin(rad))
         blur_px = max(0, mm_to_px(effect.size, dpi))
+        s = max(0.0, min(1.0, getattr(effect, 'spread', 0.0)))
+        size_px = max(0, mm_to_px(effect.size, dpi))
+        expand_px = int(round(size_px * s))
+        blur_px = max(0, size_px * (1.0 - s))
         # Translate the alpha (silhouette only) by (dx, dy)
         shadow_alpha = Image.new("L", (bw, bh), 0)
         shadow_alpha.paste(alpha, (dx, dy))
+        if expand_px > 0:
+            shadow_alpha = _dilate_L(shadow_alpha, expand_px)
         if blur_px > 0:
-            shadow_alpha = shadow_alpha.filter(ImageFilter.GaussianBlur(blur_px))
+            shadow_alpha = _blur_L(shadow_alpha, blur_px)
         # Scale by opacity
         if op_alpha != 255:
             shadow_alpha = shadow_alpha.point(lambda v, oa=op_alpha: int(v * oa / 255))
@@ -461,8 +1176,13 @@ def _apply_layer_effect_below(canvas, obj_buf, effect, dpi, paste_pos):
         _composite_with_blend(canvas, shadow, (px, py), effect.blend_mode)
 
     elif effect.type == 'outer_glow':
-        blur_px = max(1, mm_to_px(effect.size, dpi))
-        glow_alpha = alpha.filter(ImageFilter.GaussianBlur(blur_px))
+        s = max(0.0, min(1.0, getattr(effect, 'spread', 0.0)))
+        size_px = max(1, mm_to_px(effect.size, dpi))
+        expand_px = int(round(size_px * s))
+        blur_px = max(0, size_px * (1.0 - s))
+        glow_alpha = _dilate_L(alpha, expand_px) if expand_px > 0 else alpha
+        if blur_px > 0:
+            glow_alpha = _blur_L(glow_alpha, blur_px)
         if op_alpha != 255:
             glow_alpha = glow_alpha.point(lambda v, oa=op_alpha: int(v * oa / 255))
         c = effect.color
@@ -484,29 +1204,463 @@ def _apply_layer_effect_below(canvas, obj_buf, effect, dpi, paste_pos):
         stroke_layer.putalpha(ring)
         _composite_with_blend(canvas, stroke_layer, (px, py), effect.blend_mode)
 
-    elif effect.type == 'bevel' and effect.bevel_kind == 'outer':
-        # Outer bevel: shadow opposite of light direction, highlight on light side
-        size_px = max(1, int(mm_to_px(effect.size, dpi)))
+    elif effect.type == 'long_shadow':
+        # v4.2.11.57: three independent mode selectors, all resolved here into
+        # stop lists for the per-point ray renderer. Taper and cast are GONE.
+        #   BLUR  mode: solid | constant | linear | custom
+        #   COLOR mode: solid | custom
+        #   ALPHA mode: solid | fade | custom
+        # Legacy documents (pre-.57) are derived: ls_mode 'soft' maps to its
+        # ls_blur_mode (linear/constant), 'cast' to linear; ls_fade to the
+        # alpha mode; ls_color_grad to a 2-stop colour gradient; ls_taper is
+        # ignored (renders as 1.0, the straight ray).
         rad = math.radians(effect.direction)
-        dx_h = int(size_px * 0.7 * math.cos(rad))
-        dy_h = -int(size_px * 0.7 * math.sin(rad))
-        # Highlight (light side, offset outward in light direction)
-        c2 = effect.color2
-        hl_a = Image.new("L", (bw, bh), 0); hl_a.paste(alpha, (dx_h, dy_h))
-        hl_a = hl_a.filter(ImageFilter.GaussianBlur(size_px))
-        # Subtract object silhouette so it's only outside
-        hl_a = ImageChops.subtract(hl_a, alpha)
-        hl = Image.new("RGBA", (bw, bh), (c2[0], c2[1], c2[2], 0))
-        hl.putalpha(hl_a)
-        # Shadow (opposite side)
-        c1 = effect.color
-        sh_a = Image.new("L", (bw, bh), 0); sh_a.paste(alpha, (-dx_h, -dy_h))
-        sh_a = sh_a.filter(ImageFilter.GaussianBlur(size_px))
-        sh_a = ImageChops.subtract(sh_a, alpha)
-        sh = Image.new("RGBA", (bw, bh), (c1[0], c1[1], c1[2], 0))
-        sh.putalpha(sh_a)
-        _composite_with_blend(canvas, sh, (px, py), 'multiply')
-        _composite_with_blend(canvas, hl, (px, py), 'screen')
+        dxu = math.cos(rad); dyu = -math.sin(rad)
+        length_px = max(1, int(mm_to_px(abs(getattr(effect, 'ls_length', 10.0)), dpi)))
+        size_px = max(0.0, mm_to_px(effect.size, dpi))
+        color = effect.color
+        color2 = getattr(effect, 'color2', (0, 0, 0, 255)) or (0, 0, 0, 255)
+
+        bm = (getattr(effect, 'ls_blur_mode', '') or '').strip().lower()
+        if bm not in ('solid', 'constant', 'linear', 'custom'):
+            lm = (getattr(effect, 'ls_mode', 'solid') or 'solid').lower()
+            if lm == 'solid':
+                bm = 'solid'
+            elif lm == 'cast':
+                bm = 'linear'
+            else:                       # legacy 'soft'
+                bm = 'constant' if bm == 'constant' else 'linear'
+        am = (getattr(effect, 'ls_alpha_mode', '') or '').strip().lower()
+        if am not in ('solid', 'fade', 'custom'):
+            if getattr(effect, 'ls_grad_alphas', None):
+                am = 'custom'
+            else:
+                am = 'fade' if bool(getattr(effect, 'ls_fade', True)) else 'solid'
+        cm = (getattr(effect, 'ls_color_mode', '') or '').strip().lower()
+        if cm not in ('solid', 'custom'):
+            cm = 'custom' if (getattr(effect, 'ls_grad_colors', None)
+                              or bool(getattr(effect, 'ls_color_grad', False))) else 'solid'
+
+        # ---- resolve stops (never empty; customs fall back to defaults) ----
+        if bm == 'solid':
+            bstops = [[0.0, 0.0], [1.0, 0.0]]
+        elif bm == 'constant':
+            bstops = [[0.0, size_px], [1.0, size_px]]
+        elif bm == 'linear':
+            bstops = [[0.0, 0.0], [1.0, size_px]]
+        else:
+            raw = list(getattr(effect, 'ls_grad_blurs', []) or [])
+            if not raw:
+                raw = [[0.0, 0.0], [1.0, float(effect.size)]]
+            bstops = [[float(s[0]), mm_to_px(max(0.0, float(s[1])), dpi)] for s in raw]
+            if len(bstops) == 1:
+                bstops.append([1.0, bstops[0][1]])
+        if am == 'solid':
+            astops = [[0.0, 1.0], [1.0, 1.0]]
+        elif am == 'fade':
+            astops = [[0.0, 1.0], [1.0, 0.0]]
+        else:
+            astops = [list(map(float, s)) for s in
+                      (getattr(effect, 'ls_grad_alphas', []) or [])]
+            if not astops:
+                astops = [[0.0, 1.0], [1.0, 0.0]]
+            if len(astops) == 1:
+                astops.append([1.0, astops[0][1]])
+        if cm == 'solid':
+            cstops = [[0.0, float(color[0]), float(color[1]), float(color[2])],
+                      [1.0, float(color[0]), float(color[1]), float(color[2])]]
+        else:
+            cstops = [list(map(float, s)) for s in
+                      (getattr(effect, 'ls_grad_colors', []) or [])]
+            if not cstops:
+                cstops = [[0.0, float(color[0]), float(color[1]), float(color[2])],
+                          [1.0, float(color2[0]), float(color2[1]), float(color2[2])]]
+            if len(cstops) == 1:
+                cstops.append([1.0] + list(cstops[0][1:]))
+            # legacy ls_color_grad also carried the alpha pair; honour it when
+            # the alpha mode is still legacy-derived
+            if (not getattr(effect, 'ls_grad_colors', None)
+                    and bool(getattr(effect, 'ls_color_grad', False))
+                    and am == 'fade' and not getattr(effect, 'ls_grad_alphas', None)
+                    and (getattr(effect, 'ls_alpha_mode', '') or '') == ''):
+                a0 = (color[3] if len(color) > 3 else 255) / 255.0
+                a1 = (color2[3] if len(color2) > 3 else 255) / 255.0
+                astops = [[0.0, a0], [1.0, a1]]
+
+        ls_layer = _long_shadow_matte(alpha, dxu, dyu, length_px,
+                                      cstops, astops, bstops)
+        if op_alpha != 255:
+            a = ls_layer.getchannel("A").point(lambda v, oa=op_alpha: int(v * oa / 255))
+            ls_layer.putalpha(a)
+        _composite_with_blend(canvas, ls_layer, (px, py), effect.blend_mode)
+
+    elif effect.type == 'bevel' and effect.bevel_kind == 'outer':
+        _render_bevel_shaded(canvas, alpha, effect, dpi, px, py, bw, bh, outer=True)
+
+def _ht_stencil(shape, size):
+    """0..1 float stencil (size x size) for a halftone dot of the given shape."""
+    import numpy as np
+    size = max(1, int(size))
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
+    c = (size - 1) / 2.0
+    x = (xx - c) / max(1.0, c)
+    y = (yy - c) / max(1.0, c)
+    r = np.sqrt(x * x + y * y)
+    aa = max(0.06, 2.0 / size)
+    if shape in ('circle', 'dot'):
+        m = np.clip((1.0 - r) / aa, 0, 1)
+    elif shape == 'ring':
+        m = np.minimum(np.clip((1.0 - r) / aa, 0, 1), np.clip((r - 0.55) / aa, 0, 1))
+    elif shape == 'diamond':
+        m = np.clip((1.0 - (np.abs(x) + np.abs(y))) / aa, 0, 1)
+    elif shape == 'square':
+        m = np.clip((1.0 - np.maximum(np.abs(x), np.abs(y))) / aa, 0, 1)
+    elif shape == 'cross':
+        th = 0.30
+        m = np.maximum(np.clip((th - np.abs(x)) / aa, 0, 1),
+                       np.clip((th - np.abs(y)) / aa, 0, 1))
+    elif shape == 'line':
+        m = np.clip((0.5 - np.abs(y)) / aa, 0, 1)
+    elif shape == 'triangle':
+        m = ((y <= 0.85) & (np.abs(x) <= (0.9 * (0.85 - y) / 1.7))).astype(np.float32)
+    elif shape == 'hex':
+        ax = np.abs(x); ay = np.abs(y)
+        m = ((ax <= 0.85) & (ay <= 0.95) & (0.5 * ay + 0.866 * ax <= 0.82)).astype(np.float32)
+    else:
+        m = np.clip((1.0 - r) / aa, 0, 1)
+    return m.astype(np.float32)
+
+
+def _stamp_max(layer, arr, cx, cy):
+    import numpy as np
+    h, w = arr.shape
+    x0 = int(round(cx - w / 2.0)); y0 = int(round(cy - h / 2.0))
+    H, W = layer.shape
+    ax0 = max(0, -x0); ay0 = max(0, -y0)
+    bx0 = max(0, x0); by0 = max(0, y0)
+    bx1 = min(W, x0 + w); by1 = min(H, y0 + h)
+    if bx1 <= bx0 or by1 <= by0:
+        return
+    aw = bx1 - bx0; ah = by1 - by0
+    sub = arr[ay0:ay0 + ah, ax0:ax0 + aw]
+    tgt = layer[by0:by1, bx0:bx1]
+    np.maximum(tgt, sub, out=tgt)
+
+
+def _ht_pattern_stencil(b64):
+    """Decode a base64 PNG into a float HxW stencil (its alpha, or luminance if
+    the image has no usable alpha)."""
+    import base64, io, numpy as np
+    from PIL import Image
+    try:
+        raw = base64.b64decode(b64)
+        im = Image.open(io.BytesIO(raw)).convert("RGBA")
+    except Exception:
+        return None
+    a = np.asarray(im.split()[-1], dtype=np.float32) / 255.0
+    # The alpha only carries the shape if it actually varies. A fully
+    # transparent OR a fully opaque (e.g. white-on-black) pattern has a flat
+    # alpha and the shape lives in luminance instead, so fall back there.
+    if float(a.max()) - float(a.min()) <= 0.004:
+        a = np.asarray(im.convert("L"), dtype=np.float32) / 255.0
+    return a
+
+
+def _ht_make_buckets(src, maxd, K, R, is_shape):
+    """K size buckets x R rotation variants of a dot stencil. src is a shape
+    name (is_shape=True) or a float HxW pattern array."""
+    import numpy as np
+    from PIL import Image
+    buckets = []
+    for k in range(K):
+        sz = max(1, int(round(maxd * (k + 1) / K)))
+        if is_shape:
+            base = _ht_stencil(src, sz)
+        else:
+            im = Image.fromarray((np.clip(src, 0, 1) * 255).astype('uint8'), 'L').resize((sz, sz), Image.LANCZOS)
+            base = np.asarray(im, dtype=np.float32) / 255.0
+        rots = [base]
+        if R > 1:
+            bim = Image.fromarray((np.clip(base, 0, 1) * 255).astype('uint8'), 'L')
+            for rr in range(1, R):
+                rim = bim.rotate(360.0 * rr / R, expand=True, resample=Image.BILINEAR)
+                rots.append(np.asarray(rim, dtype=np.float32) / 255.0)
+        buckets.append(rots)
+    return buckets
+
+
+def _ht_rot_idx(col, row, ci, R):
+    if R <= 1:
+        return 0
+    h = ((col * 73856093) ^ (row * 19349663) ^ ((ci + 1) * 83492791)) & 0x7fffffff
+    return h % R
+
+
+def _ht_gpu_channel_layer(ci, vmap, buckets, cell, vy, hexgrid, n_rows, n_cols,
+                          cos_r, sin_r, cx0, cy0, srad, K, maxd, rmode, bw, bh,
+                          a_arr, csa, ox=0.0, oy=0.0, Rrot=1):
+    """Vectorised grid geometry + EXACT per-cell value sampling (replicating
+    the CPU loop's window .sum() expressions verbatim, v4.2.11.35: a cumsum-based
+    sum has a different float32 rounding order, which could flip a dot one size
+    bucket at exact .5 boundaries) + GPU instanced stamping. Returns the channel
+    layer, or None to fall back.
+    v4.2.11.50: covers ALL halftone cases. Custom patterns flow through the
+    same buckets (only the gate excluded them); random rotation becomes K*Rrot
+    atlas tiles with the variant picked by the CPU's exact _ht_rot_idx hash;
+    decentralization is a constant per-channel (ox, oy) offset on the grid.
+    Rotation variants are expand=True so the tile pitch is the LARGEST variant,
+    not maxd."""
+    import numpy as np
+    from edof.engine import gpu as _gpu
+    R = max(1, int(Rrot))
+    T = K * R
+    tile_sizes = np.zeros(T, dtype=np.int64)
+    for k in range(K):
+        for rr in range(R):
+            tile_sizes[k * R + rr] = buckets[k][rr].shape[0]
+    pitch = int(tile_sizes.max())
+    if pitch <= 0:
+        return None
+    # memory guard: the f32 atlas upload should stay sane
+    if pitch * pitch * T * 4 > 256 * 1024 * 1024:
+        return None
+    atlas = np.zeros((pitch, T * pitch), np.float32)
+    for k in range(K):
+        for rr in range(R):
+            st = buckets[k][rr]; sz = st.shape[0]
+            ti = k * R + rr
+            atlas[0:sz, ti * pitch:ti * pitch + sz] = st
+    rows = np.arange(-n_rows, n_rows + 1); cols = np.arange(-n_cols, n_cols + 1)
+    RR, CC = np.meshgrid(rows, cols, indexing='ij')
+    uy = RR * vy
+    xoff = np.where(RR % 2 != 0, cell / 2.0, 0.0) if hexgrid else 0.0
+    ux = CC * cell + xoff
+    gx = ux * cos_r - uy * sin_r + cx0 + ox
+    gy = ux * sin_r + uy * cos_r + cy0 + oy
+    ix = gx.astype(np.int64); iy = gy.astype(np.int64)
+    inb = (ix >= 0) & (ix < bw) & (iy >= 0) & (iy < bh)
+
+    # exact CPU-order value sampling over candidate (in-bounds) cells
+    cand = np.where(inb.ravel())[0]
+    gxr = gx.ravel(); gyr = gy.ravel(); ixr = ix.ravel(); iyr = iy.ravel()
+    rowr = RR.ravel(); colr = CC.ravel()
+    inst_rows = []
+    Km1 = K - 1
+    for f in cand:
+        iix = int(ixr[f]); iiy = int(iyr[f])
+        y0 = iiy - srad if iiy - srad > 0 else 0
+        y1 = iiy + srad + 1 if iiy + srad + 1 < bh else bh
+        x0 = iix - srad if iix - srad > 0 else 0
+        x1 = iix + srad + 1 if iix + srad + 1 < bw else bw
+        a_reg = a_arr[y0:y1, x0:x1]
+        asum = float(a_reg.sum())
+        if asum <= 0.01:
+            continue
+        v_reg = vmap[y0:y1, x0:x1]
+        val = float((v_reg * a_reg).sum() / asum)
+        if rmode == 'size':
+            scale = val; ad = 1.0
+        else:
+            scale = 1.0; ad = val
+        if scale > 0.02:
+            bk = min(K - 1, max(0, int(round(scale * Km1))))
+            rr = _ht_rot_idx(int(colr[f]), int(rowr[f]), ci, R)
+            ti = bk * R + rr
+            sz = float(tile_sizes[ti])
+            inst_rows.append((round(float(gxr[f]) - sz / 2.0),
+                              round(float(gyr[f]) - sz / 2.0),
+                              sz, float(ti), ad))
+    inst = np.array(inst_rows, dtype=np.float32).reshape(-1, 5)
+    return _gpu.gpu_halftone_stamp(atlas, pitch, T, bw, bh, inst)
+
+
+def _render_halftone_mosaic(obj_buf, alpha, effect, dpi, bw, bh):
+    """Per-channel shaped-dot / patterned halftone screen (the 'Maori mosaic'
+    style). Optional custom pattern image(s) (1 / per-channel), random dot
+    rotation, and the effect opacity all feed in. numpy + Pillow only."""
+    import numpy as np
+    import math as _m
+    from PIL import Image
+    src = np.asarray(obj_buf.convert("RGB"), dtype=np.float32)
+    a_arr = np.asarray(alpha, dtype=np.float32) / 255.0
+    cell = max(4.0, float(mm_to_px(abs(getattr(effect, 'ht_dot', 1.5)), dpi)))
+    shape = getattr(effect, 'ht_shape', 'circle') or 'circle'
+    mode = (getattr(effect, 'ht_color_mode', 'cmyk') or 'cmyk').lower()
+    rmode = (getattr(effect, 'ht_render_mode', 'size') or 'size').lower()
+    sizef = max(0.05, getattr(effect, 'ht_size_factor', 115.0) / 100.0)
+    oscale = max(0.2, getattr(effect, 'ht_overlay_scale', 1.5))
+    decent = max(0.0, getattr(effect, 'ht_decentralization', 0.0) / 100.0)
+    angle_step = getattr(effect, 'ht_angle', 72.0)
+    hexgrid = bool(getattr(effect, 'ht_hex', True))
+    randrot = bool(getattr(effect, 'ht_random_rotate', False))
+    clip = (getattr(effect, 'ht_clip', 'whole') or 'whole').lower()
+    op = max(0.0, min(1.0, getattr(effect, 'opacity', 1.0)))
+
+    Rc = src[..., 0]; Gc = src[..., 1]; Bc = src[..., 2]
+    extra = bool(getattr(effect, 'ht_extra_channel', False))
+    extra_col = (getattr(effect, 'ht_extra_color', 'auto') or 'auto').lower()
+    if extra_col == 'auto':
+        extra_col = 'black' if mode == 'rgb' else 'white'
+    enabled = list(getattr(effect, 'ht_channels_enabled', []) or [])
+    bright = np.maximum(np.maximum(Rc, Gc), Bc) / 255.0
+    white_amt = np.minimum(np.minimum(Rc, Gc), Bc) / 255.0  # achromatic white floor
+    dark_amt = 1.0 - bright                                  # darkness in all channels
+    if mode == 'rgb':
+        chans = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
+        vmaps = [Rc / 255.0, Gc / 255.0, Bc / 255.0]
+        kinds = ['add', 'add', 'add']
+    else:
+        chans = [(0, 255, 255), (255, 0, 255), (255, 255, 0), (0, 0, 0)]
+        rn = Rc / 255.0; gn = Gc / 255.0; bn = Bc / 255.0
+        kk_ = 1.0 - bright
+        denom = np.clip(1.0 - kk_, 1e-6, 1.0)
+        vmaps = [np.clip((1.0 - rn - kk_) / denom, 0, 1),
+                 np.clip((1.0 - gn - kk_) / denom, 0, 1),
+                 np.clip((1.0 - bn - kk_) / denom, 0, 1),
+                 np.clip(kk_, 0, 1)]
+        kinds = ['mul', 'mul', 'mul', 'mul']
+    if extra:
+        if extra_col == 'black':
+            chans.append((0, 0, 0)); vmaps.append(np.clip(dark_amt, 0, 1)); kinds.append('over')
+        else:
+            chans.append((255, 255, 255)); vmaps.append(np.clip(white_amt, 0, 1)); kinds.append('over')
+    nchan = len(chans)
+
+    diag = _m.hypot(bw, bh) / 2.0
+    while ((2 * (diag / cell)) * (2 * (diag / cell))) > 200000 and cell < diag:
+        cell *= 1.4
+
+    K = 20
+    Rrot = 8 if randrot else 1
+    maxd = max(2, int(round(cell * oscale * sizef)))
+
+    pat_arrs = [_ht_pattern_stencil(b) for b in (getattr(effect, 'ht_patterns', []) or [])]
+
+    def _chan_src(ci):
+        valid = [p for p in pat_arrs if p is not None]
+        if not valid:
+            return shape, True
+        if len(pat_arrs) == 1:
+            return (pat_arrs[0], False)
+        if ci < len(pat_arrs) and pat_arrs[ci] is not None:
+            return pat_arrs[ci], False
+        return shape, True
+
+    bucket_cache = {}
+    chan_buckets = []
+    for ci in range(nchan):
+        s, is_shape = _chan_src(ci)
+        key = ('shape:' + s) if is_shape else id(s)
+        if key not in bucket_cache:
+            bucket_cache[key] = _ht_make_buckets(s, maxd, K, Rrot, is_shape)
+        chan_buckets.append(bucket_cache[key])
+
+    if mode == 'rgb':
+        out = np.zeros((bh, bw, 3), np.float32)
+    else:
+        out = np.full((bh, bw, 3), 255.0, np.float32)
+
+    screen_angles = [0.0, 120.0, 240.0, 0.0]
+    cover = np.zeros((bh, bw), np.float32)
+    srad = max(1, int(round(cell / 4.0)))   # v4.2.10.12: per-cell sampling radius
+    vy = (_m.sqrt(3) / 2.0) * cell if hexgrid else cell
+    cx0, cy0 = bw / 2.0, bh / 2.0
+    n_rows = int(diag / vy) + 2
+    n_cols = int(diag / cell) + 2
+    # v4.2.11.50: GPU fast path covers ALL cases now -- custom patterns,
+    # random dot rotation and decentralization included (per-call CPU fallback
+    # stays, as always).
+    _use_gpu_ht = False; _csa = None
+    try:
+        from edof.engine import gpu as _gpu
+        if _gpu.is_enabled() and _gpu.gpu_available():
+            _use_gpu_ht = True   # exact per-cell sampling needs no precompute
+    except Exception:
+        _use_gpu_ht = False
+    for ci, tint in enumerate(chans):
+        if not (enabled[ci] if ci < len(enabled) else True):
+            continue
+        rot = _m.radians(angle_step * ci)
+        cos_r = _m.cos(rot); sin_r = _m.sin(rot)
+        vmap = vmaps[ci]
+        oa = _m.radians(screen_angles[ci % 4]); off = decent * (cell / 2.0)
+        ox = off * _m.cos(oa); oy = off * _m.sin(oa)
+        buckets = chan_buckets[ci]
+        layer = None
+        if _use_gpu_ht:
+            try:
+                layer = _ht_gpu_channel_layer(ci, vmap, buckets, cell, vy, hexgrid,
+                            n_rows, n_cols, cos_r, sin_r, cx0, cy0, srad, K, maxd,
+                            rmode, bw, bh, a_arr, _csa,
+                            ox=ox, oy=oy, Rrot=Rrot)
+            except Exception:
+                layer = None
+        if layer is None:
+            layer = np.zeros((bh, bw), np.float32)
+            for row in range(-n_rows, n_rows + 1):
+                uy = row * vy
+                xoff = (cell / 2.0) if (hexgrid and (row % 2 != 0)) else 0.0
+                for col in range(-n_cols, n_cols + 1):
+                    ux = col * cell + xoff
+                    gx = ux * cos_r - uy * sin_r + cx0 + ox
+                    gy = ux * sin_r + uy * cos_r + cy0 + oy
+                    ix = int(gx); iy = int(gy)
+                    if 0 <= ix < bw and 0 <= iy < bh:
+                        # sample the channel value by AVERAGING over the cell
+                        # (radius ~ cell/4), alpha-weighted, like the reference
+                        # mosaic generator.
+                        y0 = iy - srad if iy - srad > 0 else 0
+                        y1 = iy + srad + 1 if iy + srad + 1 < bh else bh
+                        x0 = ix - srad if ix - srad > 0 else 0
+                        x1 = ix + srad + 1 if ix + srad + 1 < bw else bw
+                        a_reg = a_arr[y0:y1, x0:x1]
+                        asum = float(a_reg.sum())
+                        if asum > 0.01:
+                            v_reg = vmap[y0:y1, x0:x1]
+                            val = float((v_reg * a_reg).sum() / asum)
+                        else:
+                            val = 0.0
+                        if asum <= 0.01:
+                            continue
+                        if rmode == 'size':
+                            scale = val; ad = 1.0
+                        else:
+                            scale = 1.0; ad = val
+                        if scale > 0.02:
+                            bk = min(K - 1, max(0, int(round(scale * (K - 1)))))
+                            rr = _ht_rot_idx(col, row, ci, Rrot)
+                            st = buckets[bk][rr]
+                            _stamp_max(layer, st * ad if ad != 1.0 else st, gx, gy)
+        kind = kinds[ci]
+        if kind == 'add':
+            out[..., 0] += layer * tint[0]
+            out[..., 1] += layer * tint[1]
+            out[..., 2] += layer * tint[2]
+        elif kind == 'mul':
+            out[..., 0] *= (1.0 - layer * (1.0 - tint[0] / 255.0))
+            out[..., 1] *= (1.0 - layer * (1.0 - tint[1] / 255.0))
+            out[..., 2] *= (1.0 - layer * (1.0 - tint[2] / 255.0))
+        else:  # 'over' — paint solid tint (extra white/black key channel)
+            out[..., 0] = out[..., 0] * (1.0 - layer) + tint[0] * layer
+            out[..., 1] = out[..., 1] * (1.0 - layer) + tint[1] * layer
+            out[..., 2] = out[..., 2] * (1.0 - layer) + tint[2] * layer
+        np.maximum(cover, layer, out=cover)
+    out = np.clip(out, 0, 255).astype('uint8')
+    # background mode decides the alpha: 'native' fills the whole silhouette
+    # (RGB on its black base / CMYK on its white base — self-contained, faithful
+    # regardless of document background); 'transparent'/'layer' keep only the dot
+    # coverage so gaps show through.
+    bg = (getattr(effect, 'ht_background', '') or '').lower()
+    if not bg:
+        bg = 'layer' if getattr(effect, 'ht_keep_background', False) else 'native'
+    base = a_arr.copy() if bg == 'native' else cover
+    if clip == 'hard':
+        base = base * (a_arr > 0.5)
+    elif clip == 'soft':
+        base = base * a_arr
+    out_a = np.clip(base * (255.0 * op), 0, 255).astype('uint8')
+    rgba = np.dstack([out, out_a])
+    return Image.fromarray(rgba, 'RGBA')
 
 
 def _apply_layer_effect_above(canvas, obj_buf, effect, dpi, paste_pos):
@@ -523,11 +1677,17 @@ def _apply_layer_effect_above(canvas, obj_buf, effect, dpi, paste_pos):
         dx = int(mm_to_px(effect.distance, dpi) * math.cos(rad))
         dy = -int(mm_to_px(effect.distance, dpi) * math.sin(rad))
         blur_px = max(0, mm_to_px(effect.size, dpi))
+        s = max(0.0, min(1.0, getattr(effect, 'spread', 0.0)))
+        size_px = max(0, mm_to_px(effect.size, dpi))
+        expand_px = int(round(size_px * s))
+        blur_px = max(0, size_px * (1.0 - s))
         # Inner shadow: invert alpha, offset, blur, mask back by original alpha
         inv = ImageChops.invert(alpha)
         shifted = Image.new("L", (bw, bh), 0); shifted.paste(inv, (dx, dy))
+        if expand_px > 0:
+            shifted = _dilate_L(shifted, expand_px)
         if blur_px > 0:
-            shifted = shifted.filter(ImageFilter.GaussianBlur(blur_px))
+            shifted = _blur_L(shifted, blur_px)
         masked = ImageChops.multiply(shifted, alpha)
         if op_alpha != 255:
             masked = masked.point(lambda v, oa=op_alpha: int(v * oa / 255))
@@ -537,9 +1697,14 @@ def _apply_layer_effect_above(canvas, obj_buf, effect, dpi, paste_pos):
         _composite_with_blend(canvas, layer, (px, py), effect.blend_mode)
 
     elif effect.type == 'inner_glow':
-        blur_px = max(1, mm_to_px(effect.size, dpi))
+        s = max(0.0, min(1.0, getattr(effect, 'spread', 0.0)))
+        size_px = max(1, mm_to_px(effect.size, dpi))
+        expand_px = int(round(size_px * s))
+        blur_px = max(0, size_px * (1.0 - s))
         inv = ImageChops.invert(alpha)
-        blurred = inv.filter(ImageFilter.GaussianBlur(blur_px))
+        if expand_px > 0:
+            inv = _dilate_L(inv, expand_px)
+        blurred = _blur_L(inv, blur_px)
         masked = ImageChops.multiply(blurred, alpha)
         if op_alpha != 255:
             masked = masked.point(lambda v, oa=op_alpha: int(v * oa / 255))
@@ -566,42 +1731,8 @@ def _apply_layer_effect_above(canvas, obj_buf, effect, dpi, paste_pos):
         layer.putalpha(ring)
         _composite_with_blend(canvas, layer, (px, py), effect.blend_mode)
 
-    elif effect.type == 'bevel' and effect.bevel_kind in ('inner', 'emboss'):
-        # v4.1.1: Inner bevel — apply highlight/shadow gradient across the
-        # whole inner face (not just edge). Computes a "depth map" by blurring
-        # the eroded silhouette, then offsetting in light direction.
-        size_px = max(2, int(mm_to_px(effect.size, dpi)))
-        rad = math.radians(effect.direction)
-        dx_h = int(size_px * math.cos(rad))
-        dy_h = -int(size_px * math.sin(rad))
-        # Create a depth gradient: blurred alpha (gives soft edges)
-        depth = alpha.filter(ImageFilter.GaussianBlur(size_px))
-        # Highlight is "lighter where shifted toward light"
-        # Shadow is "darker where shifted away from light"
-        hl_a = Image.new("L", (bw, bh), 0); hl_a.paste(depth, (dx_h, dy_h))
-        hl_a = ImageChops.multiply(hl_a, alpha)  # only inside silhouette
-        # Subtract the original depth to get only the parts that are
-        # "more lit" by the shift (positive lighting)
-        hl_a = ImageChops.subtract(hl_a, depth)
-        sh_a = Image.new("L", (bw, bh), 0); sh_a.paste(depth, (-dx_h, -dy_h))
-        sh_a = ImageChops.multiply(sh_a, alpha)
-        sh_a = ImageChops.subtract(sh_a, depth)
-        # Apply opacity scaling to both
-        op = effect.opacity
-        if op != 1.0:
-            hl_a = hl_a.point(lambda v, oo=op: int(v * oo))
-            sh_a = sh_a.point(lambda v, oo=op: int(v * oo))
-        c2 = effect.color2  # highlight
-        hl = Image.new("RGBA", (bw, bh), (c2[0], c2[1], c2[2], 0))
-        hl.putalpha(hl_a)
-        c1 = effect.color   # shadow
-        sh = Image.new("RGBA", (bw, bh), (c1[0], c1[1], c1[2], 0))
-        sh.putalpha(sh_a)
-        # Blend modes per side
-        bm_shadow = getattr(effect, 'blend_mode', 'multiply') or 'multiply'
-        bm_hl     = getattr(effect, 'blend_mode2', 'screen') or 'screen'
-        _composite_with_blend(canvas, sh, (px, py), bm_shadow)
-        _composite_with_blend(canvas, hl, (px, py), bm_hl)
+    elif effect.type == 'bevel' and effect.bevel_kind != 'outer':
+        _render_bevel_shaded(canvas, alpha, effect, dpi, px, py, bw, bh, outer=False)
 
     elif effect.type == 'color_overlay':
         c = effect.color
@@ -689,6 +1820,113 @@ def _apply_layer_effect_above(canvas, obj_buf, effect, dpi, paste_pos):
         combined_alpha = ImageChops.multiply(tex_alpha, scaled_alpha)
         tiled.putalpha(combined_alpha)
         _composite_with_blend(canvas, tiled, (px, py), effect.blend_mode)
+
+    elif effect.type == 'chromatic_aberration':
+        # v4.2.7.12: rich per-channel chromatic aberration.
+        # Each channel (R/G/B) is tinted by its own colour and either shifted by
+        # its own offset/angle (linear) or scaled about the centre by its own
+        # distortion % (radial — lens-like). The three layers add together.
+        from PIL import ImageOps
+        r, g, b, a = obj_buf.split()
+        mode = getattr(effect, 'ca_mode', 'linear')
+        cx = bw / 2.0; cy = bh / 2.0
+        specs = [
+            (r, getattr(effect, 'ca_r_color', (255, 0, 0, 255)),
+             getattr(effect, 'ca_r_offset', 0.5), getattr(effect, 'ca_r_angle', 0.0),
+             getattr(effect, 'ca_r_distort', 2.0)),
+            (g, getattr(effect, 'ca_g_color', (0, 255, 0, 255)),
+             getattr(effect, 'ca_g_offset', 0.0), getattr(effect, 'ca_g_angle', 0.0),
+             getattr(effect, 'ca_g_distort', 0.0)),
+            (b, getattr(effect, 'ca_b_color', (0, 0, 255, 255)),
+             getattr(effect, 'ca_b_offset', 0.5), getattr(effect, 'ca_b_angle', 180.0),
+             getattr(effect, 'ca_b_distort', -2.0)),
+        ]
+        # v4.2.11.5: GPU fast path (per-pixel shift/scale + tint in one shader).
+        # Builds the same per-channel transforms as the CPU code below; on any
+        # miss it falls through to the CPU path so output is identical.
+        ca_done = False
+        try:
+            from edof.engine import gpu as _gpu
+            if _gpu.is_enabled():
+                gspecs = []
+                for ch, col, off, ang, dist in specs:
+                    if mode == 'radial':
+                        s = 1.0 + (dist / 100.0)
+                        if s <= 0.01: s = 0.01
+                        gspecs.append((col, (0.0, 0.0), s))
+                    else:
+                        offpx = mm_to_px(abs(off), dpi)
+                        rad = math.radians(ang)
+                        dx = int(round(offpx * math.cos(rad)))
+                        dy = int(round(-offpx * math.sin(rad)))
+                        gspecs.append((col, (dx, dy), 1.0))
+                ca_img = _gpu.gpu_chromatic_aberration(obj_buf, mode, gspecs)
+                if ca_img is not None:
+                    _gpu.blur_gpu_count += 1
+                    if op_alpha != 255:
+                        caa = ca_img.split()[3].point(lambda v, oa=op_alpha: int(v * oa / 255))
+                        ca_img.putalpha(caa)
+                    _composite_with_blend(canvas, ca_img, (px, py), effect.blend_mode)
+                    ca_done = True
+                else:
+                    _gpu.blur_cpu_count += 1
+        except Exception:
+            ca_done = False
+        if ca_done:
+            return
+        acc_rgb = Image.new("RGB", (bw, bh), (0, 0, 0))
+        acc_a = Image.new("L", (bw, bh), 0)
+        for ch, col, off, ang, dist in specs:
+            tint = ImageOps.colorize(ch, (0, 0, 0), (int(col[0]), int(col[1]), int(col[2])))
+            layer = tint.convert("RGBA"); layer.putalpha(a)
+            placed = Image.new("RGBA", (bw, bh), (0, 0, 0, 0))
+            if mode == 'radial':
+                s = 1.0 + (dist / 100.0)
+                if s <= 0.01:
+                    s = 0.01
+                nw = max(1, int(round(bw * s))); nh = max(1, int(round(bh * s)))
+                scaled = layer.resize((nw, nh))
+                placed.paste(scaled, (int(round(cx - nw / 2.0)), int(round(cy - nh / 2.0))))
+            else:
+                offpx = mm_to_px(abs(off), dpi)
+                rad = math.radians(ang)
+                dx = int(round(offpx * math.cos(rad)))
+                dy = int(round(-offpx * math.sin(rad)))
+                placed.paste(layer, (dx, dy))
+            lr, lg, lb, la = placed.split()
+            acc_rgb = ImageChops.add(acc_rgb, Image.merge("RGB", (lr, lg, lb)))
+            acc_a = ImageChops.lighter(acc_a, la)
+        ca_img = acc_rgb.convert("RGBA"); ca_img.putalpha(acc_a)
+        if op_alpha != 255:
+            caa = ca_img.split()[3].point(lambda v, oa=op_alpha: int(v * oa / 255))
+            ca_img.putalpha(caa)
+        _composite_with_blend(canvas, ca_img, (px, py), effect.blend_mode)
+
+    elif effect.type == 'halftone':
+        # v4.2.7.18: per-channel shaped-dot halftone (RGB additive / CMYK
+        # multiply), on rotated screens — the 'Maori mosaic' style.
+        ht = _render_halftone_mosaic(obj_buf, alpha, effect, dpi, bw, bh)
+        _composite_with_blend(canvas, ht, (px, py), effect.blend_mode)
+
+    elif effect.type == 'light_sweep':
+        # v4.2.7: glossy diagonal specular streak across the object.
+        import numpy as np
+        ang = math.radians(getattr(effect, 'lsw_angle', 45.0))
+        ca_, sa_ = math.cos(ang), math.sin(ang)
+        yy, xx = np.mgrid[0:bh, 0:bw].astype(np.float32)
+        u = xx * ca_ + yy * sa_
+        umin, umax = float(u.min()), float(u.max())
+        un = (u - umin) / max(1.0, (umax - umin))
+        pos = float(getattr(effect, 'lsw_pos', 0.5))
+        width = max(0.01, float(getattr(effect, 'lsw_width', 0.3)))
+        band = np.exp(-(((un - pos) / (width / 2.0)) ** 2))
+        a_arr = np.asarray(alpha, dtype=np.float32) / 255.0
+        out_a = (band * a_arr * (op_alpha / 255.0) * 255.0).astype('uint8')
+        c = getattr(effect, 'color2', (255, 255, 255, 255))
+        sweep = Image.new("RGBA", (bw, bh), (c[0], c[1], c[2], 0))
+        sweep.putalpha(Image.fromarray(out_a, "L"))
+        bm = effect.blend_mode if (effect.blend_mode and effect.blend_mode != 'normal') else 'screen'
+        _composite_with_blend(canvas, sweep, (px, py), bm)
 
 
 def _build_linear_gradient(w, h, c_start, c_end, angle_deg):
@@ -1034,6 +2272,21 @@ def _quad_bezier(p0, p1, p2, n=20):
                     u*u*p0[1] + 2*u*t*p1[1] + t*t*p2[1]))
     return out
 
+def _stroke_polyline(draw, poly, color, width):
+    """v4.2.10.8: draw a thick polyline without cracks. PIL's line() renders
+    each segment as a separate rectangle; without rounded joints a wide stroke
+    over a flattened bezier shows gaps at every vertex. joint='curve' rounds the
+    interior joints; round caps (small filled circles) close the two ends so a
+    wide open stroke has clean, gap-free terminals."""
+    if not poly or len(poly) < 2:
+        return
+    draw.line(poly, fill=color, width=width, joint='curve')
+    if width >= 3:
+        r = width / 2.0
+        for (px, py) in (poly[0], poly[-1]):
+            draw.ellipse([px - r, py - r, px + r, py + r], fill=color)
+
+
 def _path_to_polygons(path_data, dpi, offset_x=0.0, offset_y=0.0):
     """Convert path commands to polylines.
 
@@ -1073,6 +2326,53 @@ def _path_to_polygons(path_data, dpi, offset_x=0.0, offset_y=0.0):
             cx, cy = sx, sy
     if cur: polys.append(cur)
     return polys
+
+
+def _effective_corner_radii(obj, w, h, dpi):
+    """Return ([tl,tr,br,bl] in px, all_equal). Empty corner_radii -> uniform."""
+    rr = getattr(obj, 'corner_radii', None)
+    if rr and len(rr) == 4:
+        radii = [max(0.0, mm_to_px(float(x), dpi)) for x in rr]
+    else:
+        r = max(0.0, mm_to_px(float(getattr(obj, 'corner_radius', 0.0)), dpi))
+        radii = [r, r, r, r]
+    tl, tr, br, bl = radii
+
+    def _sc(a, b, length):
+        s = a + b
+        if s > length and s > 0:
+            f = length / s
+            return a * f, b * f
+        return a, b
+    tl_t, tr_t = _sc(tl, tr, w)        # top edge
+    bl_b, br_b = _sc(bl, br, w)        # bottom edge
+    tl_l, bl_l = _sc(tl, bl, h)        # left edge
+    tr_r, br_r = _sc(tr, br, h)        # right edge
+    radii = [min(tl_t, tl_l), min(tr_t, tr_r), min(br_b, br_r), min(bl_b, bl_l)]
+    all_equal = (max(radii) - min(radii)) < 0.01
+    return radii, all_equal
+
+
+def _rounded_corner_points(w, h, radii, samples=14, inset=0.0):
+    """Closed polygon outline of a rectangle with per-corner radii [tl,tr,br,bl].
+
+    `inset` shrinks the path inward on every side (used to keep a centered stroke
+    of width 2*inset fully inside the object bounds instead of being clipped)."""
+    tl, tr, br, bl = [max(0.0, r - inset) for r in radii]
+    x0, y0, x1, y1 = inset, inset, w - inset, h - inset
+    pts = []
+
+    def arc(cx, cy, r, a0, a1):
+        if r <= 0:
+            pts.append((cx, cy)); return
+        for i in range(samples + 1):
+            a = math.radians(a0 + (a1 - a0) * i / samples)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    arc(x0 + tl, y0 + tl, tl, 180, 270)        # top-left
+    arc(x1 - tr, y0 + tr, tr, 270, 360)        # top-right
+    arc(x1 - br, y1 - br, br, 0, 90)           # bottom-right
+    arc(x0 + bl, y1 - bl, bl, 90, 180)         # bottom-left
+    return [(int(round(x)), int(round(y))) for x, y in pts]
 
 
 def _render_shape(obj, canvas, dpi):
@@ -1137,10 +2437,17 @@ def _render_shape(obj, canvas, dpi):
         # v4.1.10.4: ceil + 1px right/bottom padding so anti-aliased stroke
         # and floor-rounded path coords don't clip the last column/row.
         import math as _math
-        buf_w = max(1, int(_math.ceil(w_px)) + 1)
-        buf_h = max(1, int(_math.ceil(h_px)) + 1)
+        # v4.2.10.8: pad the buffer by half the stroke width (+ a small margin)
+        # on every side. The path bbox (w_px/h_px) covers the centreline only;
+        # a wide stroke is centred on the path edge and extends sw/2 beyond it,
+        # so without padding the buffer edge clipped the stroke. Polys are
+        # offset by PAD and the buffer is pasted back at -PAD.
+        PAD = int(_math.ceil(sw / 2.0)) + 2
+        buf_w = max(1, int(_math.ceil(w_px)) + 1 + 2 * PAD)
+        buf_h = max(1, int(_math.ceil(h_px)) + 1 + 2 * PAD)
         buf = Image.new("RGBA", (buf_w, buf_h), (0,0,0,0))
-        polys = _path_to_polygons(obj.path_data, dpi, 0.0, 0.0)
+        _pad_mm = PAD / mm_to_px(1.0, dpi)
+        polys = _path_to_polygons(obj.path_data, dpi, _pad_mm, _pad_mm)
         bd = ImageDraw.Draw(buf, "RGBA")
         # v4.1.15: gradient support for closed paths
         if is_closed and obj.fill.gradient is not None:
@@ -1160,12 +2467,12 @@ def _render_shape(obj, canvas, dpi):
             # Then draw stroke ON TOP of the gradient fill
             for poly in polys:
                 if len(poly) < 2: continue
-                bd.line(poly, fill=sc[:4], width=sw)
+                _stroke_polyline(bd, poly, sc[:4], sw)
         else:
             for poly in polys:
                 if len(poly) < 2: continue
                 if fc and len(poly) >= 3: bd.polygon(poly, fill=fc[:4])
-                bd.line(poly, fill=sc[:4], width=sw)
+                _stroke_polyline(bd, poly, sc[:4], sw)
         # Apply flip/rotation if any
         if t.flip_h: buf = buf.transpose(Image.FLIP_LEFT_RIGHT)
         if t.flip_v: buf = buf.transpose(Image.FLIP_TOP_BOTTOM)
@@ -1177,9 +2484,15 @@ def _render_shape(obj, canvas, dpi):
             paste_y = cy_px - buf.height // 2
             canvas.alpha_composite(buf, (max(0, paste_x), max(0, paste_y)))
         else:
-            canvas.alpha_composite(buf,
-                (max(0, int(mm_to_px(t.x, dpi))),
-                 max(0, int(mm_to_px(t.y, dpi)))))
+            _px = int(mm_to_px(t.x, dpi)) - PAD
+            _py = int(mm_to_px(t.y, dpi)) - PAD
+            # alpha_composite needs non-negative dest; crop the buffer if the
+            # padded origin lands off the top/left edge of the canvas.
+            _cropx = -_px if _px < 0 else 0
+            _cropy = -_py if _py < 0 else 0
+            if _cropx or _cropy:
+                buf = buf.crop((_cropx, _cropy, buf.width, buf.height))
+            canvas.alpha_composite(buf, (max(0, _px), max(0, _py)))
         return
 
     tmp = Image.new("RGBA", (max(1, int(w_px)), max(1, int(h_px))), (0,0,0,0))
@@ -1193,9 +2506,13 @@ def _render_shape(obj, canvas, dpi):
         mask = Image.new("L", (int(w_px), int(h_px)), 0)
         md = ImageDraw.Draw(mask)
         if st == SHAPE_RECT:
-            r = int(mm_to_px(obj.corner_radius, dpi))
-            if r > 0: md.rounded_rectangle([0,0,w_px,h_px], radius=r, fill=255)
-            else:     md.rectangle([0,0,w_px,h_px], fill=255)
+            radii, eq = _effective_corner_radii(obj, w_px, h_px, dpi)
+            if eq:
+                r = int(radii[0])
+                if r > 0: md.rounded_rectangle([0,0,w_px,h_px], radius=r, fill=255)
+                else:     md.rectangle([0,0,w_px,h_px], fill=255)
+            else:
+                md.polygon(_rounded_corner_points(w_px, h_px, radii), fill=255)
         elif st == SHAPE_ELLIPSE:
             md.ellipse([0,0,w_px,h_px], fill=255)
         else:
@@ -1203,16 +2520,29 @@ def _render_shape(obj, canvas, dpi):
         gimg.putalpha(mask)
         tmp.alpha_composite(gimg)
         if st == SHAPE_RECT:
-            r = int(mm_to_px(obj.corner_radius, dpi))
-            if r > 0: td.rounded_rectangle([0,0,w_px,h_px], radius=r, outline=sc[:4], width=sw)
-            else:     td.rectangle([0,0,w_px,h_px], outline=sc[:4], width=sw)
+            radii, eq = _effective_corner_radii(obj, w_px, h_px, dpi)
+            if eq:
+                r = int(radii[0])
+                if r > 0: td.rounded_rectangle([0,0,w_px,h_px], radius=r, outline=sc[:4], width=sw)
+                else:     td.rectangle([0,0,w_px,h_px], outline=sc[:4], width=sw)
+            else:
+                p = _rounded_corner_points(w_px, h_px, radii, inset=sw/2.0)
+                td.line(p + [p[0]], fill=sc[:4], width=sw, joint='curve')
         elif st == SHAPE_ELLIPSE:
             td.ellipse([0,0,w_px,h_px], outline=sc[:4], width=sw)
     else:
         if st == SHAPE_RECT:
-            r = int(mm_to_px(obj.corner_radius, dpi))
-            if r > 0: td.rounded_rectangle([0,0,w_px,h_px], radius=r, fill=fc[:4] if fc else None, outline=sc[:4], width=sw)
-            else:     td.rectangle([0,0,w_px,h_px], fill=fc[:4] if fc else None, outline=sc[:4], width=sw)
+            radii, eq = _effective_corner_radii(obj, w_px, h_px, dpi)
+            if eq:
+                r = int(radii[0])
+                if r > 0: td.rounded_rectangle([0,0,w_px,h_px], radius=r, fill=fc[:4] if fc else None, outline=sc[:4], width=sw)
+                else:     td.rectangle([0,0,w_px,h_px], fill=fc[:4] if fc else None, outline=sc[:4], width=sw)
+            else:
+                pf = _rounded_corner_points(w_px, h_px, radii)
+                if fc: td.polygon(pf, fill=fc[:4])
+                if sc and sw > 0:
+                    ps = _rounded_corner_points(w_px, h_px, radii, inset=sw/2.0)
+                    td.line(ps + [ps[0]], fill=sc[:4], width=sw, joint='curve')
         elif st == SHAPE_ELLIPSE:
             td.ellipse([0,0,w_px,h_px], fill=fc[:4] if fc else None, outline=sc[:4], width=sw)
         elif st == SHAPE_LINE:

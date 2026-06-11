@@ -22,7 +22,6 @@ import xml.etree.ElementTree as ET
 from typing import List
 
 from edof.format.objects import Shape, SHAPE_PATH, _parse_svg_path
-from edof.format.styles import FillStyle, StrokeStyle
 
 
 SVG_NS = "{http://www.w3.org/2000/svg}"

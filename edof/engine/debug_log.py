@@ -19,8 +19,15 @@ def _default_path() -> str:
 
 
 def _env_enabled() -> bool:
-    return os.environ.get('EDOF_DEBUG', '').strip().lower() in (
-        '1', 'true', 'yes', 'on')
+    # Be forgiving: a launcher may accidentally append a trailing comment
+    # (e.g. Windows Batch "set EDOF_DEBUG=1  REM ..." stores the whole rest of
+    # the line). Only the FIRST whitespace-separated token decides truthiness,
+    # so a stray comment can never silently disable logging again.
+    raw = os.environ.get('EDOF_DEBUG', '').strip().lower()
+    if not raw:
+        return False
+    token = raw.split()[0].strip(' \t",;')
+    return token in ('1', 'true', 'yes', 'on')
 
 
 ENABLED = _env_enabled()      # off unless explicitly opted in

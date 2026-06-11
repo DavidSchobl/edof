@@ -6,7 +6,6 @@ and validates the settings chosen in the document.
 """
 
 from __future__ import annotations
-from typing import Optional
 from PIL import Image
 
 # Mapping from edof CS constants → Pillow mode

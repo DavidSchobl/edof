@@ -28,6 +28,31 @@ def icon_path(name: str):
     return here if os.path.isfile(here) else None
 
 
+def _sub_asset_path(subpkg: str, subdir: str, name: str):
+    try:
+        from importlib.resources import files
+        p = files("edof._apps.assets." + subpkg).joinpath(name)
+        sp = str(p)
+        if os.path.isfile(sp):
+            return sp
+    except Exception:
+        pass
+    here = os.path.join(os.path.dirname(__file__), subdir, name)
+    return here if os.path.isfile(here) else None
+
+
+def cursor_path(name: str):
+    """Absolute path to a bundled cursor asset (e.g. 'cur-pen.png' or
+    'cursors.json'), or None."""
+    return _sub_asset_path("cursors", "cursors", name)
+
+
+def ui_icon_path(name: str):
+    """Absolute path to a bundled UI icon asset (e.g. 'ic-save.png' or
+    'icons.json'), or None."""
+    return _sub_asset_path("ui_icons", "ui_icons", name)
+
+
 def app_icon_name(kind: str, ext: str = "ico") -> str:
     """Map a logical kind to an icon file name. kind in {editor,viewer,document}."""
     kind = kind if kind in ("editor", "viewer", "document") else "document"

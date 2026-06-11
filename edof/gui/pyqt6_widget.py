@@ -21,6 +21,7 @@ Usage::
 """
 
 from __future__ import annotations
+import logging
 from typing import Callable, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -106,7 +107,7 @@ def _build_widget(doc: "Document",
                 self._pixmap = QPixmap.fromImage(qimg)
             except Exception as e:
                 self._pixmap = None
-                print(f"[edof] Render error: {e}")
+                logging.getLogger(__name__).warning("edof render error: %s", e)
             self.update()
 
         def paintEvent(self, event):

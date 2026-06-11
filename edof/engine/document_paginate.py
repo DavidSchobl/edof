@@ -33,7 +33,7 @@ import copy as _copy
 from typing import Any, Dict, List, Optional, Tuple
 
 from edof.format.styles import TextRun
-from edof.format.document_body import DocumentBody, Paragraph
+from edof.format.document_body import Paragraph
 from edof.format.document_boxes import (
     DocumentTextBox, DocumentHeaderBox, DocumentFooterBox,
     is_document_box, is_document_body, is_document_header, is_document_footer,
@@ -956,12 +956,50 @@ def paginate_document(doc,
     return result
 
 
+def _hf_templates_for_page(body, page_idx: int):
+    """v4.2.11.46: pick the header/footer template set for this page.
+    The displayed page number is page_idx + page_number_start; when
+    hf_odd_even is enabled, pages with an EVEN page number use the *_even
+    templates. Returns (header_runs, header_style, footer_runs, footer_style,
+    eff_idx, eff_count_delta) where eff_idx feeds resolve_template_runs so
+    {page_number}/{page_count} honour page_number_start."""
+    start = int(getattr(body, 'page_number_start', 1) or 1)
+    page_number = page_idx + start
+    use_even = bool(getattr(body, 'hf_odd_even', False)) and (page_number % 2 == 0)
+    if use_even:
+        h_runs = getattr(body, 'header_runs_even', []) or []
+        f_runs = getattr(body, 'footer_runs_even', []) or []
+        h_style = getattr(body, 'header_style_even', None)
+        f_style = getattr(body, 'footer_style_even', None)
+    else:
+        h_runs = body.header_runs
+        f_runs = body.footer_runs
+        h_style = getattr(body, 'header_style', None)
+        f_style = getattr(body, 'footer_style', None)
+    return h_runs, h_style, f_runs, f_style, page_idx + (start - 1), (start - 1)
+
+
+def _apply_hf_style(box, style_dict):
+    if not style_dict:
+        return
+    try:
+        from edof.format.styles import TextStyle
+        box.style = TextStyle.from_dict(dict(style_dict))
+    except Exception:
+        pass
+
+
 def _ensure_header_footer(doc, pg, page_idx: int, page_count: int,
                             ref_style=None) -> None:
     """For one page: add/remove the DocumentHeaderBox / DocumentFooterBox
     according to doc.body.header_enabled / footer_enabled, and fill in
-    their runs with variables resolved for this page index."""
+    their runs with variables resolved for this page index.
+    v4.2.11.46: honours page_number_start, odd/even template sets, and the
+    persisted band style (e.g. vertical align) on every page."""
     body = doc.body
+    h_runs, h_style, f_runs, f_style, eff_idx, cnt_d = \
+        _hf_templates_for_page(body, page_idx)
+    eff_count = page_count + cnt_d
     # Header
     existing_h = find_document_header_on_page(pg)
     if body.header_enabled:
@@ -973,8 +1011,8 @@ def _ensure_header_footer(doc, pg, page_idx: int, page_count: int,
             hx, hy, hw, hh = _header_rect_mm(doc)
             existing_h.transform.x = hx; existing_h.transform.y = hy
             existing_h.transform.width = hw; existing_h.transform.height = hh
-        resolved = resolve_template_runs(body.header_runs,
-                                            page_idx, page_count)
+        _apply_hf_style(existing_h, h_style)
+        resolved = resolve_template_runs(h_runs, eff_idx, eff_count)
         existing_h.runs = resolved
         existing_h.text = runs_text(resolved)
     elif existing_h is not None:
@@ -990,8 +1028,8 @@ def _ensure_header_footer(doc, pg, page_idx: int, page_count: int,
             fx, fy, fw, fh = _footer_rect_mm(doc)
             existing_f.transform.x = fx; existing_f.transform.y = fy
             existing_f.transform.width = fw; existing_f.transform.height = fh
-        resolved = resolve_template_runs(body.footer_runs,
-                                            page_idx, page_count)
+        _apply_hf_style(existing_f, f_style)
+        resolved = resolve_template_runs(f_runs, eff_idx, eff_count)
         existing_f.runs = resolved
         existing_f.text = runs_text(resolved)
     elif existing_f is not None:

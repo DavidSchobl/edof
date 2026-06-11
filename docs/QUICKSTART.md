@@ -141,6 +141,23 @@ qr.error_correction = "M"   # "L" | "M" | "Q" | "H"
 
 Requires `pip install edof[qr]`.
 
+## Layer effects
+
+Photoshop-style effects attach to any object via its `effects` list:
+
+```python
+from edof import LayerEffect
+
+tb = page.add_textbox(10, 10, 80, 25, "BADGE")
+tb.effects.append(LayerEffect(type="drop_shadow", distance=2.0, size=3.0))
+tb.effects.append(LayerEffect(type="long_shadow", direction=25.0,
+                              ls_length=12.0, ls_blur_mode="linear",
+                              size=3.0, ls_alpha_mode="fade"))
+tb.effects.append(LayerEffect(type="stroke", size=0.5, color=(20, 20, 20)))
+```
+
+Shadows, glows, stroke, overlays, bevel, chromatic aberration, halftone, and the flat-design long shadow with multi-stop gradients — see [reference/12-effects.md](reference/12-effects.md).
+
 ## Loading and saving
 
 ```python
@@ -187,3 +204,5 @@ You now know enough to build real documents. Some directions to explore:
 - All variable types and template features in [reference/04-variables.md](reference/04-variables.md)
 - Cookbook recipes in [cookbook/](cookbook/) for full working examples
 - Helper methods like `page.add_card()`, `page.add_metric()` in [reference/10-helpers.md](reference/10-helpers.md) — they save a lot of typing for common layouts
+- Layer effects (shadows, halftone, long shadow) in [reference/12-effects.md](reference/12-effects.md)
+- Runnable scripts in [`examples/`](../examples/README.md)

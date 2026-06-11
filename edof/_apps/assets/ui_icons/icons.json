@@ -1,0 +1,356 @@
+{
+  "icons": [
+    {
+      "name": "select",
+      "file": "ic-select.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "text",
+      "file": "ic-text.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "image",
+      "file": "ic-image.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "rect",
+      "file": "ic-rect.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "ellipse",
+      "file": "ic-ellipse.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "line",
+      "file": "ic-line.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "pen",
+      "file": "ic-pen.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "qr",
+      "file": "ic-qr.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "table",
+      "file": "ic-table.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "eyedropper",
+      "file": "ic-eyedropper.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "hand",
+      "file": "ic-hand.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "zoom",
+      "file": "ic-zoom.png",
+      "where": "toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "new",
+      "file": "ic-new.png",
+      "where": "top bar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "open",
+      "file": "ic-open.png",
+      "where": "top bar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "save",
+      "file": "ic-save.png",
+      "where": "top bar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "export",
+      "file": "ic-export.png",
+      "where": "top bar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "print",
+      "file": "ic-print.png",
+      "where": "top bar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "undo",
+      "file": "ic-undo.png",
+      "where": "top bar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "redo",
+      "file": "ic-redo.png",
+      "where": "top bar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "bold",
+      "file": "ic-bold.png",
+      "where": "text toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "italic",
+      "file": "ic-italic.png",
+      "where": "text toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "underline",
+      "file": "ic-underline.png",
+      "where": "text toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "strike",
+      "file": "ic-strike.png",
+      "where": "text toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "align-left",
+      "file": "ic-align-left.png",
+      "where": "text toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "align-center",
+      "file": "ic-align-center.png",
+      "where": "text toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "align-right",
+      "file": "ic-align-right.png",
+      "where": "text toolbar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "layer-up",
+      "file": "ic-layer-up.png",
+      "where": "arrange",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "layer-down",
+      "file": "ic-layer-down.png",
+      "where": "arrange",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "duplicate",
+      "file": "ic-duplicate.png",
+      "where": "arrange",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "delete",
+      "file": "ic-delete.png",
+      "where": "arrange",
+      "size": 24,
+      "safe": 0,
+      "stroke": true
+    },
+    {
+      "name": "group",
+      "file": "ic-group.png",
+      "where": "arrange",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "ungroup",
+      "file": "ic-ungroup.png",
+      "where": "arrange",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "lock",
+      "file": "ic-lock.png",
+      "where": "arrange",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "unlock",
+      "file": "ic-unlock.png",
+      "where": "arrange",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "visible",
+      "file": "ic-visible.png",
+      "where": "arrange",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "hidden",
+      "file": "ic-hidden.png",
+      "where": "arrange",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "zoom-in",
+      "file": "ic-zoom-in.png",
+      "where": "view bar",
+      "size": 24,
+      "safe": 0,
+      "stroke": true
+    },
+    {
+      "name": "zoom-out",
+      "file": "ic-zoom-out.png",
+      "where": "view bar",
+      "size": 24,
+      "safe": 0,
+      "stroke": true
+    },
+    {
+      "name": "fit",
+      "file": "ic-fit.png",
+      "where": "view bar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "grid",
+      "file": "ic-grid.png",
+      "where": "view bar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "snap",
+      "file": "ic-snap.png",
+      "where": "view bar",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "guides",
+      "file": "ic-guides.png",
+      "where": "view bar",
+      "size": 24,
+      "safe": 0,
+      "stroke": true
+    },
+    {
+      "name": "fx",
+      "file": "ic-fx.png",
+      "where": "effects dialog",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    },
+    {
+      "name": "blend",
+      "file": "ic-blend.png",
+      "where": "effects dialog",
+      "size": 24,
+      "safe": 5,
+      "stroke": true
+    }
+  ]
+}

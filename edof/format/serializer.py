@@ -626,6 +626,7 @@ def _build_manifest_json(doc, encryption=None) -> str:
     manifest: Dict[str, Any] = {
         "mime":         MIME_EDOF,
         "edof_version": _version_mod.FORMAT_VERSION_STR,
+        "writer_version": _version_mod.__version__,
         "id":           doc.id,
     }
     # In full encryption mode, hide title and page count from the manifest.

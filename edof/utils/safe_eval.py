@@ -23,7 +23,7 @@ Returns the boolean result of the expression, or None on error.
 from __future__ import annotations
 import ast
 import operator
-from typing import Any, Optional
+from typing import Optional
 
 
 _BIN_OPS = {

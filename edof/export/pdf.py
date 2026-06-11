@@ -175,53 +175,6 @@ def _has_complex_effects(obj) -> bool:
     return False
 
 
-def _emit_rasterized(pp, obj, doc, writer, dpi: float = 300.0):
-    """Render `obj` onto a transparent PIL canvas via the regular renderer,
-    crop to the rendered bbox, and embed as a PNG image in the PDF.
-
-    This is used for objects that exceed PDF's native expressive power:
-    layer effects (drop shadow, glow, etc), non-normal blend modes, and
-    fractional opacity."""
-    from PIL import Image
-    from edof.engine.renderer import _render_object, mm_to_px
-    from edof.units import px_to_mm
-    t = obj.transform
-    # Compute a buffer big enough for the object + some headroom for effects
-    margin_mm = 20.0
-    pad_px = int(mm_to_px(margin_mm, dpi))
-    w_px = int(mm_to_px(t.width, dpi)) + 2 * pad_px
-    h_px = int(mm_to_px(t.height, dpi)) + 2 * pad_px
-    # Place a temporary canvas; we shift coordinates so the obj is centred
-    canvas = Image.new("RGBA", (w_px, h_px), (0, 0, 0, 0))
-    # Translate obj's transform so it draws at the correct buffer position
-    orig_x, orig_y = t.x, t.y
-    t.x = px_to_mm(pad_px, dpi)
-    t.y = px_to_mm(pad_px, dpi)
-    try:
-        _render_object(obj, canvas, doc.resources, doc.variables, dpi)
-    finally:
-        t.x, t.y = orig_x, orig_y
-    bbox = canvas.getbbox()
-    if bbox is None: return
-    cropped = canvas.crop(bbox)
-    # Compute absolute mm position of the cropped image's top-left
-    rel_x_mm = px_to_mm(bbox[0] - pad_px, dpi)
-    rel_y_mm = px_to_mm(bbox[1] - pad_px, dpi)
-    abs_x_mm = orig_x + rel_x_mm
-    abs_y_mm = orig_y + rel_y_mm
-    w_mm = px_to_mm(cropped.width, dpi)
-    h_mm = px_to_mm(cropped.height, dpi)
-    # Embed as PNG image in PDF
-    import io as _io
-    buf = _io.BytesIO()
-    cropped.save(buf, "PNG")
-    image_id = f"rast_{id(obj):x}"
-    # PDF writer's add_image expects raw RGB or RGBA bytes
-    rgb = cropped.convert("RGB")
-    writer.add_image(image_id, cropped.width, cropped.height, rgb.tobytes())
-    pp.image(image_id, abs_x_mm, abs_y_mm, w_mm, h_mm)
-
-
 def _emit_object(pp, obj, doc, writer):
     from edof.format.objects import (TextBox, ImageBox, Shape, QRCode, Group, Table)
     from edof.utils.safe_eval import is_visible

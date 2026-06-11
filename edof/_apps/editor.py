@@ -257,9 +257,6 @@ def _to_qc(c) -> QColor:
     t=tuple(int(v) for v in c)
     return QColor(t[0],t[1],t[2],t[3] if len(t)>=4 else 255)
 
-def _from_qc(c: QColor) -> tuple:
-    return (c.red(),c.green(),c.blue(),c.alpha())
-
 def _cswatch(c) -> str:
     q=_to_qc(c)
     return f"background:rgba({q.red()},{q.green()},{q.blue()},{q.alpha()});border:1px solid #777;border-radius:3px"
@@ -269,82 +266,380 @@ def _cswatch(c) -> str:
 #  Custom Color Dialog with hex + alpha slider
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class EdofColorDialog(QDialog):
-    def __init__(self, initial=(0,0,0,255), parent=None, alpha=True):
+class _SVField(QWidget):
+    """Saturation (x) / Value (y) square for the current hue."""
+    picked = pyqtSignal(float, float)
+
+    def __init__(self, parent=None):
         super().__init__(parent)
+        self.setMinimumSize(210, 170)
+        self._h = 0.0; self._s = 1.0; self._v = 1.0
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def set_hsv(self, h, s, v):
+        self._h = h; self._s = s; self._v = v; self.update()
+
+    def paintEvent(self, e):
+        from PyQt6.QtGui import QLinearGradient
+        p = QPainter(self); r = self.rect()
+        hue = QColor.fromHsvF(max(0.0, min(0.99999, self._h)), 1.0, 1.0)
+        g1 = QLinearGradient(float(r.left()), float(r.top()), float(r.right()), float(r.top()))
+        g1.setColorAt(0.0, QColor(255, 255, 255)); g1.setColorAt(1.0, hue)
+        p.fillRect(r, QBrush(g1))
+        g2 = QLinearGradient(float(r.left()), float(r.top()), float(r.left()), float(r.bottom()))
+        g2.setColorAt(0.0, QColor(0, 0, 0, 0)); g2.setColorAt(1.0, QColor(0, 0, 0, 255))
+        p.fillRect(r, QBrush(g2))
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        x = self._s * r.width(); y = (1.0 - self._v) * r.height()
+        p.setPen(QPen(QColor(0, 0, 0), 2)); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QPointF(x, y), 5.5, 5.5)
+        p.setPen(QPen(QColor(255, 255, 255), 1)); p.drawEllipse(QPointF(x, y), 6.5, 6.5)
+
+    def _emit(self, pos):
+        w = max(1, self.width()); h = max(1, self.height())
+        self._s = min(1.0, max(0.0, pos.x() / w))
+        self._v = min(1.0, max(0.0, 1.0 - pos.y() / h))
+        self.update(); self.picked.emit(self._s, self._v)
+
+    def mousePressEvent(self, e): self._emit(e.position())
+    def mouseMoveEvent(self, e):
+        if e.buttons(): self._emit(e.position())
+
+
+class _HueBar(QWidget):
+    picked = pyqtSignal(float)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(20); self.setMinimumHeight(170); self._h = 0.0
+
+    def set_hue(self, h): self._h = h; self.update()
+
+    def paintEvent(self, e):
+        from PyQt6.QtGui import QLinearGradient
+        p = QPainter(self); r = self.rect()
+        g = QLinearGradient(float(r.left()), float(r.top()), float(r.left()), float(r.bottom()))
+        for i in range(7):
+            g.setColorAt(i / 6.0, QColor.fromHsvF((i / 6.0) % 1.0, 1.0, 1.0))
+        p.fillRect(r, QBrush(g))
+        y = int(self._h * r.height())
+        p.setPen(QPen(QColor(0, 0, 0), 3)); p.drawLine(0, y, r.width(), y)
+        p.setPen(QPen(QColor(255, 255, 255), 1)); p.drawLine(0, y, r.width(), y)
+
+    def _emit(self, pos):
+        self._h = min(0.99999, max(0.0, pos.y() / max(1, self.height())))
+        self.update(); self.picked.emit(self._h)
+
+    def mousePressEvent(self, e): self._emit(e.position())
+    def mouseMoveEvent(self, e):
+        if e.buttons(): self._emit(e.position())
+
+
+class _AlphaBar(QWidget):
+    picked = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(20); self.setMinimumHeight(170); self._a = 255; self._rgb = (0, 0, 0)
+
+    def set_color(self, r, g, b, a): self._rgb = (r, g, b); self._a = a; self.update()
+
+    def paintEvent(self, e):
+        from PyQt6.QtGui import QLinearGradient
+        p = QPainter(self); r = self.rect(); sz = 6
+        for yy in range(0, r.height(), sz):
+            for xx in range(0, r.width(), sz):
+                c = QColor(205, 205, 210) if ((xx // sz + yy // sz) % 2 == 0) else QColor(150, 150, 158)
+                p.fillRect(xx, yy, sz, sz, c)
+        rr, gg, bb = self._rgb
+        g = QLinearGradient(float(r.left()), float(r.top()), float(r.left()), float(r.bottom()))
+        g.setColorAt(0.0, QColor(rr, gg, bb, 255)); g.setColorAt(1.0, QColor(rr, gg, bb, 0))
+        p.fillRect(r, QBrush(g))
+        y = int((1.0 - self._a / 255.0) * r.height())
+        p.setPen(QPen(QColor(0, 0, 0), 3)); p.drawLine(0, y, r.width(), y)
+        p.setPen(QPen(QColor(255, 255, 255), 1)); p.drawLine(0, y, r.width(), y)
+
+    def _emit(self, pos):
+        self._a = int(round((1.0 - min(1.0, max(0.0, pos.y() / max(1, self.height())))) * 255))
+        self.update(); self.picked.emit(self._a)
+
+    def mousePressEvent(self, e): self._emit(e.position())
+    def mouseMoveEvent(self, e):
+        if e.buttons(): self._emit(e.position())
+
+
+class _EyedropOverlay(QDialog):
+    """Fullscreen modal screenshot overlay: move to preview (loupe + swatch),
+    left-click to sample, right-click / Esc to cancel."""
+
+    def __init__(self):
+        super().__init__(None)
+        from PyQt6.QtWidgets import QApplication
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint |
+                            Qt.WindowType.WindowStaysOnTopHint |
+                            Qt.WindowType.BypassWindowManagerHint)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        scr = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        self._scr = scr
+        self._shot = scr.grabWindow(0)
+        self._img = self._shot.toImage()
+        self._dpr = self._shot.devicePixelRatio() or 1.0
+        self._rgb = None
+        self._pos = None        # last logical cursor pos within overlay
+        self._cur = (0, 0, 0)
+        self.setGeometry(scr.geometry())
+        self.setMouseTracking(True)
+        cur = _custom_cursor('eyedropper')
+        self.setCursor(cur if cur is not None else QCursor(Qt.CursorShape.CrossCursor))
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.activateWindow(); self.raise_()
+        cur = _custom_cursor('eyedropper')
+        self.grabMouse(cur if cur is not None else QCursor(Qt.CursorShape.CrossCursor))
+
+    def _devpt(self, lx, ly):
+        ox = self._scr.geometry().x(); oy = self._scr.geometry().y()
+        x = int((lx - ox) * self._dpr); y = int((ly - oy) * self._dpr)
+        return (max(0, min(self._img.width() - 1, x)),
+                max(0, min(self._img.height() - 1, y)))
+
+    def _sample(self, gx, gy):
+        x, y = self._devpt(gx, gy)
+        return self._img.pixelColor(x, y)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.drawPixmap(self.rect(), self._shot)
+        if self._pos is None:
+            return
+        from PyQt6.QtCore import QRect
+        lx, ly = self._pos.x(), self._pos.y()
+        dx, dy = self._devpt(lx, ly)
+        # loupe: zoom an N×N device-pixel region around the cursor
+        N = 13; Z = 9; side = N * Z
+        src = self._img.copy(QRect(dx - N // 2, dy - N // 2, N, N))
+        loupe = src.scaled(side, side, Qt.AspectRatioMode.IgnoreAspectRatio,
+                           Qt.TransformationMode.FastTransformation)
+        ox = lx + 22; oy = ly + 22
+        if ox + side + 14 > self.width():
+            ox = lx - side - 22
+        if oy + side + 40 > self.height():
+            oy = ly - side - 40
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        p.fillRect(ox - 2, oy - 2, side + 4, side + 4, QColor(20, 20, 24))
+        p.drawImage(ox, oy, loupe)
+        # centre pixel marker
+        p.setPen(QPen(QColor(255, 255, 255), 1))
+        p.drawRect(ox + (N // 2) * Z, oy + (N // 2) * Z, Z, Z)
+        p.setPen(QPen(QColor(0, 0, 0), 1))
+        p.drawRect(ox - 1, oy - 1, side + 2, side + 2)
+        # swatch + hex below the loupe
+        r, g, b = self._cur
+        p.fillRect(ox, oy + side + 2, side, 22, QColor(r, g, b))
+        p.fillRect(ox, oy + side + 24, side, 16, QColor(20, 20, 24))
+        p.setPen(QColor(235, 235, 240))
+        p.drawText(QRect(ox, oy + side + 24, side, 16), Qt.AlignmentFlag.AlignCenter,
+                   "#%02X%02X%02X" % (r, g, b))
+
+    def mouseMoveEvent(self, e):
+        gp = e.globalPosition().toPoint()
+        self._pos = self.mapFromGlobal(gp)
+        c = self._sample(gp.x(), gp.y())
+        self._cur = (c.red(), c.green(), c.blue())
+        self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.RightButton:
+            self.releaseMouse(); self.reject(); return
+        c = self._sample(e.globalPosition().toPoint().x(), e.globalPosition().toPoint().y())
+        self._rgb = (c.red(), c.green(), c.blue())
+        self.releaseMouse(); self.accept()
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Escape:
+            self.releaseMouse(); self.reject()
+
+
+class EdofColorDialog(QDialog):
+    """Photoshop-style colour picker: SV square + hue strip (+ alpha strip) with
+    HSB / RGB / hex fields, all kept in sync."""
+
+    def __init__(self, initial=(0, 0, 0, 255), parent=None, alpha=True):
+        super().__init__(parent)
+        from PyQt6.QtWidgets import (QVBoxLayout, QHBoxLayout, QGridLayout,
+                                     QLabel, QSpinBox, QLineEdit)
+        import colorsys
         self.setWindowTitle("Color"); self.setStyleSheet(QSS)
-        self.setFixedSize(280, 300 if alpha else 240)
+        self.setMinimumWidth(340)
         self._alpha_enabled = alpha
-        self._color = list(initial[:4]) if len(initial)>=4 else [*initial[:3],255]
+        c = list(initial[:4]) if len(initial) >= 4 else [*initial[:3], 255]
+        self._color = c
+        self._on_change = None
+        h, s, v = colorsys.rgb_to_hsv(c[0] / 255.0, c[1] / 255.0, c[2] / 255.0)
+        self._h, self._s, self._v = h, s, v
+        self._upd = False
 
-        vb=QVBoxLayout(self); vb.setContentsMargins(12,12,12,12); vb.setSpacing(8)
+        vb = QVBoxLayout(self); vb.setContentsMargins(12, 12, 12, 12); vb.setSpacing(8)
 
-        # Preview swatch
-        self._swatch=QLabel(); self._swatch.setFixedHeight(32)
-        self._swatch.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        vb.addWidget(self._swatch)
+        top = QHBoxLayout(); top.setSpacing(8)
+        self._sv = _SVField(); self._sv.set_hsv(h, s, v)
+        self._hb = _HueBar(); self._hb.set_hue(h)
+        top.addWidget(self._sv, 1); top.addWidget(self._hb)
+        if alpha:
+            self._ab = _AlphaBar(); self._ab.set_color(c[0], c[1], c[2], c[3])
+            top.addWidget(self._ab)
+        else:
+            self._ab = None
+        vb.addLayout(top)
 
-        # Hex input
-        hrow=QWidget(); hb=QHBoxLayout(hrow); hb.setContentsMargins(0,0,0,0)
-        hb.addWidget(QLabel("Hex:"))
-        self._hex=QLineEdit(); self._hex.setMaxLength(9); self._hex.setFixedWidth(90)
-        self._hex.editingFinished.connect(self._from_hex)
-        hb.addWidget(self._hex); hb.addStretch()
-        vb.addWidget(hrow)
+        # new / current swatches
+        sw = QHBoxLayout(); sw.setSpacing(0)
+        self._new_sw = QLabel(); self._new_sw.setFixedHeight(24)
+        self._cur_sw = QLabel(); self._cur_sw.setFixedHeight(24)
+        self._cur_sw.setStyleSheet(
+            f"background:rgba({c[0]},{c[1]},{c[2]},{c[3]/255.0});border:1px solid #777;")
+        sw.addWidget(self._new_sw); sw.addWidget(self._cur_sw)
+        vb.addLayout(sw)
 
-        # RGBA sliders
-        self._sliders={}; self._labels={}
-        channels=[("R","color_r",0),("G","color_g",1),("B","color_b",2)]
-        if alpha: channels.append(("A","color_a",3))
-        for name,key,idx in channels:
-            row=QWidget(); rb=QHBoxLayout(row); rb.setContentsMargins(0,0,0,0)
-            rb.addWidget(QLabel(t(key)).setMinimumWidth(12) or QLabel(t(key)))
-            sl=QSlider(Qt.Orientation.Horizontal); sl.setRange(0,255); sl.setValue(self._color[idx])
-            lbl=QLabel(str(self._color[idx])); lbl.setFixedWidth(30)
-            sl.valueChanged.connect(lambda v,i=idx,l=lbl: self._on_slider(i,v,l))
-            rb.addWidget(sl); rb.addWidget(lbl)
-            row.setLayout(rb); vb.addWidget(row)
-            self._sliders[idx]=sl; self._labels[idx]=lbl
+        def _spinbox(mx):
+            sp = QSpinBox(); sp.setRange(0, mx)
+            sp.setMinimumWidth(84); sp.setMinimumHeight(24)
+            sp.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
+            return sp
+        grid = QGridLayout(); grid.setHorizontalSpacing(8); grid.setVerticalSpacing(5)
+        self._spH = _spinbox(360); self._spS = _spinbox(100); self._spB = _spinbox(100)
+        self._spR = _spinbox(255); self._spG = _spinbox(255); self._spBl = _spinbox(255)
+        grid.addWidget(QLabel("H"), 0, 0); grid.addWidget(self._spH, 0, 1)
+        grid.addWidget(QLabel("S"), 1, 0); grid.addWidget(self._spS, 1, 1)
+        grid.addWidget(QLabel("B"), 2, 0); grid.addWidget(self._spB, 2, 1)
+        grid.addWidget(QLabel("R"), 0, 2); grid.addWidget(self._spR, 0, 3)
+        grid.addWidget(QLabel("G"), 1, 2); grid.addWidget(self._spG, 1, 3)
+        grid.addWidget(QLabel("B "), 2, 2); grid.addWidget(self._spBl, 2, 3)
+        grid.addWidget(QLabel("#"), 3, 0)
+        self._hex = QLineEdit(); self._hex.setMaxLength(9); self._hex.setMinimumWidth(110)
+        grid.addWidget(self._hex, 3, 1)
+        if alpha:
+            self._spA = _spinbox(255)
+            grid.addWidget(QLabel("A"), 3, 2); grid.addWidget(self._spA, 3, 3)
+        else:
+            self._spA = None
+        grid.setColumnStretch(1, 1); grid.setColumnStretch(3, 1)
+        vb.addLayout(grid)
 
-        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|
-                            QDialogButtonBox.StandardButton.Cancel)
+        from PyQt6.QtWidgets import QPushButton as _QPB
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                              QDialogButtonBox.StandardButton.Cancel)
+        self._btn_eye = _QPB("🖉 Pick from screen")
+        self._btn_eye.setToolTip("Eyedropper: click anywhere on screen to sample a colour")
+        self._btn_eye.clicked.connect(self._eyedrop)
+        bb.addButton(self._btn_eye, QDialogButtonBox.ButtonRole.ActionRole)
         bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
         vb.addWidget(bb)
-        self._update_display()
 
-    def _on_slider(self, idx, v, lbl):
-        self._color[idx]=v; lbl.setText(str(v)); self._update_display()
+        # wiring
+        self._sv.picked.connect(self._on_sv)
+        self._hb.picked.connect(self._on_hue)
+        if self._ab: self._ab.picked.connect(self._on_alpha)
+        self._spH.valueChanged.connect(self._on_hsb)
+        self._spS.valueChanged.connect(self._on_hsb)
+        self._spB.valueChanged.connect(self._on_hsb)
+        self._spR.valueChanged.connect(self._on_rgb)
+        self._spG.valueChanged.connect(self._on_rgb)
+        self._spBl.valueChanged.connect(self._on_rgb)
+        if self._spA: self._spA.valueChanged.connect(self._on_alpha_spin)
+        self._hex.editingFinished.connect(self._on_hex)
+        self._apply()
 
-    def _update_display(self):
-        r,g,b,a=self._color
-        self._swatch.setStyleSheet(
-            f"background:rgba({r},{g},{b},{a});border:1px solid #777;border-radius:4px")
-        hex8="#%02x%02x%02x%02x"%(r,g,b,a)
-        self._hex.blockSignals(True); self._hex.setText(hex8); self._hex.blockSignals(False)
+    def _on_sv(self, s, v):
+        self._s, self._v = s, v; self._apply()
 
-    def _from_hex(self):
-        h=self._hex.text().strip().lstrip("#")
+    def _on_hue(self, h):
+        self._h = h; self._apply()
+
+    def _on_alpha(self, a):
+        self._color[3] = a; self._apply()
+
+    def _on_alpha_spin(self, a):
+        if self._upd: return
+        self._color[3] = a; self._apply()
+
+    def _on_hsb(self, _=0):
+        if self._upd: return
+        self._h = self._spH.value() / 360.0
+        self._s = self._spS.value() / 100.0
+        self._v = self._spB.value() / 100.0
+        self._apply()
+
+    def _on_rgb(self, _=0):
+        if self._upd: return
+        import colorsys
+        r = self._spR.value() / 255.0; g = self._spG.value() / 255.0; b = self._spBl.value() / 255.0
+        self._h, self._s, self._v = colorsys.rgb_to_hsv(r, g, b)
+        self._apply()
+
+    def _on_hex(self):
+        h = self._hex.text().strip().lstrip("#")
         try:
-            if len(h)==6:   r,g,b=int(h[0:2],16),int(h[2:4],16),int(h[4:6],16); a=255
-            elif len(h)==8: r,g,b,a=int(h[0:2],16),int(h[2:4],16),int(h[4:6],16),int(h[6:8],16)
-            else: return
-            self._color=[r,g,b,a]
-            for idx,v in [(0,r),(1,g),(2,b),(3,a)]:
-                if idx in self._sliders:
-                    self._sliders[idx].blockSignals(True)
-                    self._sliders[idx].setValue(v)
-                    self._labels[idx].setText(str(v))
-                    self._sliders[idx].blockSignals(False)
-            self._update_display()
-        except Exception: pass
+            if len(h) == 6:
+                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16); a = self._color[3]
+            elif len(h) == 8:
+                r, g, b, a = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), int(h[6:8], 16)
+            else:
+                return
+        except ValueError:
+            return
+        import colorsys
+        self._h, self._s, self._v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+        self._color[3] = a
+        self._apply()
+
+    def _apply(self):
+        import colorsys
+        r, g, b = colorsys.hsv_to_rgb(self._h, self._s, self._v)
+        R, G, B = int(round(r * 255)), int(round(g * 255)), int(round(b * 255))
+        A = self._color[3]
+        self._color = [R, G, B, A]
+        self._upd = True
+        self._sv.set_hsv(self._h, self._s, self._v)
+        self._hb.set_hue(self._h)
+        if self._ab: self._ab.set_color(R, G, B, A)
+        self._new_sw.setStyleSheet(
+            f"background:rgba({R},{G},{B},{A/255.0});border:1px solid #777;")
+        self._spH.setValue(int(round(self._h * 360)))
+        self._spS.setValue(int(round(self._s * 100)))
+        self._spB.setValue(int(round(self._v * 100)))
+        self._spR.setValue(R); self._spG.setValue(G); self._spBl.setValue(B)
+        if self._spA: self._spA.setValue(A)
+        if self._alpha_enabled:
+            self._hex.setText("#%02x%02x%02x%02x" % (R, G, B, A))
+        else:
+            self._hex.setText("#%02x%02x%02x" % (R, G, B))
+        self._upd = False
+        if self._on_change:
+            try:
+                self._on_change(tuple(self._color))
+            except Exception:
+                pass
+
+    def _eyedrop(self):
+        ov = _EyedropOverlay()
+        if ov.exec() == QDialog.DialogCode.Accepted and ov._rgb:
+            self._on_eyedrop(*ov._rgb)
+
+    def _on_eyedrop(self, r, g, b):
+        import colorsys
+        self._h, self._s, self._v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+        self._apply()
 
     def color(self) -> tuple:
         return tuple(self._color)
 
     @staticmethod
-    def get_color(parent, initial=(0,0,0,255), alpha=True):
-        dlg=EdofColorDialog(initial, parent, alpha)
-        if dlg.exec()==QDialog.DialogCode.Accepted:
+    def get_color(parent, initial=(0, 0, 0, 255), alpha=True, on_change=None):
+        dlg = EdofColorDialog(initial, parent, alpha)
+        dlg._on_change = on_change
+        if dlg.exec() == QDialog.DialogCode.Accepted:
             return dlg.color()
         return None
 
@@ -364,6 +659,208 @@ _render_id = 0
 #  SelectionOverlay
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ── v4.2.7.2: custom tool cursors (loaded from bundled cursors.json) ──────────
+_CURSOR_CACHE = {}
+
+
+def _zoom_cursor():
+    """A plain magnifier cursor (no +/- sign) used while Alt is held over the
+    page, to signal that the wheel will zoom."""
+    c = _CURSOR_CACHE.get('zoom_plain')
+    if c is not None:
+        return c
+    try:
+        s = 28
+        pm = QPixmap(s, s); pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm); p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        cx, cy, r = 11, 11, 8
+        # lens (white halo + dark ring so it shows on any background)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor(255, 255, 255), 3)); p.drawEllipse(cx - r, cy - r, 2 * r, 2 * r)
+        p.setPen(QPen(QColor(30, 30, 30), 1.6)); p.drawEllipse(cx - r, cy - r, 2 * r, 2 * r)
+        # handle
+        hx0, hy0, hx1, hy1 = int(cx + r * 0.7), int(cy + r * 0.7), 25, 25
+        p.setPen(QPen(QColor(255, 255, 255), 4)); p.drawLine(hx0, hy0, hx1, hy1)
+        p.setPen(QPen(QColor(30, 30, 30), 2)); p.drawLine(hx0, hy0, hx1, hy1)
+        p.end()
+        c = QCursor(pm, cx, cy)
+    except Exception:
+        c = QCursor(Qt.CursorShape.CrossCursor)
+    _CURSOR_CACHE['zoom_plain'] = c
+    return c
+_CURSOR_SHEET = None
+
+def _load_cursor_sheet():
+    global _CURSOR_SHEET
+    if _CURSOR_SHEET is not None:
+        return _CURSOR_SHEET
+    _CURSOR_SHEET = {}
+    try:
+        import json as _json
+        from edof._apps.assets import cursor_path
+        p = cursor_path("cursors.json")
+        if p:
+            with open(p, encoding="utf-8") as fh:
+                for c in _json.load(fh).get("cursors", []):
+                    _CURSOR_SHEET[c.get("name")] = c
+    except Exception:
+        pass
+    return _CURSOR_SHEET
+
+def _custom_cursor(name):
+    """Return a QCursor built from the bundled PNG + hotspot, or None."""
+    if name in _CURSOR_CACHE:
+        return _CURSOR_CACHE[name]
+    qc = None
+    try:
+        from edof._apps.assets import cursor_path
+        sheet = _load_cursor_sheet()
+        meta = sheet.get(name, {})
+        fname = meta.get("file", "cur-%s.png" % name)
+        path = cursor_path(fname)
+        if path:
+            pm = QPixmap(path)
+            if not pm.isNull():
+                hs = meta.get("hotspot") or [pm.width() // 2, pm.height() // 2]
+                hx, hy = int(hs[0]), int(hs[1])
+                target = 24                              # 32px art renders too big
+                if pm.width() > target:
+                    f = target / float(pm.width())
+                    pm = pm.scaled(target, max(1, int(round(pm.height() * f))),
+                                   Qt.AspectRatioMode.KeepAspectRatio,
+                                   Qt.TransformationMode.SmoothTransformation)
+                    hx = int(round(hx * f)); hy = int(round(hy * f))
+                qc = QCursor(pm, hx, hy)
+    except Exception:
+        qc = None
+    _CURSOR_CACHE[name] = qc
+    return qc
+
+def tcur(name, fallback=Qt.CursorShape.ArrowCursor):
+    """Custom QCursor for `name`, falling back to a Qt cursor shape."""
+    return _custom_cursor(name) or QCursor(fallback)
+
+
+_UICON_CACHE = {}
+
+def _ht_file_to_b64(path):
+    """Load an image file and return it as a base64 PNG string (or None)."""
+    import base64, io
+    from PIL import Image as _Img
+    try:
+        im = _Img.open(path).convert("RGBA")
+        buf = io.BytesIO(); im.save(buf, 'PNG')
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+
+def _ht_b64_pixmap(b64, size=30):
+    """QPixmap thumbnail for a base64 PNG pattern (or None)."""
+    import base64
+    if not b64:
+        return None
+    try:
+        raw = base64.b64decode(b64)
+        pm = QPixmap()
+        if pm.loadFromData(raw) and not pm.isNull():
+            return pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                             Qt.TransformationMode.SmoothTransformation)
+    except Exception:
+        pass
+    return None
+
+
+def _menu_icon_style(menu, px):
+    """Enlarge QMenu action icons. QMenu has no setIconSize in Qt6, so we attach
+    a QProxyStyle overriding PM_SmallIconSize. The no-arg QProxyStyle wraps the
+    application default style WITHOUT taking ownership (passing a concrete style
+    would transfer ownership of the shared app style and crash on teardown). The
+    style is parented to the menu so its lifetime is tied to it; setStyle does
+    not take ownership."""
+    from PyQt6.QtWidgets import QProxyStyle, QStyle
+
+    class _IconStyle(QProxyStyle):
+        def pixelMetric(self, metric, option=None, widget=None):
+            if metric == QStyle.PixelMetric.PM_SmallIconSize:
+                return px
+            return super().pixelMetric(metric, option, widget)
+
+    st = _IconStyle()
+    st.setParent(menu)
+    return st
+
+
+def _ht_lib_get():
+    from PyQt6.QtCore import QSettings
+    v = QSettings("EDOF", "editor").value("halftone/pattern_library", [])
+    return [x for x in (v or []) if isinstance(x, str) and x]
+
+
+def _ht_lib_add(b64):
+    from PyQt6.QtCore import QSettings
+    if not b64:
+        return
+    s = QSettings("EDOF", "editor")
+    lst = [x for x in (s.value("halftone/pattern_library", []) or []) if isinstance(x, str) and x]
+    if b64 in lst:
+        lst.remove(b64)
+    lst.insert(0, b64)
+    s.setValue("halftone/pattern_library", lst[:24])
+
+
+def uicon(name, tint=None):
+    """QIcon for a bundled UI icon ('save', 'rect', ...), keeping the original
+    (colour) artwork. `tint` can recolour it via SourceIn if ever needed.
+    Returns a (possibly null) QIcon."""
+    key = (name, tint)
+    if key in _UICON_CACHE:
+        return _UICON_CACHE[key]
+    ic = QIcon()
+    try:
+        from edof._apps.assets import ui_icon_path
+        p = ui_icon_path("ic-%s.png" % name)
+        if p:
+            pm = QPixmap(p)
+            if not pm.isNull():
+                if tint is not None:
+                    tinted = QPixmap(pm.size())
+                    tinted.fill(Qt.GlobalColor.transparent)
+                    pt = QPainter(tinted)
+                    pt.drawPixmap(0, 0, pm)
+                    pt.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                    pt.fillRect(tinted.rect(), QColor(*tint))
+                    pt.end()
+                    pm = tinted
+                ic = QIcon(pm)
+    except Exception:
+        ic = QIcon()
+    _UICON_CACHE[key] = ic
+    return ic
+
+
+def _key_name(k):
+    """Human-readable Qt key name for debug logs."""
+    try:
+        return Qt.Key(k).name
+    except Exception:
+        return str(k)
+
+
+def _mods_str(m):
+    """Human-readable keyboard-modifier string for debug logs."""
+    try:
+        M = Qt.KeyboardModifier
+        out = []
+        if m & M.ControlModifier: out.append('Ctrl')
+        if m & M.ShiftModifier:   out.append('Shift')
+        if m & M.AltModifier:     out.append('Alt')
+        if m & M.MetaModifier:    out.append('Meta')
+        return '+'.join(out) or 'none'
+    except Exception:
+        return '?'
+
+
 class SelectionOverlay(QGraphicsItem):
     _ANCHOR={'TL':(1,1),'TC':(.5,1),'TR':(0,1),'ML':(1,.5),'MR':(0,.5),
              'BL':(1,0),'BC':(.5,0),'BR':(0,0)}
@@ -380,6 +877,21 @@ class SelectionOverlay(QGraphicsItem):
         super().__init__(); self.setZValue(9999)
         self._handles={}; self._poly=QPolygonF(); self._tc_pt=QPointF()
         self._is_line=False; self._lp1=QPointF(); self._lp2=QPointF()
+
+    def _view_zoom(self):
+        """Current view zoom (scene->viewport scale). Handles are sized in
+        scene units, so dividing by this keeps them a constant on-screen size
+        at any zoom. HiDPI is handled by Qt rendering the vectors at the
+        display's device pixel ratio."""
+        try:
+            vs = self.scene().views()
+            if vs:
+                z = vs[0].transform().m11()
+                if z > 1e-6:
+                    return float(z)
+        except Exception:
+            pass
+        return 1.0
 
     def update_for(self, obj, dpi):
         self._handles.clear(); self._is_line=False
@@ -426,53 +938,297 @@ class SelectionOverlay(QGraphicsItem):
              'BR':(t.x+t.width,t.y+t.height)}
         for k,(mx,my) in pts.items(): self._handles[k]=rs(mx,my)
         rad=math.radians(t.rotation); tc=self._handles['TC']
-        self._handles['ROT']=QPointF(tc.x()+ROT_DIST*math.sin(rad),
-                                      tc.y()-ROT_DIST*math.cos(rad))
+        rdist=ROT_DIST/self._view_zoom()   # constant on-screen rotate distance
+        self._handles['ROT']=QPointF(tc.x()+rdist*math.sin(rad),
+                                      tc.y()-rdist*math.cos(rad))
         self._tc_pt=tc
         self._poly=QPolygonF([rs(*pts['TL']),rs(*pts['TR']),rs(*pts['BR']),rs(*pts['BL'])])
         self.prepareGeometryChange()
 
     def hit_handle(self, sp):
-        HIT=HSIZE+6
+        HIT=(HSIZE+6)/self._view_zoom()
         for k,pt in self._handles.items():
             if abs(sp.x()-pt.x())<=HIT and abs(sp.y()-pt.y())<=HIT: return k
         return None
 
-    def cursor_for(self, h): return self._CUR.get(h,Qt.CursorShape.ArrowCursor)
+    _CUR_NAME={'TL':'resize_nwse','TC':'resize_ns','TR':'resize_nesw',
+               'ML':'resize_ew','MR':'resize_ew','BL':'resize_nesw',
+               'BC':'resize_ns','BR':'resize_nwse','ROT':'rotate',
+               'P1':'tangent','P2':'tangent'}
+    def cursor_for(self, h): return tcur(self._CUR_NAME.get(h,''), self._CUR.get(h,Qt.CursorShape.ArrowCursor))
     def boundingRect(self): return QRectF(-9999,-9999,19998,19998)
 
     def paint(self, p, opt, widget):
         if not self._handles: return
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        z = self._view_zoom()
+        hs = HSIZE / z                      # handle half-size, constant on screen
+        def _pen(color, w, style=Qt.PenStyle.SolidLine, dash=None):
+            pen = QPen(QColor(color), float(w), style)
+            pen.setCosmetic(True)           # width/dash in screen px, HiDPI-aware
+            if dash is not None: pen.setDashPattern(dash)
+            return pen
         if self._is_line:
-            p.setPen(QPen(QColor(ACC),2,Qt.PenStyle.DashLine)); p.drawLine(self._lp1,self._lp2)
+            p.setPen(_pen(ACC, 2, Qt.PenStyle.DashLine)); p.drawLine(self._lp1,self._lp2)
             for pt in (self._lp1,self._lp2):
-                r=QRectF(pt.x()-HSIZE,pt.y()-HSIZE,HSIZE*2,HSIZE*2)
-                p.setPen(QPen(QColor(ACC),2)); p.setBrush(QBrush(QColor("white"))); p.drawEllipse(r)
+                r=QRectF(pt.x()-hs,pt.y()-hs,hs*2,hs*2)
+                p.setPen(_pen(ACC, 2)); p.setBrush(QBrush(QColor("white"))); p.drawEllipse(r)
             return
         # v4.1.20.9: document-body outline mode — dashed bbox only, no handles
         if '_body_outline' in self._handles:
-            pen = QPen(QColor(ACC), 1.5, Qt.PenStyle.DashLine)
-            pen.setDashPattern([4, 3])
-            p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawPolygon(self._poly)
+            p.setPen(_pen(ACC, 1.5, Qt.PenStyle.DashLine, [4, 3]))
+            p.setBrush(Qt.BrushStyle.NoBrush); p.drawPolygon(self._poly)
             return
-        pen=QPen(QColor(ACC),2,Qt.PenStyle.DashLine); pen.setDashPattern([5,3])
-        p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush); p.drawPolygon(self._poly)
+        p.setPen(_pen(ACC, 2, Qt.PenStyle.DashLine, [5, 3]))
+        p.setBrush(Qt.BrushStyle.NoBrush); p.drawPolygon(self._poly)
         rot=self._handles.get('ROT')
         if rot:
-            p.setPen(QPen(QColor(ACC),1,Qt.PenStyle.DotLine)); p.drawLine(self._tc_pt,rot)
+            p.setPen(_pen(ACC, 1, Qt.PenStyle.DotLine)); p.drawLine(self._tc_pt,rot)
         for k,pt in self._handles.items():
-            r=QRectF(pt.x()-HSIZE,pt.y()-HSIZE,HSIZE*2,HSIZE*2)
+            r=QRectF(pt.x()-hs,pt.y()-hs,hs*2,hs*2)
             if k=='ROT':
-                p.setPen(QPen(QColor("white"),2)); p.setBrush(QBrush(QColor(ACC2))); p.drawEllipse(r)
+                p.setPen(_pen("white", 2)); p.setBrush(QBrush(QColor(ACC2))); p.drawEllipse(r)
             else:
-                p.setPen(QPen(QColor(ACC),2)); p.setBrush(QBrush(QColor("white"))); p.drawRect(r)
+                p.setPen(_pen(ACC, 2)); p.setBrush(QBrush(QColor("white"))); p.drawRect(r)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  EdofCanvas  –  QGraphicsView
 # ═══════════════════════════════════════════════════════════════════════════════
+
+class _GradientStopsBar(QWidget):
+    """Photoshop-style multi-stop gradient editor over t in [0, 1].
+
+    mode 'color': each stop is [t, r, g, b] (double-click a stop = colour
+    dialog). mode 'scalar': each stop is [t, v] with v in [0, vmax]
+    (double-click = numeric input). Interactions: drag a stop to move it,
+    double-click empty space to add a stop (interpolated value), right-click a
+    stop to delete it. An empty stop list means 'legacy behaviour' and renders
+    as a dashed outline; the small x button clears back to it."""
+    changed = pyqtSignal()
+
+    def __init__(self, mode='color', vmax=1.0, suffix='', parent=None):
+        super().__init__(parent)
+        self._mode = mode; self._vmax = float(vmax); self._suffix = suffix
+        self._stops = []          # sorted [t, ...] rows
+        self._drag = -1
+        self.setMinimumSize(190, 30)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setToolTip("Double-click: add / edit stop. Drag: move. Right-click: delete.\n"
+                        "Empty = legacy controls (fade / colour / blur mode).")
+
+    # -- data ----------------------------------------------------------------
+    def stops(self):
+        return [list(s) for s in self._stops]
+
+    def setStops(self, stops):
+        self._stops = sorted(([float(x) for x in s] for s in (stops or [])),
+                             key=lambda s: s[0])
+        self.update()
+
+    def _interp_at(self, t):
+        if not self._stops:
+            if self._mode == 'color':
+                return [0.0, 0.0, 0.0]
+            return [self._vmax if self._mode == 'scalar' else 1.0]
+        st = self._stops
+        if t <= st[0][0]:
+            return list(st[0][1:])
+        if t >= st[-1][0]:
+            return list(st[-1][1:])
+        for i in range(len(st) - 1):
+            a, b = st[i], st[i + 1]
+            if a[0] <= t <= b[0]:
+                f = 0.0 if b[0] == a[0] else (t - a[0]) / (b[0] - a[0])
+                return [a[1 + k] + (b[1 + k] - a[1 + k]) * f
+                        for k in range(len(a) - 1)]
+        return list(st[-1][1:])
+
+    # -- geometry ------------------------------------------------------------
+    def _bar_rect(self):
+        from PyQt6.QtCore import QRect
+        return QRect(8, 4, max(40, self.width() - 16), self.height() - 16)
+
+    def _t_at(self, x):
+        r = self._bar_rect()
+        return max(0.0, min(1.0, (x - r.left()) / max(1.0, float(r.width()))))
+
+    def _x_of(self, t):
+        r = self._bar_rect()
+        return int(r.left() + t * r.width())
+
+    def _hit(self, pos):
+        for i, s in enumerate(self._stops):
+            if abs(pos.x() - self._x_of(s[0])) <= 6:
+                return i
+        return -1
+
+    # -- painting ------------------------------------------------------------
+    def paintEvent(self, ev):
+        from PyQt6.QtGui import QPainter, QColor, QLinearGradient, QPen, QPolygonF
+        from PyQt6.QtCore import QPointF
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = self._bar_rect()
+        if not self._stops:
+            pen = QPen(QColor(150, 150, 150)); pen.setStyle(Qt.PenStyle.DashLine)
+            p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(r, 3, 3)
+            p.setPen(QColor(140, 140, 140))
+            p.drawText(r, Qt.AlignmentFlag.AlignCenter, "legacy (click to add stops)")
+            p.end(); return
+        grad = QLinearGradient(r.left(), 0, r.right(), 0)
+        n = 32
+        for i in range(n + 1):
+            t = i / n
+            v = self._interp_at(t)
+            if self._mode == 'color':
+                col = QColor(int(v[0]), int(v[1]), int(v[2]))
+            else:
+                g8 = int(255 * (1.0 - max(0.0, min(1.0, v[0] / max(1e-6, self._vmax)))))
+                col = QColor(g8, g8, g8)
+            grad.setColorAt(t, col)
+        p.setPen(QPen(QColor(90, 90, 90))); p.setBrush(grad)
+        p.drawRoundedRect(r, 3, 3)
+        for i, s in enumerate(self._stops):
+            x = self._x_of(s[0]); y = r.bottom() + 1
+            tri = QPolygonF([QPointF(x, y), QPointF(x - 5, y + 8), QPointF(x + 5, y + 8)])
+            if self._mode == 'color':
+                fill = QColor(int(s[1]), int(s[2]), int(s[3]))
+            else:
+                g8 = int(255 * (1.0 - max(0.0, min(1.0, s[1] / max(1e-6, self._vmax)))))
+                fill = QColor(g8, g8, g8)
+            p.setBrush(fill)
+            p.setPen(QPen(QColor(30, 30, 30) if i != self._drag else QColor(0, 120, 255), 1.4))
+            p.drawPolygon(tri)
+        p.end()
+
+    # -- interaction ---------------------------------------------------------
+    def mousePressEvent(self, ev):
+        i = self._hit(ev.position().toPoint())
+        if ev.button() == Qt.MouseButton.RightButton:
+            if i >= 0:
+                del self._stops[i]
+                self._drag = -1; self.update(); self.changed.emit()
+            return
+        self._drag = i
+        self.update()
+
+    def mouseMoveEvent(self, ev):
+        if self._drag >= 0:
+            t = self._t_at(ev.position().x())
+            self._stops[self._drag][0] = t
+            self._stops.sort(key=lambda s: s[0])
+            self._drag = next(idx for idx, s in enumerate(self._stops)
+                              if abs(s[0] - t) < 1e-9)
+            self.update(); self.changed.emit()
+
+    def mouseReleaseEvent(self, ev):
+        self._drag = -1; self.update()
+
+    def mouseDoubleClickEvent(self, ev):
+        i = self._hit(ev.position().toPoint())
+        t = self._t_at(ev.position().x())
+        if i < 0:
+            self._stops.append([t] + self._interp_at(t))
+            self._stops.sort(key=lambda s: s[0])
+            i = next(idx for idx, s in enumerate(self._stops)
+                     if abs(s[0] - t) < 1e-9)
+        s = self._stops[i]
+        if self._mode == 'color':
+            init = (int(s[1]), int(s[2]), int(s[3]), 255)
+            rgb = None
+            try:
+                dlg = EdofColorDialog(init, self, alpha=False)
+                if dlg.exec():
+                    rgb = dlg.color()[:3]
+            except Exception:
+                rgb = None
+            if rgb is None:
+                from PyQt6.QtWidgets import QColorDialog
+                from PyQt6.QtGui import QColor as _QC
+                col = QColorDialog.getColor(_QC(*init[:3]), self)
+                if col.isValid():
+                    rgb = (col.red(), col.green(), col.blue())
+            if rgb is not None:
+                s[1], s[2], s[3] = float(rgb[0]), float(rgb[1]), float(rgb[2])
+        else:
+            from PyQt6.QtWidgets import QInputDialog
+            v, ok = QInputDialog.getDouble(self, "Stop value",
+                                           f"Value at {int(s[0]*100)}%{self._suffix}:",
+                                           float(s[1]), 0.0, self._vmax, 2)
+            if ok:
+                s[1] = float(v)
+        self.update(); self.changed.emit()
+
+
+class _MmField(QWidget):
+    """A slider + number box for a (mm) value, with a user-adjustable maximum
+    so there is no hard cap. Exposes value()/setValue() and a valueChanged
+    signal, so it is a drop-in replacement for a QDoubleSpinBox."""
+    valueChanged = pyqtSignal(float)
+
+    def __init__(self, value=0.0, maximum=100.0, decimals=2, suffix=' mm',
+                 minimum=0.0, parent=None):
+        super().__init__(parent)
+        self._guard = False
+        self._dec = decimals
+        self._scale = 10 ** decimals
+        self._min = float(minimum)
+        h = QHBoxLayout(self); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(6)
+        self._sld = QSlider(Qt.Orientation.Horizontal); self._sld.setMinimumWidth(110)
+        self._spin = _QDoubleSpinBox(); self._spin.setDecimals(decimals); self._spin.setSuffix(suffix)
+        self._spin.setFixedWidth(94)
+        self._spin.setSingleStep(0.1 if suffix.strip() == 'mm' else 1.0)
+        self._maxspin = _QDoubleSpinBox(); self._maxspin.setDecimals(0)
+        self._maxspin.setRange(1, 100000); self._maxspin.setFixedWidth(72)
+        self._maxspin.setPrefix("≤ ")
+        self._maxspin.setToolTip("Maximum — raise to go past the default cap")
+        self._apply_max(max(float(maximum), float(value), self._min + 1.0))
+        self.setValue(float(value))
+        h.addWidget(self._sld, 1); h.addWidget(self._spin); h.addWidget(self._maxspin)
+        self._sld.valueChanged.connect(self._on_slider)
+        self._spin.valueChanged.connect(self._on_spin)
+        self._maxspin.valueChanged.connect(self._on_maxchange)
+
+    def _apply_max(self, mx):
+        mx = float(mx)
+        self._maxspin.blockSignals(True); self._maxspin.setValue(mx); self._maxspin.blockSignals(False)
+        self._spin.setRange(self._min, mx)
+        self._sld.blockSignals(True)
+        self._sld.setRange(int(self._min * self._scale), int(mx * self._scale))
+        self._sld.blockSignals(False)
+
+    def _on_maxchange(self, mx):
+        cur = self._spin.value()
+        self._apply_max(max(float(mx), self._min + 1.0))
+        self.setValue(min(cur, float(mx)))
+
+    def _on_slider(self, iv):
+        if self._guard:
+            return
+        self._guard = True
+        v = iv / self._scale
+        self._spin.setValue(v)
+        self._guard = False
+        self.valueChanged.emit(v)
+
+    def _on_spin(self, v):
+        if self._guard:
+            return
+        self._guard = True
+        self._sld.setValue(int(round(v * self._scale)))
+        self._guard = False
+        self.valueChanged.emit(v)
+
+    def value(self):
+        return self._spin.value()
+
+    def setValue(self, v):
+        self._guard = True
+        self._spin.setValue(float(v))
+        self._sld.setValue(int(round(float(v) * self._scale)))
+        self._guard = False
+
 
 class EdofCanvas(QGraphicsView):
     objectSelected=pyqtSignal(object)
@@ -483,6 +1239,7 @@ class EdofCanvas(QGraphicsView):
     # idle repaginate, _do_new_page, merge_with_previous, etc.) — without
     # this signal the page list lagged behind the actual canvas state.
     pageChanged=pyqtSignal(int)
+    zoomChanged=pyqtSignal(float)   # emitted whenever the view zoom changes
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -525,6 +1282,7 @@ class EdofCanvas(QGraphicsView):
         self._path_edit_handles = []
         self._path_edit_decorations = []   # v4.1.5: dashed control lines (not draggable)
         self._path_drag_handle = None
+        self._path_drag_start = None
         self._path_selected_anchors = set()  # v4.1.10: indexes of selected anchors
         self._lasso_start=None          # start point for lasso selection
         self._lasso_rect_item=None
@@ -542,19 +1300,13 @@ class EdofCanvas(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setDragMode(QGraphicsView.DragMode.NoDrag); self.setMouseTracking(True)
+        # v4.2.10.11: load toggleable render optimizations (see _load_render_opts).
+        self._load_render_opts()
         # v4.1.1: GPU acceleration via QOpenGLWidget viewport (when available).
+        # v4.2.10.11: now behind the gl_viewport setting (default on).
         # Falls back to default raster viewport if Qt OpenGL is missing.
-        try:
-            from PyQt6.QtOpenGLWidgets import QOpenGLWidget
-            from PyQt6.QtGui import QSurfaceFormat
-            fmt = QSurfaceFormat(); fmt.setSamples(4)  # 4× MSAA
-            gl = QOpenGLWidget()
-            gl.setFormat(fmt)
-            self.setViewport(gl)
-            self.setViewportUpdateMode(
-                QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
-        except Exception:
-            pass  # No OpenGL — use raster viewport (default)
+        if self._opt_gl_viewport:
+            self._apply_gl_viewport(True)
 
         self._page_item=QGraphicsPixmapItem(); scene.addItem(self._page_item)
         # v4.1.0: ensure smooth pixmap scaling on the page item itself, not just the view
@@ -593,7 +1345,20 @@ class EdofCanvas(QGraphicsView):
         except Exception: pass
         # v4.1.23.21: a different document invalidates the whole pixmap cache.
         if doc is not getattr(self, '_doc', None):
+            # v4.2.11.49: the ribbon is present from startup for EVERY
+            # document: rebuild a disabled skeleton for the new document so the
+            # band is reserved up front and the page never shifts when text
+            # editing begins.
+            try:
+                from PyQt6.QtCore import QTimer as _QT
+                _QT.singleShot(0, self._ensure_ribbon_skeleton)
+            except Exception:
+                pass
             try: self._page_px_cache.clear()
+            except Exception: pass
+            try:
+                from edof.engine.renderer import clear_object_cache
+                clear_object_cache()
             except Exception: pass
         self._doc=doc; self._page_idx=page_idx; self._sel_id=None
         # v4.1.18: pick the rendering DPI for the canvas — for print-targeted
@@ -627,8 +1392,8 @@ class EdofCanvas(QGraphicsView):
         try:
             cached = self._page_px_cache.get(page_idx)
             if cached is not None:
-                self._page_item.setPixmap(cached); self._page_item.setPos(0,0)
-                self.scene().setSceneRect(QRectF(0,0,cached.width(),cached.height()))
+                cpx, cscale = cached if isinstance(cached, tuple) else (cached, 1.0)
+                self._apply_page_pixmap(cpx, cscale)
         except Exception: pass
         self._start_render(); self.objectSelected.emit(None)
         try: self.pageChanged.emit(page_idx)
@@ -657,8 +1422,8 @@ class EdofCanvas(QGraphicsView):
         cached = self._page_px_cache.get(idx)
         if cached is not None:
             try:
-                self._page_item.setPixmap(cached); self._page_item.setPos(0,0)
-                self.scene().setSceneRect(QRectF(0,0,cached.width(),cached.height()))
+                cpx, cscale = cached if isinstance(cached, tuple) else (cached, 1.0)
+                self._apply_page_pixmap(cpx, cscale)
             except Exception: pass
         self._start_render(); self.objectSelected.emit(None)
         # v4.1.23.21: Ctrl+click on a page only VIEWS it — the caret is left
@@ -706,6 +1471,24 @@ class EdofCanvas(QGraphicsView):
             return
         self._rtimer.start(ms)
 
+    def schedule_render_interactive(self, ms=30):
+        """v4.2.10.0: live-preview render used while a value is being tuned
+        (effect sliders, opacity, etc.). Renders low-res for responsiveness,
+        then a full-quality render once edits settle (~0.35s idle)."""
+        self._interacting = True
+        self.schedule_render(ms)
+        try:
+            if getattr(self, '_interact_idle', None) is None:
+                self._interact_idle = QTimer(); self._interact_idle.setSingleShot(True)
+                self._interact_idle.timeout.connect(self._finish_interaction)
+            self._interact_idle.start(350)
+        except Exception:
+            pass
+
+    def _finish_interaction(self):
+        self._interacting = False
+        self.schedule_render(0)
+
     # ── Async rendering ───────────────────────────────────────────────────────
 
     def _start_render(self):
@@ -716,20 +1499,183 @@ class EdofCanvas(QGraphicsView):
         try: self._prerender_timer.start(120)
         except Exception: pass
 
+    def _load_render_opts(self):
+        """v4.2.10.11: load toggleable render optimizations from QSettings.
+        All default ON. These gate the interactive render path; the idle
+        full-quality render and export are unaffected by cache/dirty-region
+        flags (they always produce exact output)."""
+        from PyQt6.QtCore import QSettings
+        s = QSettings("edof", "editor")
+        def _b(key, default=True):
+            return bool(s.value("render/" + key, default, type=bool))
+        self._opt_object_cache       = _b("object_cache")
+        self._opt_dirty_region       = _b("dirty_region")
+        self._opt_adaptive_dpi       = _b("adaptive_dpi")
+        self._opt_supersample        = _b("supersample")
+        self._opt_lowres_interaction = _b("lowres_interaction")
+        self._opt_gl_viewport        = _b("gl_viewport")
+        # v4.2.11.2: GPU effects (shader blur for shadow/glow). Default OFF until
+        # the user opts in; the renderer falls back to CPU whenever GPU is off or
+        # unavailable, so this only ever accelerates, never changes output.
+        self._opt_gpu_effects        = _b("gpu_effects", False)
+        try:
+            from edof.engine import gpu as _gpu
+            _gpu.set_enabled(self._opt_gpu_effects)
+        except Exception:
+            pass
+
+    def set_render_opt(self, key, value):
+        """Set one optimization flag live + persist it. gl_viewport is applied
+        immediately by swapping the viewport."""
+        from PyQt6.QtCore import QSettings
+        QSettings("edof", "editor").setValue("render/" + key, bool(value))
+        setattr(self, "_opt_" + key, bool(value))
+        if key == "gl_viewport":
+            self._apply_gl_viewport(bool(value))
+        if key == "gpu_effects":
+            try:
+                from edof.engine import gpu as _gpu
+                _gpu.set_enabled(bool(value))
+            except Exception:
+                pass
+        self.schedule_render(0)
+
+    def _apply_gl_viewport(self, enabled):
+        """Swap the QGraphicsView viewport between a QOpenGLWidget (GPU blits for
+        pan/zoom) and the default raster viewport. Safe to call at runtime."""
+        try:
+            from PyQt6.QtWidgets import QGraphicsView as _QGV
+            if enabled:
+                from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+                from PyQt6.QtGui import QSurfaceFormat
+                fmt = QSurfaceFormat(); fmt.setSamples(4)  # 4x MSAA
+                gl = QOpenGLWidget(); gl.setFormat(fmt)
+                self.setViewport(gl)
+                self.setViewportUpdateMode(_QGV.ViewportUpdateMode.FullViewportUpdate)
+            else:
+                from PyQt6.QtWidgets import QWidget
+                self.setViewport(QWidget())
+                self.setViewportUpdateMode(_QGV.ViewportUpdateMode.MinimalViewportUpdate)
+        except Exception:
+            pass  # No OpenGL available — keep whatever viewport we have
+
     def _render_page_async(self, pg_idx, display=True):
         if not self._doc or not self._doc.pages: return
         if not (0 <= pg_idx < len(self._doc.pages)): return
+        # v4.2.9.1/.2: adaptive render DPI — match the effective on-screen
+        # resolution (base_dpi * zoom). Zoom in -> render higher (crisp); zoom
+        # out -> render lower (cheaper, identical on-screen sharpness since the
+        # screen can't show more pixels than it has). The pixmap is then scaled
+        # onto the base-DPI scene, so scene coords / hit-testing never move.
+        # Rendering at the object's full DPI when shown small would just waste
+        # pixels the screen can't display, so we target the screen resolution.
+        base_dpi = int(self._dpi)
+        zoom = float(getattr(self, '_zoom', 1.0) or 1.0)
+        # v4.2.9.3: also honour the display's device pixel ratio (HiDPI / OS
+        # scaling), otherwise the OS upscales a logical-resolution pixmap and it
+        # looks soft on retina / 125-150% screens.
+        try:
+            eff_dpr = float(self.devicePixelRatioF() or 1.0)
+        except Exception:
+            eff_dpr = 1.0
+        eff_dpr = max(1.0, min(eff_dpr, 4.0))
+        if not getattr(self, '_opt_adaptive_dpi', True):
+            eff_dpr = 1.0   # optimization off -> plain base-DPI render
+        if not getattr(self, '_opt_adaptive_dpi', True):
+            factor = 1.0
+        elif zoom > 1.25:
+            factor = min(zoom, 3.0)
+        elif zoom < 0.8:
+            # v4.2.9.9: supersample when zoomed out so fine detail (halftone
+            # dots, thin strokes, small text) downscales smoothly instead of
+            # aliasing / moiring. Render above the bare screen-matched DPI, up
+            # to the base DPI (Qt then minifies it = anti-aliasing). For extreme
+            # zoom-out we still scale below base to keep big pages cheap.
+            SS = 2.0 if getattr(self, '_opt_supersample', True) else 1.0
+            factor = min(1.0, max(zoom * SS, 0.2))
+        else:
+            factor = 1.0
+        raw = max(48.0 * eff_dpr, min(base_dpi * 3.0 * eff_dpr, base_dpi * factor * eff_dpr))
+        if factor == 1.0 and eff_dpr == 1.0:
+            render_dpi = base_dpi          # exact at ~100% on a 1x display
+        else:
+            # quantise to 24-DPI steps to limit per-object cache churn on zoom
+            render_dpi = max(24, int(round(raw / 24.0)) * 24)
+        try:
+            pg0 = self._doc.pages[pg_idx]
+            wpx = mm_to_px(pg0.width, render_dpi); hpx = mm_to_px(pg0.height, render_dpi)
+            CAP = 28_000_000
+            if wpx * hpx > CAP and wpx * hpx > 0:
+                import math as _m2
+                render_dpi = max(24, int(render_dpi * _m2.sqrt(CAP / (wpx * hpx))))
+        except Exception:
+            render_dpi = base_dpi
+        # v4.2.11.52: WYSIWYG halftone. The dot lattice is decided at the render
+        # DPI, so zooming out (which lowers render DPI) re-samples it and makes
+        # dots pop in and out between zoom levels. Pin a minimum render DPI when
+        # the page carries a halftone effect, so the lattice is computed at a
+        # stable resolution and the pixmap is merely scaled onto the scene; the
+        # dot count then stays identical at every zoom. Floor = the DPI at which
+        # the cell spacing is >= 24 px (the lattice has converged by there); the
+        # densest dot on the page (smallest ht_dot) drives it. Capped at 600 and
+        # re-checked against the memory cap so big pages stay bounded.
+        try:
+            _pg_ht = self._doc.pages[pg_idx]
+            _ht_dots = [abs(float(getattr(fx, 'ht_dot', 1.5)) or 1.5)
+                        for _o in (getattr(_pg_ht, 'objects', None) or [])
+                        for fx in (getattr(_o, 'effects', None) or [])
+                        if getattr(fx, 'type', '') == 'halftone'
+                        and getattr(fx, 'enabled', False)]
+            if _ht_dots:
+                _ht_floor = int(min(24.0 * 25.4 / max(0.05, min(_ht_dots)), 600.0))
+                if render_dpi < _ht_floor:
+                    render_dpi = _ht_floor
+                    _wpx = mm_to_px(_pg_ht.width, render_dpi)
+                    _hpx = mm_to_px(_pg_ht.height, render_dpi)
+                    if _wpx * _hpx > 28_000_000 and _wpx * _hpx > 0:
+                        import math as _m3
+                        render_dpi = max(24, int(render_dpi * _m3.sqrt(28_000_000 / (_wpx * _hpx))))
+        except Exception:
+            pass
+        # v4.2.9.8 / v4.2.11.31: while actively dragging/resizing an object the
+        # page re-renders every mouse-move, which lags for heavy objects (images,
+        # halftone, blur). Keep the page (and every STATIC element) at full DPI so
+        # nothing shifts, and render only the dragged object at reduced resolution
+        # (pixelated, via render_page_active active_scale). Only when there is no
+        # single active object (whole-page re-render) do we fall back to the old
+        # low-DPI page preview for responsiveness.
+        interacting = bool(getattr(self, '_interacting', False))
+        lowres = bool(getattr(self, '_opt_lowres_interaction', True))
+        use_cache = bool(getattr(self, '_opt_object_cache', True))
+        active_id = None
+        if (interacting and display
+                and getattr(self, '_opt_dirty_region', True)):
+            active_id = (getattr(self, '_path_edit_obj_id', None)
+                         or getattr(self, '_sel_id', None))
+        active_scale = 1.0
+        if interacting and lowres:
+            if active_id is not None:
+                active_scale = 0.6           # only the dragged object pixelates
+            else:
+                render_dpi = max(48, min(render_dpi, int(base_dpi * 0.6)))
+        scale = (base_dpi / float(render_dpi)) if render_dpi else 1.0
         self._render_id += 1; rid = self._render_id
-        self._rid_info[rid] = (pg_idx, display)
-        # v4.1.15.7: render at canvas DPI directly — NO oversampling.
-        target_dpi = int(self._dpi)
-        dpi = target_dpi
+        self._rid_info[rid] = (pg_idx, display, scale)
+        dpi = render_dpi
         doc = self._doc
         def task():
             try:
-                from edof.engine.renderer import render_page
+                from edof.engine.renderer import render_page, render_page_active
                 pg = doc.pages[pg_idx]
-                img = render_page(pg, doc.resources, doc.variables, dpi=dpi).convert("RGB")
+                img = None
+                if active_id is not None:
+                    img = render_page_active(pg, doc.resources, doc.variables,
+                                             active_id, dpi=dpi,
+                                             active_scale=active_scale)
+                if img is None:
+                    img = render_page(pg, doc.resources, doc.variables,
+                                      dpi=dpi, use_cache=use_cache)
+                img = img.convert("RGB")
                 buf = _io.BytesIO(); img.save(buf, "PNG"); buf.seek(0)
                 _render_signals.done.emit(buf.read(), rid)
             except Exception as e:
@@ -828,21 +1774,32 @@ class EdofCanvas(QGraphicsView):
                 except Exception: pass
         except Exception: pass
 
+    def _apply_page_pixmap(self, px, scale):
+        """Place a rendered page pixmap so it occupies the base-DPI scene rect.
+        When the page was rendered at a higher DPI (crisp zoom-in), scale < 1
+        maps the high-res pixmap back onto the base-DPI scene so overlays and
+        hit-testing stay in base-DPI coordinates."""
+        self._page_item.setPixmap(px)
+        try: self._page_item.setScale(scale)
+        except Exception: pass
+        self._page_item.setPos(0, 0)
+        self.scene().setSceneRect(QRectF(0, 0, px.width() * scale, px.height() * scale))
+
     def _on_render_done(self, data: bytes, rid: int):
         info = self._rid_info.pop(rid, None)
         px = QPixmap(); px.loadFromData(data)
-        # Cache by page index regardless of whether this was a display or a
-        # background pre-render.
-        pg_idx, display = (info if info is not None else (self._page_idx, True))
-        try: self._page_px_cache[pg_idx] = px
+        if info is not None and len(info) >= 3:
+            pg_idx, display, scale = info[0], info[1], info[2]
+        else:
+            pg_idx, display, scale = (self._page_idx, True, 1.0)
+        try: self._page_px_cache[pg_idx] = (px, scale)
         except Exception: pass
         # Background pre-renders only fill the cache — don't touch the view.
         if not display:
             return
         if rid != self._render_id and pg_idx != self._page_idx:
             return   # stale display render for a page we already left
-        self._page_item.setPixmap(px); self._page_item.setPos(0,0)
-        self.scene().setSceneRect(QRectF(0,0,px.width(),px.height()))
+        self._apply_page_pixmap(px, scale)
         self._refresh_overlay(); self._update_ghosts()
         self._reposition_inline()
 
@@ -872,7 +1829,21 @@ class EdofCanvas(QGraphicsView):
         if getattr(self, '_path_edit_obj_id', None):
             self._overlay.update_for(None, self._dpi)
             return
-        self._overlay.update_for(self._sel_obj(),self._dpi)
+        sel = self._sel_obj()
+        # v4.2.11.42: header/footer (and the body) are geometry-locked document
+        # furniture, not free objects. Never show their transform box/handles
+        # even if selected via the Objects list -- their size/position is driven
+        # by page setup, so dragging an edge makes no sense.
+        try:
+            from edof.format.document_boxes import (
+                DocumentHeaderBox, DocumentFooterBox)
+            if isinstance(sel, (DocumentHeaderBox, DocumentFooterBox)) or \
+               self._is_document_body(sel):
+                self._overlay.update_for(None, self._dpi)
+                return
+        except Exception:
+            pass
+        self._overlay.update_for(sel, self._dpi)
 
     # v4.1.0: grid as semi-transparent dots + visible margins
     def drawForeground(self, painter, rect):
@@ -882,21 +1853,25 @@ class EdofCanvas(QGraphicsView):
         page = self._doc.pages[self._page_idx]
         page_w_px = mm_to_px(page.width, self._dpi)
         page_h_px = mm_to_px(page.height, self._dpi)
+        # v4.2.10.3: keep grid/margins/guides a constant on-screen size at any
+        # zoom (cosmetic pens for lines/dashes; dots via a cosmetic-width point).
+        z = self.transform().m11()
+        if z <= 1e-6: z = 1.0
 
         # Draw grid as semi-transparent dots
         if self._snap_to_grid:
             grid_mm = self._snap_size_mm
             grid_px = mm_to_px(grid_mm, self._dpi)
-            if grid_px > 4:  # don't draw if too dense
+            if grid_px * z > 6:  # don't draw if too dense on screen
                 painter.save()
-                painter.setPen(QPen(QColor(120, 140, 200, 90), 1))
-                painter.setBrush(QBrush(QColor(120, 140, 200, 90)))
-                # dots only inside page bounds + small margin
+                pen = QPen(QColor(120, 140, 200, 120), 2.2)
+                pen.setCosmetic(True); pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                painter.setPen(pen)
                 x = 0.0
                 while x <= page_w_px:
                     y = 0.0
                     while y <= page_h_px:
-                        painter.drawEllipse(QRectF(x - 0.7, y - 0.7, 1.4, 1.4))
+                        painter.drawPoint(QPointF(x, y))
                         y += grid_px
                     x += grid_px
                 painter.restore()
@@ -905,8 +1880,8 @@ class EdofCanvas(QGraphicsView):
         if self._margins_enabled and self._margins:
             top, right, bottom, left = self._margins
             painter.save()
-            pen = QPen(QColor(80, 160, 220, 140), 1, Qt.PenStyle.DashLine)
-            pen.setDashPattern([4, 4])
+            pen = QPen(QColor(80, 160, 220, 160), 1.2, Qt.PenStyle.DashLine)
+            pen.setCosmetic(True); pen.setDashPattern([4, 4])
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             tl_x = mm_to_px(left, self._dpi)
@@ -916,10 +1891,59 @@ class EdofCanvas(QGraphicsView):
             painter.drawRect(QRectF(tl_x, tl_y, br_x - tl_x, br_y - tl_y))
             painter.restore()
 
-        # v4.1.0: visible alignment guides (transient during drag)
+        # v4.2.11.43: header/footer guide bands. An enabled but empty band has
+        # no text and no fill, so there was nothing to see or aim at -- you
+        # could not tell where to double-click to edit it (or to insert page
+        # numbers). Draw a faint tinted band with a dashed outline, plus a hint
+        # while it is empty. Document mode only. The band is exactly the box the
+        # double-click hit-test targets.
+        try:
+            body = getattr(self._doc, 'body', None)
+            if body is not None and getattr(self._doc, 'mode', '') == 'document':
+                from edof.engine.document_paginate import (
+                    find_document_header_on_page as _fh,
+                    find_document_footer_on_page as _ff)
+                bands = []
+                if getattr(body, 'header_enabled', False):
+                    hb = _fh(page)
+                    if hb is not None:
+                        bands.append((hb, "Header"))
+                if getattr(body, 'footer_enabled', False):
+                    fb = _ff(page)
+                    if fb is not None:
+                        bands.append((fb, "Footer"))
+                for box, label in bands:
+                    # v4.2.11.44: draw the band at the box's ACTUAL geometry
+                    # (it sits inside the top/bottom margin at box.transform.y,
+                    # NOT at the page edge). The previous version computed its
+                    # own y from the page edge, so the visible band did not line
+                    # up with the box the double-click targets -- it looked like
+                    # a band at the page boundary that could not be clicked.
+                    t = box.transform
+                    bx = mm_to_px(t.x, self._dpi); by = mm_to_px(t.y, self._dpi)
+                    bw = mm_to_px(t.width, self._dpi); bh = mm_to_px(t.height, self._dpi)
+                    empty = not ((box.text or '').strip())
+                    painter.save()
+                    pen = QPen(QColor(90, 150, 210, 150), 1.0, Qt.PenStyle.DashLine)
+                    pen.setCosmetic(True); pen.setDashPattern([3, 3])
+                    painter.setPen(pen)
+                    painter.setBrush(QColor(120, 160, 220, 26))
+                    painter.drawRect(QRectF(bx, by, bw, bh))
+                    if empty:
+                        painter.setPen(QColor(90, 120, 170, 210))
+                        f = painter.font(); f.setPointSizeF(max(6.0, 9.0 / z)); painter.setFont(f)
+                        painter.drawText(
+                            QRectF(bx + 6, by, bw - 12, bh),
+                            int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+                            f"{label} (double-click to edit)")
+                    painter.restore()
+        except Exception:
+            pass
         if self._align_guide_lines:
             painter.save()
-            painter.setPen(QPen(QColor(255, 100, 200, 200), 1, Qt.PenStyle.DashLine))
+            pen = QPen(QColor(255, 100, 200, 200), 1.2, Qt.PenStyle.DashLine)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
             for line in self._align_guide_lines:
                 # line is (orientation, position_px) where orientation is 'h' or 'v'
                 if isinstance(line, tuple) and len(line) == 2:
@@ -1047,6 +2071,44 @@ class EdofCanvas(QGraphicsView):
             import traceback as _tb; _tb.print_exc()
             snapshot_qimg = None
         is_body = self._is_document_body(obj)
+        # v4.2.11.41: header/footer boxes display per-page RESOLVED runs
+        # (with {page_number} already turned into "1"). When the user edits one
+        # we want them to see and edit the TEMPLATE (the raw {page_number}
+        # token), which lives on doc.body.header_runs / footer_runs. Swap the
+        # template in before constructing the editor and remember the role so
+        # the commit writes back to the right place.
+        self._inline_hf_role = None
+        self._inline_hf_even = False
+        try:
+            from edof.format.document_boxes import (
+                DocumentHeaderBox, DocumentFooterBox)
+            from edof.format.styles import TextRun as _TR
+            body = getattr(self._doc, 'body', None)
+            if body is not None and isinstance(
+                    obj, (DocumentHeaderBox, DocumentFooterBox)):
+                role = 'header' if isinstance(obj, DocumentHeaderBox) else 'footer'
+                self._inline_hf_role = role
+                # v4.2.11.46: pick the template SET for this page's parity so
+                # editing on an even page edits the even template (when the
+                # odd/even option is on), and apply the persisted band style so
+                # vertical align etc. shows correctly while editing.
+                start = int(getattr(body, 'page_number_start', 1) or 1)
+                page_number = self._page_idx + start
+                use_even = bool(getattr(body, 'hf_odd_even', False)) and (page_number % 2 == 0)
+                self._inline_hf_even = use_even
+                suff = '_even' if use_even else ''
+                tmpl = list(getattr(body, f'{role}_runs{suff}', []) or [])
+                obj.runs = tmpl or [_TR(text="")]
+                obj.text = "".join(r.text or "" for r in obj.runs)
+                sd = getattr(body, f'{role}_style{suff}', None)
+                if sd:
+                    try:
+                        from edof.format.styles import TextStyle as _TS
+                        obj.style = _TS.from_dict(dict(sd))
+                    except Exception:
+                        pass
+        except Exception:
+            self._inline_hf_role = None
         ed = EdofTextEditor(obj, dpi=dpi, page_bg=page_bg,
                               bg_snapshot=snapshot_qimg,
                               is_doc_body=is_body)
@@ -1171,14 +2233,59 @@ class EdofCanvas(QGraphicsView):
         self._inline_border_frame = border_rect
 
         # Floating formatting toolbar above the editor (stays in viewport
-        # so it's always readable at any zoom)
-        toolbar = QWidget(self.viewport())
-        toolbar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        tb_layout = QHBoxLayout(toolbar)
-        tb_layout.setContentsMargins(4, 4, 4, 4); tb_layout.setSpacing(3)
-        toolbar.setStyleSheet("background:#2b2b2b;border:1px solid #555;border-radius:3px;")
+        # so it's always readable at any zoom). v4.2.11.49: construction lives
+        # in _build_text_ribbon so a disabled skeleton can be shown at startup.
+        self._build_text_ribbon(ed, obj, is_body)
 
-        def _btn(text, tip, callback, fixed_w=32):
+
+    def _build_text_ribbon(self, ed, obj, is_body):
+        """Build (or rebuild in place) the persistent text ribbon, binding its
+        controls to the given editor instance. Also used with a hidden dummy
+        editor to show a disabled skeleton ribbon from startup
+        (v4.2.11.49)."""
+                # v4.2.11.47: PERSISTENT ribbon. Destroying and recreating the toolbar
+        # on every session (and every sticky commit cycle in document mode)
+        # made it blink and flipped the reserved viewport band -- the page
+        # visibly jumped. The container is now created ONCE and kept visible;
+        # each session only rebuilds its contents in place (the buttons bind to
+        # the current editor instance). Ending a session merely disables the
+        # controls; the band and the page never move.
+        toolbar = getattr(self, '_text_ribbon', None)
+        if toolbar is None:
+            toolbar = QWidget(self)   # parent = view frame: occupies the
+            # reserved top margin band instead of the scrollable page area.
+            toolbar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            toolbar.setStyleSheet("background:#2b2b2b;border:1px solid #555;border-radius:3px;")
+            self._text_ribbon = toolbar
+        else:
+            old = toolbar.layout()
+            if old is not None:
+                while old.count():
+                    it = old.takeAt(0)
+                    w_ = it.widget()
+                    if w_ is not None:
+                        w_.deleteLater()
+                    else:
+                        lay = it.layout()
+                        if lay is not None:
+                            while lay.count():
+                                it2 = lay.takeAt(0)
+                                if it2.widget() is not None:
+                                    it2.widget().deleteLater()
+                # detach the old layout so a fresh one can be installed
+                _tmp = QWidget(); _tmp.setLayout(old); _tmp.deleteLater()
+        toolbar.setEnabled(True)
+        # v4.2.11.39: the toolbar content can exceed one row's width (the
+        # design-mode editor adds Apply/Cancel on top of everything else), and
+        # a fixed-width single row silently pushed the trailing controls --
+        # including the size / line-spacing / letter-spacing spinboxes -- past
+        # the right edge. The outer layout is vertical now; the content is
+        # packed into ONE row when it fits the viewport and wraps into TWO
+        # rows when it does not.
+        tb_layout = QVBoxLayout(toolbar)
+        tb_layout.setContentsMargins(4, 2, 4, 2); tb_layout.setSpacing(2)
+
+        def _btn(text, tip, callback, fixed_w=32, icon=None):
             b = QPushButton(text); b.setToolTip(tip)
             b.setFixedHeight(30); b.setFixedWidth(fixed_w)
             b.setStyleSheet("font:bold 11pt 'Segoe UI';color:white;background:#444;border:1px solid #666;border-radius:3px;")
@@ -1186,16 +2293,20 @@ class EdofCanvas(QGraphicsView):
             # steal focus from the editor (which would clear the selection
             # and make format toggles act on nothing).
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            if icon:
+                _ic = uicon(icon)
+                if not _ic.isNull():
+                    b.setText(""); b.setIcon(_ic); b.setIconSize(QSize(18, 18))
             b.clicked.connect(callback)
             return b
 
         # Format toggles
-        btn_b = _btn("B",   "Bold (Ctrl+B)",         ed.toggle_bold)
-        btn_i = _btn("I",   "Italic (Ctrl+I)",       ed.toggle_italic)
+        btn_b = _btn("B",   "Bold (Ctrl+B)",         ed.toggle_bold, icon="bold")
+        btn_i = _btn("I",   "Italic (Ctrl+I)",       ed.toggle_italic, icon="italic")
         btn_i.setStyleSheet(btn_i.styleSheet().replace("font:bold", "font:italic bold"))
-        btn_u = _btn("U",   "Underline (Ctrl+U)",    ed.toggle_underline)
+        btn_u = _btn("U",   "Underline (Ctrl+U)",    ed.toggle_underline, icon="underline")
         btn_u.setStyleSheet(btn_u.styleSheet() + "QPushButton{text-decoration:underline}")
-        btn_s = _btn("S",   "Strikethrough",         ed.toggle_strikethrough)
+        btn_s = _btn("S",   "Strikethrough",         ed.toggle_strikethrough, icon="strike")
         btn_s.setStyleSheet(btn_s.styleSheet() + "QPushButton{text-decoration:line-through}")
         # v4.1.23.38: text colour + highlight (line/background) colour.
         from PyQt6.QtWidgets import QColorDialog as _QCD
@@ -1227,6 +2338,30 @@ class EdofCanvas(QGraphicsView):
         btn_hl = _btn("ab", "Highlight colour", _pick_hl_color)
         btn_hl.setStyleSheet(btn_hl.styleSheet() + "QPushButton{background:#5a5a2d}")
         btn_hl_clear = _btn("a̶", "Clear highlight", _clear_hl)
+        # v4.2.11.41: page-number token menu, shown only while editing a header
+        # or footer. Inserts {page_number} (and variants) at the caret; the
+        # paginator resolves the token per page at render time.
+        btn_pgnum = None
+        if getattr(self, '_inline_hf_role', None) in ('header', 'footer'):
+            from PyQt6.QtWidgets import QMenu as _QMenu
+            def _ins(tok):
+                def _do():
+                    try:
+                        ed._insert_text(tok); ed._invalidate()
+                    except Exception: pass
+                    self._refocus_inline()
+                return _do
+            pg_menu = _QMenu(self)
+            pg_menu.addAction("Page number  (1)", _ins("{page_number}"))
+            pg_menu.addAction("Page X of Y  (1 / N)",
+                              _ins("{page_number} / {page_count}"))
+            pg_menu.addAction("Total pages  (N)", _ins("{page_count}"))
+            pg_menu.addSeparator()
+            pg_menu.addAction("Number, left-aligned",   _ins("{page_number_left}"))
+            pg_menu.addAction("Number, centered",       _ins("{page_number_center}"))
+            pg_menu.addAction("Number, right-aligned",  _ins("{page_number_right}"))
+            btn_pgnum = _btn("#▾", "Insert page number", lambda: None, fixed_w=40)
+            btn_pgnum.setMenu(pg_menu)
         # v4.1.16.3: Font size spinbox — applies to current selection.
         # v4.1.17: now in mm (canonical EDOF unit).
         sp_size = FocusKeepingSpinBox()
@@ -1438,9 +2573,9 @@ class EdofCanvas(QGraphicsView):
         # justify modes: weak = spread spaces on full lines only; force =
         # also stretch with automatic letter spacing.
         _TP = "\uFE0E"
-        btn_al  = _btn("⯇"+_TP,  "Align left (Ctrl+L)",   lambda: ed.set_alignment('left'))
-        btn_ac  = _btn("≡"+_TP,  "Align center (Ctrl+E)", lambda: ed.set_alignment('center'))
-        btn_ar  = _btn("⯈"+_TP,  "Align right (Ctrl+R)",  lambda: ed.set_alignment('right'))
+        btn_al  = _btn("⯇"+_TP,  "Align left (Ctrl+L)",   lambda: ed.set_alignment('left'), icon="align-left")
+        btn_ac  = _btn("≡"+_TP,  "Align center (Ctrl+E)", lambda: ed.set_alignment('center'), icon="align-center")
+        btn_ar  = _btn("⯈"+_TP,  "Align right (Ctrl+R)",  lambda: ed.set_alignment('right'), icon="align-right")
         btn_aj  = _btn("≣"+_TP,  "Justify – spread spaces, full lines only (Ctrl+J)",
                        lambda: ed.set_alignment('justify'))
         btn_ajf = _btn("≣!"+_TP, "Force justify – stretch with automatic letter spacing",
@@ -1473,47 +2608,93 @@ class EdofCanvas(QGraphicsView):
         btn_cancel = _btn("✕"+_TP, "Cancel (Esc)",       self._cancel_inline)
         btn_cancel.setStyleSheet(btn_cancel.styleSheet().replace("background:#444", "background:#6e2d2d"))
 
-        for w in (btn_b, btn_i, btn_u, btn_s):
-            tb_layout.addWidget(w)
-        for w in (btn_color, btn_hl, btn_hl_clear):
-            tb_layout.addWidget(w)
-        tb_layout.addWidget(cb_font)
-        tb_layout.addWidget(sp_size)
-        tb_layout.addWidget(sp_ls)
-        tb_layout.addWidget(sp_letsp)
-        for w in (btn_al, btn_ac, btn_ar, btn_aj, btn_ajf):
-            tb_layout.addWidget(w)
-        for w in (btn_ul, btn_ol, btn_ind, btn_ded):
-            tb_layout.addWidget(w)
-        for w in (btn_vt, btn_vm, btn_vb):
-            tb_layout.addWidget(w)
-        tb_layout.addStretch()
-        # v4.1.22.1: hide commit/cancel buttons when editing the doc-mode
-        # body. The body is permanent — you don't "cancel" your document.
-        # Esc still ends the edit session, but having ✓/✗ buttons in the
-        # toolbar implies they're discrete states for a transient piece of
-        # content, which is misleading for a flow-edited body.
-        if not is_body:
-            tb_layout.addWidget(btn_ok)
-            tb_layout.addWidget(btn_cancel)
-        else:
+        # Content groups in display order. v4.1.22.1: the doc-mode body has no
+        # Apply/Cancel (the body is permanent; Esc still ends the session).
+        row1_items = [btn_b, btn_i, btn_u, btn_s,
+                      btn_color, btn_hl, btn_hl_clear]
+        if btn_pgnum is not None:
+            row1_items.append(btn_pgnum)
+        row1_items += [cb_font, sp_size, sp_ls, sp_letsp]
+        row2_items = [btn_al, btn_ac, btn_ar, btn_aj, btn_ajf,
+                      btn_ul, btn_ol, btn_ind, btn_ded,
+                      btn_vt, btn_vm, btn_vb]
+        tail_items = [] if is_body else [btn_ok, btn_cancel]
+        if is_body:
             btn_ok.hide(); btn_cancel.hide()
 
-        toolbar.setFixedHeight(40)
-        # v4.1.20.2: doc mode pins toolbar to top of viewport; else float
-        # above the textbox.
-        is_doc_mode = (getattr(self._doc, 'mode', '') == 'document')
-        if is_doc_mode:
-            vp = self.viewport()
-            tb_w = vp.width() - 8
-            toolbar.setGeometry(4, 4, max(740, tb_w), 40)
-        else:
-            vp_tl = self.mapFromScene(QPointF(scene_x, scene_y))
-            w_vp = max(int(scene_w * float(self._zoom)), 200)
-            tb_y = max(0, vp_tl.y() - 44)
-            toolbar.setGeometry(vp_tl.x(), tb_y, max(740, w_vp), 40)
+        # v4.2.7.4: pin to the TOP of the viewport (Word-style ribbon).
+        vp = self.viewport()
+        tb_w = max(740, self.width() - 8)
+
+        def _need_w(ws):
+            return sum(max(w.sizeHint().width(), w.minimumWidth())
+                       for w in ws) + 3 * (len(ws) + 1) + 8
+
+        # v4.2.11.47: the row decision must be IDENTICAL for every session
+        # (body / header / design textbox), otherwise the ribbon height would
+        # flip 40<->76 between sessions and the band would jump. Sessions
+        # differ by up to ~96px of optional buttons (#▾ page-number menu,
+        # Apply/Cancel), so always include that allowance in the estimate.
+        one_row = (_need_w(row1_items + row2_items + tail_items) + 96) <= tb_w
+        rows = ([row1_items + row2_items] if one_row
+                else [row1_items, row2_items])
+        for ri, items in enumerate(rows):
+            rl = QHBoxLayout(); rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(3)
+            for wdg in items:
+                rl.addWidget(wdg)
+            rl.addStretch()
+            if ri == len(rows) - 1:
+                for wdg in tail_items:
+                    rl.addWidget(wdg)
+            tb_layout.addLayout(rl)
+        tb_h = 40 if one_row else 76
+        toolbar.setFixedHeight(tb_h)
+        toolbar.setGeometry(4, 4, tb_w, tb_h)
         toolbar.show()
         self._inline_toolbar = toolbar
+        # v4.2.11.42: reserve the toolbar band as a viewport margin so the
+        # scrollable canvas area starts BELOW it. centerOn / Fit then operate on
+        # the area under the ribbon (the scene rect is exactly the page and
+        # offered no scroll room to shift it down, so the page used to be
+        # centered in the full viewport and tucked under the ribbon).
+        try:
+            self.setViewportMargins(0, tb_h + 8, 0, 0)
+        except Exception:
+            pass
+        return toolbar
+
+    def _ensure_ribbon_skeleton(self):
+        """v4.2.11.49: show the text ribbon from startup (disabled) instead of
+        having it pop in -- and shift the page -- on the first text edit. Built
+        against a hidden dummy editor; the controls are disabled so the dummy
+        bindings can never fire, and the first real session rebuilds the
+        contents in place."""
+        try:
+            from edof.format.objects import TextBox as _TB
+            from edof._apps.edof_text_editor import EdofTextEditor as _ETE
+            dummy_tb = _TB()
+            dummy_ed = _ETE(dummy_tb, dpi=float(self._dpi),
+                            page_bg=(255, 255, 255, 255),
+                            bg_snapshot=None, is_doc_body=True)
+            dummy_ed.hide()
+            for _tn in ('_blink_timer', '_render_timer'):
+                _t = getattr(dummy_ed, _tn, None)
+                if _t is not None:
+                    try: _t.stop()
+                    except Exception: pass
+            prev_role = getattr(self, '_inline_hf_role', None)
+            self._inline_hf_role = None     # no #▾ button in the skeleton
+            self._build_text_ribbon(dummy_ed, dummy_tb, is_body=True)
+            self._inline_hf_role = prev_role
+            self._ribbon_dummy_ed = dummy_ed   # keep closures alive
+            self._inline_toolbar = None        # no active session
+            rb = getattr(self, '_text_ribbon', None)
+            if rb is not None:
+                rb.setEnabled(False)
+                rb.show()
+        except Exception:
+            import traceback as _tb; _tb.print_exc()
 
     def _textbox_to_html(self, obj):
         """v4.1.0: Convert TextBox runs to HTML for QTextEdit display."""
@@ -1608,26 +2789,17 @@ class EdofCanvas(QGraphicsView):
         # canvas viewport (Word-style ribbon), regardless of where the
         # textbox sits. Floating-near-textbox is the default for free-form
         # design mode but feels wrong for a long flowing document.
-        if getattr(self, '_inline_toolbar', None):
-            is_doc_mode = (getattr(self._doc, 'mode', '') == 'document')
+        rb = getattr(self, '_text_ribbon', None)
+        if rb is not None and rb.isVisible():
+            # v4.2.7.4: always pin to the top of the viewport.
+            # v4.2.11.47: the ribbon is persistent; keep its current height
+            # (1 or 2 rows) and only reflow its width to the view.
             try:
-                if is_doc_mode:
-                    vp = self.viewport()
-                    tb_w = vp.width() - 8
-                    self._inline_toolbar.setGeometry(4, 4, max(740, tb_w), 40)
-                else:
-                    br = self._inline_proxy.sceneBoundingRect()
-                    vp_tl = self.mapFromScene(QPointF(br.left(), br.top()))
-                    zoom = float(self._zoom)
-                    w_vp = max(int(br.width() * zoom), 200)
-                    tb_y = max(0, vp_tl.y() - 44)
-                    self._inline_toolbar.setGeometry(vp_tl.x(), tb_y, max(740, w_vp), 40)
+                tb_w = max(740, self.width() - 8)
+                cur_h = rb.height() or 40
+                rb.setGeometry(4, 4, tb_w, cur_h)
             except Exception:
-                vp_tl = self.mapFromScene(QPointF(scene_x, scene_y))
-                zoom = float(self._zoom)
-                w_vp = max(int(scene_w * zoom), 200)
-                tb_y = max(0, vp_tl.y() - 44)
-                self._inline_toolbar.setGeometry(vp_tl.x(), tb_y, max(740, w_vp), 40)
+                pass
 
     def _confirm_inline(self):
         """v4.1.16.4: drive commit by asking the editor widget to write
@@ -1666,6 +2838,56 @@ class EdofCanvas(QGraphicsView):
         committed_obj = getattr(self, '_inline_obj', None)
         skip_sticky = getattr(self, '_skip_sticky_reentry', False)
         was_doc_body = self._is_document_body(committed_obj)
+        # v4.2.11.41: if a header/footer was being edited, persist its runs back
+        # to the shared template on doc.body and repaginate so every page picks
+        # up the change (with per-page variables re-resolved).
+        hf_role = getattr(self, '_inline_hf_role', None)
+        hf_even = bool(getattr(self, '_inline_hf_even', False))
+        self._inline_hf_role = None
+        self._inline_hf_even = False
+        if hf_role and committed_obj is not None and self._doc is not None:
+            self._skip_sticky_reentry = False   # early return below skips the
+            # normal reset at the end of this method; don't leak the flag.
+            try:
+                body = self._doc.body
+                runs = list(getattr(committed_obj, 'runs', []) or [])
+                suff = '_even' if hf_even else ''
+                setattr(body, f'{hf_role}_runs{suff}', runs)
+                # v4.2.11.46: persist the band's box-level style (vertical
+                # align, default font, ...) so it survives repagination and
+                # applies on every page of this parity.
+                try:
+                    sd = committed_obj.style.to_dict()
+                    setattr(body, f'{hf_role}_style{suff}', sd)
+                except Exception:
+                    pass
+                # v4.2.11.46: keep the view where the user left it -- the
+                # repagination + refresh below used to reset scroll and make
+                # the page jump around.
+                _hsb = self.horizontalScrollBar().value()
+                _vsb = self.verticalScrollBar().value()
+                self._inline_snapshot = None
+                self._cancel_inline()
+                from edof.engine.document_paginate import paginate_document
+                paginate_document(self._doc, dpi=self._dpi)
+                mw = self.parent()
+                if mw is not None and hasattr(mw, '_refresh_pages'):
+                    try: mw._refresh_pages()
+                    except Exception: pass
+                if mw is not None and hasattr(mw, '_mark_modified'):
+                    try: mw._mark_modified()
+                    except Exception: pass
+                self._invalidate_page_cache()
+                self.schedule_render(0)
+                try:
+                    self.horizontalScrollBar().setValue(_hsb)
+                    self.verticalScrollBar().setValue(_vsb)
+                except Exception:
+                    pass
+                return
+            except Exception:
+                import traceback as _tb; _tb.print_exc()
+                return
         # v4.1.23.26: snapshot the caret format BEFORE teardown so an
         # overflow hop can carry it to the next page (set only if we actually
         # hop below).
@@ -1840,6 +3062,27 @@ class EdofCanvas(QGraphicsView):
         return
 
     def _on_new_page_requested(self, tb):
+        # v4.2.11.37: any exception escaping this slot aborts the whole app
+        # (PyQt6 qFatal) -- reproduced exactly that on Ctrl+Enter. Run the page
+        # break inside a guard; on failure log it and leave the editor alive.
+        try:
+            return self._do_new_page_requested(tb)
+        except Exception:
+            import traceback as _tb_mod
+            _tb_mod.print_exc()
+            try:
+                from edof.engine.debug_log import log as _dlog
+                _dlog("canvas._on_new_page_requested EXCEPTION",
+                      err=_tb_mod.format_exc()[-1500:])
+            except Exception:
+                pass
+            try:
+                self.schedule_render(0)
+            except Exception:
+                pass
+            return
+
+    def _do_new_page_requested(self, tb):
         """v4.1.22.14: Ctrl+Enter handling.
 
         In document mode (body textbox): WORD-STYLE HARD PAGE BREAK.
@@ -2554,9 +3797,13 @@ class EdofCanvas(QGraphicsView):
                 pass
         self._inline_snapshot = None
         if getattr(self, '_inline_toolbar', None):
+            # v4.2.11.47: the ribbon is persistent -- ending a session only
+            # DISABLES its controls. It stays visible and the reserved band
+            # stays put, so the page never jumps on commit/cancel/sticky
+            # cycles. It is hidden only when the document is replaced
+            # (set_document).
             try:
-                self._inline_toolbar.hide()
-                self._inline_toolbar.deleteLater()
+                self._inline_toolbar.setEnabled(False)
             except Exception: pass
             self._inline_toolbar = None
         # v4.1.15.7: remove scene-based dashed border rect
@@ -2589,6 +3836,14 @@ class EdofCanvas(QGraphicsView):
             except Exception: pass
         if widget is not None:
             try:
+                # v4.2.11.37: stop the widget's own timers (render debounce,
+                # cursor blink) BEFORE the deferred delete so a queued timeout
+                # can't land on a half-destroyed widget.
+                for _tn in ('_render_timer', '_blink_timer'):
+                    _t = getattr(widget, _tn, None)
+                    if _t is not None:
+                        try: _t.stop()
+                        except Exception: pass
                 widget.hide()
                 widget.setParent(None)
                 QTimer.singleShot(0, lambda w=widget: (
@@ -2609,7 +3864,7 @@ class EdofCanvas(QGraphicsView):
             self._pan_start = event.pos()
             self._pan_scroll0 = (self.horizontalScrollBar().value(),
                                    self.verticalScrollBar().value())
-            self.viewport().setCursor(QCursor(Qt.CursorShape.ClosedHandCursor))
+            self.viewport().setCursor(tcur('hand_grab', Qt.CursorShape.ClosedHandCursor))
             event.accept(); return
         # v4.1.16.4: when inline edit is active and user clicks outside
         # both the editor (proxy widget) AND the toolbar, auto-commit.
@@ -2672,13 +3927,13 @@ class EdofCanvas(QGraphicsView):
             self._pan_start=event.pos()
             self._pan_scroll0=(self.horizontalScrollBar().value(),
                                self.verticalScrollBar().value())
-            self.viewport().setCursor(QCursor(Qt.CursorShape.ClosedHandCursor))
+            self.viewport().setCursor(tcur('hand_grab', Qt.CursorShape.ClosedHandCursor))
             event.accept(); return
         if btn==Qt.MouseButton.MiddleButton:
             self._pan_start=event.pos()
             self._pan_scroll0=(self.horizontalScrollBar().value(),
                                self.verticalScrollBar().value())
-            self.viewport().setCursor(QCursor(Qt.CursorShape.ClosedHandCursor))
+            self.viewport().setCursor(tcur('hand_grab', Qt.CursorShape.ClosedHandCursor))
             event.accept(); return
 
         # v4.1.0/4.1.1/4.1.5/4.1.10: path edit mode — pick up a handle if clicked
@@ -2722,7 +3977,9 @@ class EdofCanvas(QGraphicsView):
                             for h2 in self._path_edit_handles:
                                 if (h2.data(0) == t_ci and h2.data(1) == tx_idx
                                     and h2.data(2) == 'cp'):
-                                    self._path_drag_handle = h2
+                                    self._path_drag_handle = h2; self._path_drag_start = None
+                                    self._dbg('edit.grabTangentFromAnchor', ai=ai,
+                                              t_ci=t_ci, tx_idx=tx_idx)
                                     event.accept(); return
                 if kind == 'endpoint':
                     shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
@@ -2734,15 +3991,22 @@ class EdofCanvas(QGraphicsView):
                     else:
                         if ci not in self._path_selected_anchors:
                             self._path_selected_anchors = {ci}
+                    self._dbg('edit.selectAnchor', ci=ci, shift=shift,
+                              selected=sorted(self._path_selected_anchors))
                     self._refresh_path_edit_handles()
-                self._path_drag_handle = hit
+                self._path_drag_handle = hit; self._path_drag_start = None
+                self._dbg('edit.grabHandle', ci=hit.data(0), pi=hit.data(1),
+                          kind=hit.data(2))
                 event.accept(); return
             # v4.1.8: shift+click empty segment = insert new point at click position
             if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                self._dbg('edit.insertPointAtClick', sp=(round(sp.x(),1), round(sp.y(),1)))
                 self._insert_path_point_at_click(sp)
                 event.accept(); return
             # v4.1.10: click on empty area in path edit mode = clear anchor selection
             if self._path_selected_anchors:
+                self._dbg('edit.clearSelection',
+                          was=sorted(self._path_selected_anchors))
                 self._path_selected_anchors = set()
                 self._refresh_path_edit_handles()
 
@@ -2751,13 +4015,25 @@ class EdofCanvas(QGraphicsView):
             if self._rect_draw_kind is not None:
                 sp = self._sp(event)
                 self._rect_draw_start = sp
-                # Create preview rect item; final geometry set in mouseMove
-                from PyQt6.QtWidgets import QGraphicsRectItem
-                self._rect_draw_preview = QGraphicsRectItem(QRectF(sp.x(), sp.y(), 0, 0))
-                self._rect_draw_preview.setPen(QPen(QColor(120,180,255,255), 1, Qt.PenStyle.DashLine))
-                self._rect_draw_preview.setBrush(QBrush(QColor(120,180,255,40)))
-                self._rect_draw_preview.setZValue(9500)
-                self.scene().addItem(self._rect_draw_preview)
+                # v4.2.10.1: preview matches the shape kind (ellipse shows an
+                # ellipse, line/arrow show a segment) instead of always a rect.
+                from PyQt6.QtWidgets import (QGraphicsRectItem,
+                                             QGraphicsEllipseItem, QGraphicsLineItem)
+                k = self._rect_draw_kind
+                _pen = QPen(QColor(120, 180, 255, 255), 1, Qt.PenStyle.DashLine)
+                _brush = QBrush(QColor(120, 180, 255, 40))
+                if k == "ellipse":
+                    it = QGraphicsEllipseItem(QRectF(sp.x(), sp.y(), 0, 0))
+                    it.setPen(_pen); it.setBrush(_brush)
+                elif k in ("line", "arrow"):
+                    it = QGraphicsLineItem(sp.x(), sp.y(), sp.x(), sp.y())
+                    it.setPen(QPen(QColor(120, 180, 255, 255), 2, Qt.PenStyle.DashLine))
+                else:
+                    it = QGraphicsRectItem(QRectF(sp.x(), sp.y(), 0, 0))
+                    it.setPen(_pen); it.setBrush(_brush)
+                it.setZValue(9500)
+                self._rect_draw_preview = it
+                self.scene().addItem(it)
                 event.accept(); return
 
             # v4.0.3/4.1.0: path drawing tool — intercept clicks
@@ -2772,6 +4048,8 @@ class EdofCanvas(QGraphicsView):
                     fx, fy = self._path_points[0][:2]
                     threshold_mm = 3.0
                     if abs(mx - fx) < threshold_mm and abs(my - fy) < threshold_mm:
+                        self._dbg('draw.closeClick', mx=round(mx,2), my=round(my,2),
+                                  first=(round(fx,2), round(fy,2)))
                         self._path_close = True
                         self._finish_path_drawing()
                         event.accept(); return
@@ -2781,6 +4059,8 @@ class EdofCanvas(QGraphicsView):
                 self._path_drag_origin = (mx, my)
                 self._path_press_idx = len(self._path_points)
                 self._path_points.append((mx, my, 'L'))
+                self._dbg('draw.addPoint', idx=self._path_press_idx,
+                          mx=round(mx,2), my=round(my,2), snap=self._snap_to_grid)
                 self._draw_path_preview()
                 event.accept(); return
 
@@ -2904,6 +4184,11 @@ class EdofCanvas(QGraphicsView):
         # v4.1.16.3: forward to scene/proxy widget when inline edit is active
         if self._inline_widget is not None and self._pan_start is None:
             super().mouseMoveEvent(event); return
+        # v4.2.9.8: flag active object manipulation so the page renders at a
+        # lower DPI for responsiveness (full quality restored on release).
+        self._interacting = bool(getattr(self, '_drag_mode', None)
+                                 or getattr(self, '_path_drag_handle', None)
+                                 or getattr(self, '_path_drag_origin', None))
         if self._pan_start is not None:
             d=event.pos()-self._pan_start
             self.horizontalScrollBar().setValue(self._pan_scroll0[0]-d.x())
@@ -2917,9 +4202,12 @@ class EdofCanvas(QGraphicsView):
             and self._rect_draw_preview is not None):
             x0, y0 = self._rect_draw_start.x(), self._rect_draw_start.y()
             x1, y1 = sp.x(), sp.y()
-            rx = min(x0, x1); ry = min(y0, y1)
-            rw = abs(x1 - x0); rh = abs(y1 - y0)
-            self._rect_draw_preview.setRect(rx, ry, rw, rh)
+            if self._rect_draw_kind in ("line", "arrow"):
+                self._rect_draw_preview.setLine(x0, y0, x1, y1)
+            else:
+                rx = min(x0, x1); ry = min(y0, y1)
+                rw = abs(x1 - x0); rh = abs(y1 - y0)
+                self._rect_draw_preview.setRect(rx, ry, rw, rh)
             event.accept(); return
 
         # v4.1.1: pen tool — drag during press converts last point to curve
@@ -2938,6 +4226,8 @@ class EdofCanvas(QGraphicsView):
                     p = self._path_points[idx]
                     px_pt, py_pt = p[0], p[1]
                     self._path_points[idx] = (px_pt, py_pt, 'C', mx, my)
+                    self._dbg('draw.dragToCurve', idx=idx, dist=round(dist,2),
+                              handle=(round(mx,2), round(my,2)))
                     self._draw_path_preview()
             event.accept(); return
 
@@ -2975,32 +4265,61 @@ class EdofCanvas(QGraphicsView):
                 if not cmd or pi + 1 >= len(cmd):
                     self._path_drag_handle = None
                     event.accept(); return
+                # v4.2.6.0: Photoshop-style live modifiers (read DURING drag),
+                # for both anchor and tangent handles:
+                #   (none)      = snap to grid (if grid snap is on)
+                #   Ctrl        = no snapping
+                #   Shift       = constrain to 0/45/90 deg from the drag start
+                #   Ctrl+Shift  = constrain, no snapping
+                _mods = event.modifiers()
+                _ctrl = bool(_mods & Qt.KeyboardModifier.ControlModifier)
+                _shift = bool(_mods & Qt.KeyboardModifier.ShiftModifier)
+                if getattr(self, '_path_drag_start', None) is None:
+                    self._path_drag_start = (cmd[pi], cmd[pi+1])
+                if _shift:
+                    _sx, _sy = self._path_drag_start
+                    _ddx = local_x - _sx; _ddy = local_y - _sy
+                    if _ddx or _ddy:
+                        _ang = math.atan2(_ddy, _ddx)
+                        _step = math.pi / 4.0
+                        _ang = round(_ang / _step) * _step
+                        _dist = math.hypot(_ddx, _ddy)
+                        local_x = _sx + _dist * math.cos(_ang)
+                        local_y = _sy + _dist * math.sin(_ang)
+                if (not _ctrl) and getattr(self, '_snap_to_grid', False) and abs(rot_deg) < 0.01:
+                    _s = self._snap_size_mm
+                    if _s and _s > 0:
+                        _cx = local_x + obj.transform.x
+                        _cy = local_y + obj.transform.y
+                        _cx = round(_cx / _s) * _s
+                        _cy = round(_cy / _s) * _s
+                        local_x = _cx - obj.transform.x
+                        local_y = _cy - obj.transform.y
                 old_x, old_y = cmd[pi], cmd[pi+1]
                 cmd[pi] = local_x
                 cmd[pi+1] = local_y
+                self._dbg('edit.dragHandle', ci=ci, pi=pi, kind=kind,
+                          old=(round(old_x,2), round(old_y,2)),
+                          new=(round(local_x,2), round(local_y,2)),
+                          ctrl=_ctrl, shift=_shift, rot=round(rot_deg,1))
                 # v4.1.10.1: if this endpoint is in the multi-selection, move
                 # the other selected anchors by the same delta (group drag).
+                # v4.2.6.0: group drag — move every OTHER selected anchor by the
+                # same delta, INCLUDING its tangent handles, so multi-point moves
+                # keep the curve shape (the dragged anchor itself is handled by
+                # the per-anchor logic below).
                 if (kind == 'endpoint'
                     and ci in self._path_selected_anchors
                     and len(self._path_selected_anchors) > 1):
                     dx_g = local_x - old_x; dy_g = local_y - old_y
-                    for other_ci in self._path_selected_anchors:
-                        if other_ci == ci: continue
-                        if other_ci >= len(obj.path_data): continue
-                        ocmd = obj.path_data[other_ci]
-                        if not ocmd: continue
-                        oop = ocmd[0]
-                        if oop == 'M' or oop == 'L':
-                            ocmd[1] += dx_g; ocmd[2] += dy_g
-                        elif oop == 'C':
-                            # Move all 3 coords (cp1, cp2, endpoint) so the
-                            # curve segment translates as a whole.
-                            ocmd[1] += dx_g; ocmd[2] += dy_g
-                            ocmd[3] += dx_g; ocmd[4] += dy_g
-                            ocmd[5] += dx_g; ocmd[6] += dy_g
-                        elif oop == 'Q':
-                            ocmd[1] += dx_g; ocmd[2] += dy_g
-                            ocmd[3] += dx_g; ocmd[4] += dy_g
+                    if dx_g or dy_g:
+                        for _ai in range(self._anchor_count(obj)):
+                            _aci = self._anchor_cmd_index(obj, _ai)
+                            if _aci == ci:
+                                continue
+                            if _aci not in self._path_selected_anchors:
+                                continue
+                            self._translate_anchor(obj, _ai, dx_g, dy_g)
                 # v4.1.12.6: anchor-centric CP drag with proper smooth mirror.
                 # Old code only handled middle anchors; M of closed path was
                 # broken because its tangent_in lives in wrap-cmd.cp2 (not
@@ -3076,16 +4395,25 @@ class EdofCanvas(QGraphicsView):
                             nxt = obj.path_data[ci + 1]
                             if nxt and nxt[0] == 'C':
                                 nxt[1] += dx; nxt[2] += dy
-                        # Closed-path wrap: last drawn cmd before Z
+                        # Closed-path wrap: only sync the wrap-cmd, and ONLY if
+                        # path_data[-2] is genuinely the wrap-cmd. M has already
+                        # been moved at this point, so match the wrap endpoint to
+                        # M's OLD position (the wrap still points there).
+                        # v4.2.10.8 FIX: without this guard, a closed path that
+                        # lacks a wrap-cmd (straight-Z closure) would have its
+                        # LAST user anchor overwritten with M's position when M
+                        # was dragged, making that anchor vanish onto M.
                         is_closed = (obj.path_data and obj.path_data[-1]
                                      and obj.path_data[-1][0] == "Z")
                         if is_closed and len(obj.path_data) >= 3:
                             last_drawn = obj.path_data[-2]
-                            if last_drawn and last_drawn[0] == 'C':
-                                # Move its cp2 (and endpoint, since the
-                                # endpoint IS M for a closed path… but the
-                                # endpoint coord is stored numerically and
-                                # must match the new M)
+                            is_wrap = (last_drawn and last_drawn[0] == 'C'
+                                       and len(last_drawn) >= 7
+                                       and abs(last_drawn[5] - old_x) <= 0.1
+                                       and abs(last_drawn[6] - old_y) <= 0.1)
+                            if is_wrap:
+                                # Move its cp2 (and endpoint, which IS M for a
+                                # closed path, so it must track M's new pos)
                                 last_drawn[3] += dx; last_drawn[4] += dy
                                 last_drawn[5] = cmd[1]
                                 last_drawn[6] = cmd[2]
@@ -3140,10 +4468,12 @@ class EdofCanvas(QGraphicsView):
         # v4.1.16.3: forward to editor when inline active
         if self._inline_widget is not None and self._pan_start is None:
             super().mouseReleaseEvent(event); return
+        # v4.2.9.8: interaction ended -> next render is full quality
+        self._interacting = False
         # v4.1.1: hand tool release
         if getattr(self, '_hand_tool', False) and event.button() == Qt.MouseButton.LeftButton:
             self._pan_start=None; self._pan_scroll0=None
-            self.viewport().setCursor(QCursor(Qt.CursorShape.OpenHandCursor))
+            self.viewport().setCursor(tcur('hand', Qt.CursorShape.OpenHandCursor))
             event.accept(); return
         if event.button()==Qt.MouseButton.MiddleButton:
             self._pan_start=None; self._pan_scroll0=None
@@ -3157,19 +4487,32 @@ class EdofCanvas(QGraphicsView):
             sp = self._sp(event)
             x0, y0 = self._rect_draw_start.x(), self._rect_draw_start.y()
             x1, y1 = sp.x(), sp.y()
+            kind = self._rect_draw_kind
+            cb = self._rect_draw_callback
+            if kind in ("line", "arrow"):
+                # v4.2.10.1: signed endpoints preserve the drawn direction, and
+                # axis-aligned lines (zero-width/height bbox) are allowed.
+                sx, sy = self._to_mm(QPointF(x0, y0))
+                ex, ey = self._to_mm(QPointF(x1, y1))
+                if self._snap_to_grid:
+                    s = self._snap_size_mm
+                    sx = round(sx/s)*s; sy = round(sy/s)*s
+                    ex = round(ex/s)*s; ey = round(ey/s)*s
+                self._cancel_rect_draw()
+                import math as _ml
+                if _ml.hypot(ex - sx, ey - sy) >= 2.0 and cb is not None:
+                    cb(sx, sy, ex - sx, ey - sy)   # start + signed deltas
+                event.accept(); return
+            # rect / ellipse / textbox / polygon / ... : bounding-box geometry
             rx = min(x0, x1); ry = min(y0, y1)
             rw = abs(x1 - x0); rh = abs(y1 - y0)
-            # Convert to mm
             x_mm, y_mm = self._to_mm(QPointF(rx, ry))
             w_mm = rw / mm_to_px(1.0, self._dpi)
             h_mm = rh / mm_to_px(1.0, self._dpi)
-            # Snap to grid if enabled
             if self._snap_to_grid:
                 s = self._snap_size_mm
                 x_mm = round(x_mm/s)*s; y_mm = round(y_mm/s)*s
                 w_mm = max(s, round(w_mm/s)*s); h_mm = max(s, round(h_mm/s)*s)
-            # Require minimum size (5mm); below that treat as cancel and exit mode
-            cb = self._rect_draw_callback
             self._cancel_rect_draw()
             if w_mm >= 5.0 and h_mm >= 5.0 and cb is not None:
                 cb(x_mm, y_mm, w_mm, h_mm)
@@ -3181,7 +4524,9 @@ class EdofCanvas(QGraphicsView):
             self._path_press_idx = None
         # v4.1.0/4.1.3/4.1.9.1: release path edit handle
         if getattr(self, '_path_drag_handle', None) is not None:
-            self._path_drag_handle = None
+            self._dbg('edit.releaseHandle', ci=self._path_drag_handle.data(0),
+                      pi=self._path_drag_handle.data(1), kind=self._path_drag_handle.data(2))
+            self._path_drag_handle = None; self._path_drag_start = None
             # v4.1.9.1: after dragging an anchor or CP, recompute the bbox to
             # encompass the entire curve (including overshoot from control
             # points). Previously the bbox was based on transform.x/y/w/h
@@ -3576,6 +4921,7 @@ class EdofCanvas(QGraphicsView):
         self.objectChanged.emit()
 
     def _insert_path_point_at_click(self, sp):
+        self._dbg('insertPoint.enter', sp=(round(sp.x(),1), round(sp.y(),1)))
         """v4.1.8/4.1.10.1: Insert a new anchor point on the path at the click
         location. For straight L segments: split into two L. For bezier C
         segments: use de Casteljau subdivision so the curve shape is preserved
@@ -3897,8 +5243,10 @@ class EdofCanvas(QGraphicsView):
         import math as _math
         page = self._cur_page()
         obj = page.get_object(self._path_edit_obj_id) if page else None
-        if not obj or not obj.path_data: return
+        if not obj or not obj.path_data:
+            self._dbg('connect.abort', reason='no_obj_or_data'); return
         selected = sorted(self._path_selected_anchors or set())
+        self._dbg('connect.enter', selected=selected, ncmds=len(obj.path_data))
         if len(selected) != 2:
             return
         n = self._anchor_count(obj)
@@ -4020,8 +5368,10 @@ class EdofCanvas(QGraphicsView):
         import math as _math
         page = self._cur_page()
         obj = page.get_object(self._path_edit_obj_id) if page else None
-        if not obj or not obj.path_data: return
+        if not obj or not obj.path_data:
+            self._dbg('disconnect.abort', reason='no_obj_or_data'); return
         selected = list(self._path_selected_anchors or set())
+        self._dbg('disconnect.enter', selected=sorted(selected), ncmds=len(obj.path_data))
         if len(selected) != 1: return
         ci = selected[0]
         n = self._anchor_count(obj)
@@ -4139,8 +5489,55 @@ class EdofCanvas(QGraphicsView):
         if getattr(self, '_path_drawing', False):
             self._finish_path_drawing()
             event.accept(); return
+        # v4.2.11.45: in document mode the body sits in near-permanent sticky
+        # inline edit, so the `not self._inline_widget` guard below made it
+        # impossible to double-click INTO a header/footer -- the event was
+        # silently swallowed while the body editor was open (i.e. almost
+        # always). If a double-click lands on a header/footer box while some
+        # inline session is active, commit that session and switch the editor
+        # to the band.
+        if event.button()==Qt.MouseButton.LeftButton and self._inline_widget:
+            try:
+                sp=self._sp(event); hit=self._hit_obj(sp, allow_hf=True)
+                cur_id=getattr(self._inline_obj, 'id', None)
+                tgt=self._find_obj(hit) if (hit and hit != cur_id) else None
+                from edof.format.document_boxes import (
+                    DocumentHeaderBox, DocumentFooterBox)
+                if tgt is not None and isinstance(
+                        tgt, (DocumentHeaderBox, DocumentFooterBox)):
+                    # v4.2.11.46: keep the viewport stable during the switch:
+                    # don't flip the reserved toolbar margin off/on (84->0->84
+                    # shifted the whole page = visible jump) and restore the
+                    # scroll position afterwards.
+                    self._inline_switching = True
+                    _hsb = self.horizontalScrollBar().value()
+                    _vsb = self.verticalScrollBar().value()
+                    self._skip_sticky_reentry = True
+                    try:
+                        ed = self._inline_widget
+                        if ed is not None:
+                            ed.commit_to_textbox()
+                    except Exception:
+                        pass
+                    if self._inline_widget is not None:
+                        self._cancel_inline()
+                    self._skip_sticky_reentry = False
+                    # The commit may have repaginated and replaced the box
+                    # instance -- re-resolve it on the current page.
+                    fresh = self._find_obj(tgt.id) or tgt
+                    self._sel_id = fresh.id
+                    self._start_inline(fresh)
+                    self._inline_switching = False
+                    try:
+                        self.horizontalScrollBar().setValue(_hsb)
+                        self.verticalScrollBar().setValue(_vsb)
+                    except Exception:
+                        pass
+                    event.accept(); return
+            except Exception:
+                import traceback as _tb; _tb.print_exc()
         if event.button()==Qt.MouseButton.LeftButton and not self._inline_widget:
-            sp=self._sp(event); hit=self._hit_obj(sp)
+            sp=self._sp(event); hit=self._hit_obj(sp, allow_hf=True)
             if hit:
                 self._sel_id=hit; obj=self._sel_obj()
                 if   isinstance(obj, edof.TextBox):  self._start_inline(obj)
@@ -4288,36 +5685,83 @@ class EdofCanvas(QGraphicsView):
                 h_bar.setValue(int(h_bar.value() + h_delta))
         event.accept()
 
+    def _dbg(self, tag, **extra):
+        """Detailed, opt-in debug for curve creation/editing + key handling.
+        No-op unless EDOF_DEBUG is enabled. Always records the current mode and
+        path state so the log shows context for every event."""
+        try:
+            from edof.engine.debug_log import is_enabled, log as _dlog
+            if not is_enabled():
+                return
+        except Exception:
+            return
+        try:
+            st = {
+                'mode': ('draw' if getattr(self, '_path_drawing', False)
+                         else 'pathedit' if getattr(self, '_path_edit_obj_id', None)
+                         else 'rectdraw' if getattr(self, '_rect_draw_kind', None)
+                         else 'normal'),
+                'sel': getattr(self, '_sel_id', None),
+                'edit_id': getattr(self, '_path_edit_obj_id', None),
+                'npts': len(getattr(self, '_path_points', []) or []),
+                'drag_h': getattr(self, '_path_drag_handle', None) is not None,
+                'drag_o': getattr(self, '_path_drag_origin', None) is not None,
+            }
+            st.update(extra)
+            _dlog('curve.' + tag, **st)
+        except Exception:
+            pass
+
     def keyPressEvent(self,event):
+        self._dbg('keyPress', key=_key_name(event.key()), text=event.text(),
+                  mods=_mods_str(event.modifiers()), rep=event.isAutoRepeat())
+        # v4.2.9.7: Alt held over the page -> show the magnifier cursor (the
+        # wheel will zoom). Doesn't consume the event (Alt stays a modifier).
+        if event.key() == Qt.Key.Key_Alt and not getattr(self, '_alt_zoom_on', False):
+            self._alt_zoom_on = True
+            try:
+                from PyQt6.QtWidgets import QApplication
+                QApplication.setOverrideCursor(_zoom_cursor())
+            except Exception: pass
         # v4.1.16.3: if inline edit is active, ALL key events go to the
         # editor widget (arrow keys, delete, etc). Without this guard the
         # canvas would nudge the textbox object while the user is trying
         # to navigate the cursor or delete text.
         if self._inline_widget is not None:
+            self._dbg('key.toInline', key=_key_name(event.key()))
             super().keyPressEvent(event); return
         # v4.1.15: rect draw — Esc cancels
         if self._rect_draw_kind is not None and event.key() == Qt.Key.Key_Escape:
+            self._dbg('key.rectDrawEsc')
             self._cancel_rect_draw()
             event.accept(); return
         # v4.0.3: path drawing tool keyboard handling
         if getattr(self, '_path_drawing', False):
             key=event.key()
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._dbg('key.finishDraw')
                 self._finish_path_drawing()
                 event.accept(); return
             elif key == Qt.Key.Key_Escape:
+                self._dbg('key.cancelDraw')
                 self._cancel_path_drawing()
                 event.accept(); return
+            elif key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+                # undo last placed point while drawing (if supported below)
+                self._dbg('key.drawBackspace')
         # v4.1.11: in path edit mode, C = Connect / D = Disconnect / Esc = exit
         if getattr(self, '_path_edit_obj_id', None):
             key = event.key()
             if key == Qt.Key.Key_C and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+                self._dbg('key.connect')
                 self._path_connect_selected()
                 event.accept(); return
             if key == Qt.Key.Key_D and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+                self._dbg('key.disconnect')
                 self._path_disconnect_selected()
                 event.accept(); return
             if key == Qt.Key.Key_Escape:
+                self._dbg('key.exitPathEdit')
                 self._exit_path_edit_mode()
                 self.schedule_render(0)
                 event.accept(); return
@@ -4608,17 +6052,22 @@ class EdofCanvas(QGraphicsView):
             except Exception: pass
         self._path_preview_items=[]
         if len(self._path_points) < 1: return
-        pen=QPen(QColor(120,180,255,200),2,Qt.PenStyle.SolidLine)
-        handle_pen = QPen(QColor(255, 200, 80, 200), 1, Qt.PenStyle.DashLine)
+        # v4.2.10.8: size preview dots/handles in SCREEN pixels (divide by zoom)
+        # and use cosmetic pens, matching edit-mode handles. Previously they were
+        # fixed scene-px radii, so they grew/shrank with zoom during drawing.
+        _z = max(0.05, float(getattr(self, '_zoom', 1.0) or 1.0))
+        pen=QPen(QColor(120,180,255,200),2,Qt.PenStyle.SolidLine); pen.setCosmetic(True)
+        handle_pen = QPen(QColor(255, 200, 80, 200), 1, Qt.PenStyle.DashLine); handle_pen.setCosmetic(True)
         cp_brush = QBrush(QColor(255, 220, 100, 200))
         # First point larger and orange to indicate "click to close"
         for i,p in enumerate(self._path_points):
             mx, my = p[0], p[1]
             x=mm_to_px(mx, self._dpi); y=mm_to_px(my, self._dpi)
-            r = 5 if i == 0 and len(self._path_points) >= 3 else 3
+            r = (5 if i == 0 and len(self._path_points) >= 3 else 3) / _z
             color = QColor(220, 130, 80) if i == 0 and len(self._path_points) >= 3 else QColor(120,180,255)
+            _dot_pen = QPen(color, 1.5); _dot_pen.setCosmetic(True)
             dot=self.scene().addEllipse(x-r, y-r, 2*r, 2*r,
-                                          QPen(color,1.5),
+                                          _dot_pen,
                                           QBrush(color))
             dot.setZValue(9000)
             self._path_preview_items.append(dot)
@@ -4629,8 +6078,10 @@ class EdofCanvas(QGraphicsView):
                 line = self.scene().addLine(x, y, hxp, hyp, handle_pen)
                 line.setZValue(9000)
                 self._path_preview_items.append(line)
-                cp_dot = self.scene().addEllipse(hxp - 3, hyp - 3, 6, 6,
-                                                    QPen(QColor(255, 200, 80, 255), 1),
+                _cr = 3 / _z
+                _cp_pen = QPen(QColor(255, 200, 80, 255), 1); _cp_pen.setCosmetic(True)
+                cp_dot = self.scene().addEllipse(hxp - _cr, hyp - _cr, 2*_cr, 2*_cr,
+                                                    _cp_pen,
                                                     cp_brush)
                 cp_dot.setZValue(9000)
                 self._path_preview_items.append(cp_dot)
@@ -4682,8 +6133,11 @@ class EdofCanvas(QGraphicsView):
         """
         pts=list(self._path_points or [])
         close = getattr(self, '_path_close', False)
+        self._dbg('finishDraw.enter', npts=len(pts), close=close,
+                  types=[p[2] for p in pts])
         self._cancel_path_drawing()
         if len(pts) < 2:
+            self._dbg('finishDraw.abort', reason='too_few_points', npts=len(pts))
             return
         # v4.1.11: when closing, the user typically clicked on (near) the
         # first point. We don't want to duplicate that anchor — instead the
@@ -4738,21 +6192,33 @@ class EdofCanvas(QGraphicsView):
             else:
                 path_data.append(["L", mx, my])
         if close:
-            # v4.1.12.1: only emit a wrap-cmd when the closure needs to be
-            # SMOOTH (last and/or first anchor had a drag-handle).
-            # v4.1.17.1: but require BOTH endpoints to have real handles —
-            # otherwise the degenerate wrap-C with cp2 at (0,0) showed up
-            # as a phantom control point at the bbox origin in path-edit mode.
+            # v4.1.12.1: emit a wrap-cmd that closes the path back to M.
+            # v4.2.10.8 FIX: the wrap-cmd's ENDPOINT must equal M's local
+            # position so _wrap_cmd_index() recognizes it and hides it from the
+            # anchor list. Previously it was hardcoded (0.0, 0.0); whenever M
+            # was not at the bbox origin (almost always) the wrap was mistaken
+            # for a real extra anchor (phantom point) and the closure did not
+            # connect as a curve. Also emit when EITHER end is curved (was: both),
+            # falling back to the anchor position for a corner end.
             last_has_handle = (pts and pts[-1][2] == 'C' and len(pts[-1]) >= 5)
             first_has_handle = (pts and pts[0][2] == 'C' and len(pts[0]) >= 5)
-            if last_has_handle and first_has_handle:
-                last_pt = pts[-1]
-                cp1x_w = (2 * last_pt[0] - last_pt[3]) - min_x
-                cp1y_w = (2 * last_pt[1] - last_pt[4]) - min_y
-                cp2x_w = (2 * pts[0][0] - pts[0][3]) - min_x
-                cp2y_w = (2 * pts[0][1] - pts[0][4]) - min_y
-                path_data.append(["C", cp1x_w, cp1y_w, cp2x_w, cp2y_w,
-                                    0.0, 0.0])
+            m_x = pts[0][0] - min_x; m_y = pts[0][1] - min_y
+            if last_has_handle or first_has_handle:
+                last_pt = pts[-1]; first_pt = pts[0]
+                # cp1 = last anchor's OUTGOING tangent (its stored handle, used
+                # directly like every other segment's cp1); corner -> anchor.
+                if last_has_handle:
+                    cp1x_w = last_pt[3] - min_x; cp1y_w = last_pt[4] - min_y
+                else:
+                    cp1x_w = last_pt[0] - min_x; cp1y_w = last_pt[1] - min_y
+                # cp2 = first anchor's INCOMING tangent (mirror of its stored
+                # outgoing handle); corner -> anchor.
+                if first_has_handle:
+                    cp2x_w = (2 * first_pt[0] - first_pt[3]) - min_x
+                    cp2y_w = (2 * first_pt[1] - first_pt[4]) - min_y
+                else:
+                    cp2x_w = first_pt[0] - min_x; cp2y_w = first_pt[1] - min_y
+                path_data.append(["C", cp1x_w, cp1y_w, cp2x_w, cp2y_w, m_x, m_y])
             path_data.append(["Z"])
         from edof.format.objects import Shape, SHAPE_PATH
         sh=Shape(shape_type=SHAPE_PATH)
@@ -4781,9 +6247,17 @@ class EdofCanvas(QGraphicsView):
                 self.set_sel_id(sh.id)
                 self.schedule_render()
                 win._push("Add Path")
+                self._dbg('finishDraw.created', id=sh.id, ncmds=len(path_data),
+                          close=close, bbox=(round(min_x,1), round(min_y,1),
+                                             round(w,1), round(h,1)))
+            else:
+                self._dbg('finishDraw.abort', reason='no_page')
+        else:
+            self._dbg('finishDraw.abort', reason='no_window')
 
     def _cancel_path_drawing(self):
         """Exit path-drawing mode and clean up preview."""
+        self._dbg('cancelDraw', npts=len(getattr(self,'_path_points',[]) or []))
         self._path_drawing=False
         self._path_points=[]
         self._path_close=False
@@ -4805,7 +6279,7 @@ class EdofCanvas(QGraphicsView):
         self._rect_draw_callback = callback
         self._rect_draw_start = None
         try:
-            self.viewport().setCursor(QCursor(Qt.CursorShape.CrossCursor))
+            self.viewport().setCursor(tcur('crosshair', Qt.CursorShape.CrossCursor))
         except Exception: pass
 
     def _cancel_rect_draw(self):
@@ -4825,7 +6299,9 @@ class EdofCanvas(QGraphicsView):
     def _enter_path_edit_mode(self, obj):
         """Show drag handles for each point of a Shape with shape_type='path'."""
         from edof.format.objects import SHAPE_PATH
+        self._dbg('enterEdit', id=getattr(obj,'id',None), stype=getattr(obj,'shape_type',None), ncmds=len(getattr(obj,'path_data',[]) or []))
         if obj.shape_type != SHAPE_PATH or not obj.path_data:
+            self._dbg('enterEdit.abort', reason='not_a_path_or_empty')
             return
         self._exit_path_edit_mode()
         self._path_edit_obj_id = obj.id
@@ -4853,6 +6329,9 @@ class EdofCanvas(QGraphicsView):
         if not page: return
         obj = page.get_object(oid)
         if not obj or not obj.path_data: return
+        self._dbg('refreshHandles', id=oid, ncmds=len(obj.path_data),
+                  selected=sorted(getattr(self, '_path_selected_anchors', set()) or set()),
+                  rot=round(obj.transform.rotation or 0.0, 1))
         # v4.1.3: render endpoint handles + bezier control handles + control lines
         ox = obj.transform.x; oy = obj.transform.y
         # v4.1.10.2: handles must rotate along with the rendered path so they
@@ -4915,6 +6394,12 @@ class EdofCanvas(QGraphicsView):
         endpoint_brush_sel   = QBrush(QColor(120, 230, 255, 255))
         cp_pen   = QPen(QColor(80, 150, 255, 255), 2)
         cp_brush = QBrush(QColor(180, 220, 255, 255))
+        # v4.2.6.0: keep handle outlines crisp (constant 1-2 px) at any zoom,
+        # and size the handle shapes in SCREEN pixels by dividing by the zoom
+        # so they neither grow nor pixelate when zooming in.
+        for _p in (endpoint_pen_unsel, endpoint_pen_sel, cp_pen, line_pen):
+            _p.setCosmetic(True)
+        _z = max(0.05, float(getattr(self, '_zoom', 1.0) or 1.0))
 
         # Second pass: anchor handles + tangent handles
         handles_def = []
@@ -4955,7 +6440,7 @@ class EdofCanvas(QGraphicsView):
                 brush = endpoint_brush_sel if is_sel else endpoint_brush_unsel
                 # v4.1.10: shape varies by point type
                 ptype = ptypes[ci] if ci < len(ptypes) else "corner"
-                r = 6
+                r = 6.0 / _z
                 if ptype == "corner":
                     # Square
                     handle = self.scene().addRect(
@@ -4982,7 +6467,7 @@ class EdofCanvas(QGraphicsView):
                     ])
                     handle = self.scene().addPolygon(poly, pen, brush)
             else:
-                r = 5
+                r = 5.0 / _z
                 handle = self.scene().addEllipse(
                     x_px - r, y_px - r, 2*r, 2*r,
                     cp_pen, cp_brush)
@@ -4991,6 +6476,29 @@ class EdofCanvas(QGraphicsView):
             handle.setData(1, pi)
             handle.setData(2, kind)
             self._path_edit_handles.append(handle)
+
+    def _translate_anchor(self, obj, ai, dx, dy):
+        """v4.2.6.0: move an anchor's endpoint AND both its tangent handles by
+        (dx, dy) in object-local mm, so a group drag keeps the curve shape."""
+        ci = self._anchor_cmd_index(obj, ai)
+        if ci is None or ci >= len(obj.path_data):
+            return
+        cmd = obj.path_data[ci]
+        if not cmd:
+            return
+        op = cmd[0]
+        if op in ('M', 'L') and len(cmd) >= 3:
+            cmd[1] += dx; cmd[2] += dy
+        elif op == 'C' and len(cmd) >= 7:
+            cmd[5] += dx; cmd[6] += dy
+        elif op == 'Q' and len(cmd) >= 5:
+            cmd[3] += dx; cmd[4] += dy
+        for storage in (self._tangent_in_storage(obj, ai),
+                        self._tangent_out_storage(obj, ai)):
+            if storage:
+                t, ix, iy = storage
+                if ix < len(t) and iy < len(t):
+                    t[ix] += dx; t[iy] += dy
 
     # ── v4.1.11: anchor-centric helpers ─────────────────────────────────────
     #
@@ -5284,6 +6792,7 @@ class EdofCanvas(QGraphicsView):
         return (0.0, 0.0)
 
     def _exit_path_edit_mode(self):
+        self._dbg('exitEdit', id=getattr(self,'_path_edit_obj_id',None))
         for h in getattr(self, '_path_edit_handles', []):
             try: self.scene().removeItem(h)
             except Exception: pass
@@ -5323,22 +6832,86 @@ class EdofCanvas(QGraphicsView):
 
     # ── Cursor ────────────────────────────────────────────────────────────────
 
+    def _resize_cursor(self, handle, rot):
+        """Pick a resize cursor that matches the handle's on-screen orientation,
+        accounting for the object's rotation."""
+        if handle == 'ROT':
+            return tcur('rotate', Qt.CursorShape.CrossCursor)
+        base = {'ML':0,'MR':0,'TC':90,'BC':90,'TL':135,'BR':135,'TR':45,'BL':45}.get(handle)
+        if base is None:
+            return tcur('move', Qt.CursorShape.SizeAllCursor)
+        ang = (base + (rot or 0.0)) % 180.0
+        buckets = ((0,'resize_ew',Qt.CursorShape.SizeHorCursor),
+                   (45,'resize_nesw',Qt.CursorShape.SizeBDiagCursor),
+                   (90,'resize_ns',Qt.CursorShape.SizeVerCursor),
+                   (135,'resize_nwse',Qt.CursorShape.SizeFDiagCursor))
+        best = min(buckets, key=lambda b: min(abs(ang-b[0]), 180-abs(ang-b[0])))
+        return tcur(best[1], best[2])
+
     def _update_cursor(self,sp):
+        from PyQt6.QtWidgets import QApplication
+        # v4.2.7.2: rectangle drawing
+        if self._rect_draw_kind is not None:
+            self.viewport().setCursor(tcur('crosshair', Qt.CursorShape.CrossCursor)); return
+        # pen drawing — near the first point (with >=3 pts) shows the close cursor
+        if getattr(self, '_path_drawing', False):
+            name = 'pen'
+            try:
+                if len(self._path_points) >= 3:
+                    mx, my = self._to_mm(sp)
+                    fx, fy = self._path_points[0][:2]
+                    if abs(mx-fx) < 3.0 and abs(my-fy) < 3.0:
+                        name = 'pen_close'
+            except Exception:
+                pass
+            self.viewport().setCursor(tcur(name, Qt.CursorShape.CrossCursor)); return
+        if getattr(self, '_hand_tool', False):
+            self.viewport().setCursor(tcur('hand', Qt.CursorShape.OpenHandCursor)); return
+        # path point editing — tangent / anchor / add / remove
+        if getattr(self, '_path_edit_obj_id', None):
+            mods = QApplication.keyboardModifiers()
+            hit = None
+            for h in reversed(self._path_edit_handles):
+                if h.data(0) is None: continue
+                if h.sceneBoundingRect().adjusted(-2,-2,2,2).contains(sp):
+                    hit = h; break
+            if hit is not None:
+                if hit.data(2) == 'endpoint':
+                    if mods & Qt.KeyboardModifier.AltModifier:
+                        self.viewport().setCursor(tcur('remove_point', Qt.CursorShape.PointingHandCursor))
+                    elif mods & Qt.KeyboardModifier.ControlModifier:
+                        self.viewport().setCursor(tcur('tangent', Qt.CursorShape.CrossCursor))
+                    else:
+                        self.viewport().setCursor(tcur('move', Qt.CursorShape.SizeAllCursor))
+                else:
+                    self.viewport().setCursor(tcur('tangent', Qt.CursorShape.CrossCursor))
+            else:
+                self.viewport().setCursor(tcur('add_point', Qt.CursorShape.CrossCursor))
+            return
         handle=self._overlay.hit_handle(sp)
-        if handle: self.viewport().setCursor(QCursor(self._overlay.cursor_for(handle)))
+        if handle:
+            obj=self._sel_obj()
+            rot=getattr(obj.transform,'rotation',0.0) if obj else 0.0
+            self.viewport().setCursor(self._resize_cursor(handle, rot))
         elif self._hit_obj(sp):
             obj=self._sel_obj()
-            cur=(Qt.CursorShape.ForbiddenCursor if (obj and obj.locked)
-                 else Qt.CursorShape.SizeAllCursor)
-            self.viewport().setCursor(QCursor(cur))
-        else: self.viewport().setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            if obj and obj.locked:
+                self.viewport().setCursor(tcur('not_allowed', Qt.CursorShape.ForbiddenCursor))
+            else:
+                self.viewport().setCursor(tcur('move', Qt.CursorShape.SizeAllCursor))
+        else: self.viewport().setCursor(tcur('move', Qt.CursorShape.ArrowCursor))
 
     # ── Hit test ──────────────────────────────────────────────────────────────
 
-    def _hit_obj(self,sp):
+    def _hit_obj(self,sp,allow_hf=False):
         if not self._doc or not self._doc.pages: return None
         pg=self._doc.pages[self._page_idx]; mx,my=self._to_mm(sp)
         doc_mode = getattr(self._doc, 'mode', '') == 'document'
+        try:
+            from edof.format.document_boxes import (
+                DocumentHeaderBox, DocumentFooterBox)
+        except Exception:
+            DocumentHeaderBox = DocumentFooterBox = ()
         for obj in reversed(pg.sorted_objects()):
             # v4.1.23.43: the document body is edited inline and must NEVER be
             # picked / dragged as an object via a canvas click. It spans the
@@ -5347,6 +6920,12 @@ class EdofCanvas(QGraphicsView):
             # sitting over it). It still appears in the Objects list so its
             # z-order can be changed there.
             if doc_mode and self._is_document_body(obj):
+                continue
+            # v4.2.11.42: header/footer boxes are NOT free-form objects. Their
+            # geometry is driven by page setup (margins / band height), so they
+            # must never show selection handles or be dragged/resized. They are
+            # editable by DOUBLE-CLICK only, which passes allow_hf=True.
+            if (not allow_hf) and isinstance(obj, (DocumentHeaderBox, DocumentFooterBox)):
                 continue
             t=obj.transform; cx,cy=t.x+t.width/2,t.y+t.height/2
             lx,ly=rotate_point(mx,my,cx,cy,-t.rotation)
@@ -5434,6 +7013,15 @@ class EdofCanvas(QGraphicsView):
                            self.schedule_render(),self.objectChanged.emit()))
             menu.addAction(t('ctx_flip_v'),lambda:(obj.transform.flip_vertical(),
                            self.schedule_render(),self.objectChanged.emit()))
+            menu.addSeparator()
+            fxm = menu.addMenu("Layer Effects")
+            fxm.addAction("Copy Effects", lambda o=obj: _copy_layer_effects(o))
+            _pa = fxm.addAction("Paste Effects", lambda o=obj: (
+                _paste_layer_effects(o), self.schedule_render(0), self.objectChanged.emit()))
+            _pa.setEnabled(_has_fx_clipboard())
+            _ca = fxm.addAction("Clear Effects", lambda o=obj: (
+                _clear_layer_effects(o), self.schedule_render(0), self.objectChanged.emit()))
+            _ca.setEnabled(bool(getattr(obj, 'effects', None)))
         menu.exec(self.viewport().mapToGlobal(vpos))
 
     def _toggle_lock(self):
@@ -5491,11 +7079,87 @@ class EdofCanvas(QGraphicsView):
 
     # ── Zoom / Fit ────────────────────────────────────────────────────────────
 
+    def _restore_alt_cursor(self):
+        if getattr(self, '_alt_zoom_on', False):
+            self._alt_zoom_on = False
+            try:
+                from PyQt6.QtWidgets import QApplication
+                QApplication.restoreOverrideCursor()
+            except Exception: pass
+
+    def keyReleaseEvent(self, event):
+        if not event.isAutoRepeat():
+            self._dbg('keyRelease', key=_key_name(event.key()),
+                      mods=_mods_str(event.modifiers()))
+        if event.key() == Qt.Key.Key_Alt:
+            self._restore_alt_cursor()
+        super().keyReleaseEvent(event)
+
+    def enterEvent(self, event):
+        # re-apply the magnifier if Alt is still held when the pointer returns
+        try:
+            from PyQt6.QtWidgets import QApplication
+            if (QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier) \
+               and not getattr(self, '_alt_zoom_on', False):
+                self._alt_zoom_on = True
+                QApplication.setOverrideCursor(_zoom_cursor())
+        except Exception: pass
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._restore_alt_cursor()
+        super().leaveEvent(event)
+
+    def focusOutEvent(self, event):
+        self._restore_alt_cursor()
+        super().focusOutEvent(event)
+
+    def _zoom_bounds(self):
+        """(min, max) zoom. Max = 10 screen px per document px (== 1000% in the
+        status bar), where pixel edges show crisp. Min = half the fit-to-window
+        zoom (page fills ~half the viewport)."""
+        if not self._doc or not self._doc.pages:
+            return (0.05, 8.0)
+        base = float(self._dpi or 96)
+        try:
+            pg = self._doc.pages[self._page_idx]
+            docdpi = float(getattr(pg, 'dpi', 0) or getattr(self._doc, 'default_dpi', 0) or 96)
+        except Exception:
+            docdpi = 96.0
+        if docdpi <= 0:
+            docdpi = 96.0
+        max_z = 10.0 * docdpi / base
+        try:
+            pg = self._doc.pages[self._page_idx]
+            pw = mm_to_px(pg.width, base); ph = mm_to_px(pg.height, base)
+            vw = max(50, self.viewport().width()); vh = max(50, self.viewport().height())
+            min_z = (min(vw / pw, vh / ph) * 0.95) / 2.0
+        except Exception:
+            min_z = 0.05
+        if min_z <= 0:
+            min_z = 0.02
+        if min_z >= max_z:
+            min_z = max_z * 0.05
+        return (min_z, max_z)
+
     def _set_zoom(self,z):
         old_zoom=self._zoom
-        self._zoom=max(0.05,min(8.0,z))
+        mn, mx = self._zoom_bounds()
+        self._zoom=max(mn, min(mx, z))
         self.setTransform(QTransform().scale(self._zoom,self._zoom))
+        # v4.2.9.7: once we're upscaling the rendered pixmap (zoom beyond the
+        # render-DPI factor cap of 3x), switch to nearest-neighbour so pixel
+        # edges look crisp/blocky instead of blurry.
+        try:
+            mode = (Qt.TransformationMode.FastTransformation if self._zoom > 3.0
+                    else Qt.TransformationMode.SmoothTransformation)
+            self._page_item.setTransformationMode(mode)
+        except Exception: pass
         self._refresh_overlay(); self._reposition_inline()
+        # v4.2.6.0: rebuild path-edit handles so their screen size stays
+        # constant (they are sized by 1/zoom).
+        if getattr(self, '_path_edit_obj_id', None):
+            self._refresh_path_edit_handles()
         # v4.1.15.7: inline editor is a QGraphicsProxyWidget in the scene,
         # so the view transform scales it automatically — no manual rescale.
         # v4.1.0: re-render at higher DPI when zoomed in for crisp display
@@ -5509,13 +7173,21 @@ class EdofCanvas(QGraphicsView):
                 self._zoom_timer.timeout.connect(self._start_render)
             self._zoom_timer.start(150)
         self.viewport().update()
+        try: self.zoomChanged.emit(self._zoom)
+        except Exception: pass
 
     def zoom_fit(self):
         if not self._doc or not self._doc.pages: return
         pg=self._doc.pages[self._page_idx]
         pw=mm_to_px(pg.width,self._dpi); ph=mm_to_px(pg.height,self._dpi)
-        vw=max(100,self.viewport().width()); vh=max(100,self.viewport().height())
-        self._set_zoom(min(vw/pw,vh/ph)*0.95); self.centerOn(pw/2,ph/2)
+        # v4.2.11.42: the inline toolbar band is reserved via setViewportMargins,
+        # so viewport().width()/height() already exclude it -- Fit uses the
+        # usable area and centers the page within it (the page top lands below
+        # the ribbon).
+        vw=max(100,self.viewport().width())
+        vh=max(100,self.viewport().height())
+        self._set_zoom(min(vw/pw,vh/ph)*0.95)
+        self.centerOn(pw/2, ph/2)
 
     @property
     def zoom(self): return self._zoom
@@ -5582,6 +7254,66 @@ _SHAPE_SUBTYPE_ICONS = {
     'polygon': '◆',
     'arrow':   '➤',
 }
+
+_TYPE_ICON_NAMES = {
+    'textbox': 'text', 'imagebox': 'image', 'qrcode': 'qr',
+    'group': 'group', 'table': 'table',
+}
+_SHAPE_ICON_NAMES = {
+    'rect': 'rect', 'ellipse': 'ellipse', 'line': 'line', 'path': 'pen',
+    'polygon': 'polygon', 'arrow': 'arrow',
+}
+
+
+def _obj_icon_name(obj):
+    """UI-icon asset name for an object type (or None to fall back to a glyph)."""
+    t = getattr(obj, 'OBJECT_TYPE', 'base')
+    if t == 'shape':
+        return _SHAPE_ICON_NAMES.get(getattr(obj, 'shape_type', None))
+    return _TYPE_ICON_NAMES.get(t)
+
+
+# --- Layer-effects clipboard (Copy / Paste / Clear layer style) --------------
+_FX_CLIPBOARD = None
+
+
+def _copy_layer_effects(obj):
+    """Copy an object's full layer style (effects + blending) to the clipboard."""
+    global _FX_CLIPBOARD
+    if obj is None:
+        return False
+    _FX_CLIPBOARD = {
+        'effects': [e.to_dict() for e in (getattr(obj, 'effects', None) or [])],
+        'blend_mode': getattr(obj, 'blend_mode', 'normal'),
+        'opacity': getattr(obj, 'opacity', 1.0),
+        'fill_opacity': getattr(obj, 'fill_opacity', 1.0),
+    }
+    return True
+
+
+def _paste_layer_effects(obj):
+    """Apply the clipboard layer style to an object (replaces its effects)."""
+    if obj is None or _FX_CLIPBOARD is None:
+        return False
+    from edof.format.styles import LayerEffect
+    obj.effects = [LayerEffect.from_dict(d) for d in _FX_CLIPBOARD['effects']]
+    obj.blend_mode = _FX_CLIPBOARD['blend_mode']
+    obj.opacity = _FX_CLIPBOARD['opacity']
+    obj.fill_opacity = _FX_CLIPBOARD['fill_opacity']
+    return True
+
+
+def _clear_layer_effects(obj):
+    """Remove all layer effects from an object (blending left untouched)."""
+    if obj is None:
+        return False
+    obj.effects = []
+    return True
+
+
+def _has_fx_clipboard():
+    return _FX_CLIPBOARD is not None
+
 
 def _icon_for_obj(obj) -> str:
     """v4.1.10: pick the most informative icon for an object."""
@@ -5681,9 +7413,15 @@ class ObjectListPanel(QWidget):
         icon = _icon_for_obj(obj)
         name = obj.name or obj.id[:12] + "…"
 
-        # Icon label
-        ico_lbl = QLabel(icon)
+        # Icon label — real bundled PNG when available, glyph fallback otherwise
+        ico_lbl = QLabel()
         ico_lbl.setStyleSheet("background:transparent;color:#cccccc;font-size:11pt;")
+        _icn = uicon(_obj_icon_name(obj)) if _obj_icon_name(obj) else None
+        if _icn is not None and not _icn.isNull():
+            ico_lbl.setPixmap(_icn.pixmap(16, 16))
+        else:
+            ico_lbl.setText(icon)
+        ico_lbl.setFixedWidth(20)
         # v4.1.23.45: let clicks fall through to the list so the item gets
         # selected (and a drag can start) no matter where on the row you click.
         ico_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -5740,8 +7478,14 @@ class ObjectListPanel(QWidget):
             h.addWidget(var_lbl)
 
         # Toggle buttons
-        def _mk_btn(symbol_fn, tooltip_fn, toggle_fn):
-            btn = QPushButton(symbol_fn(obj))
+        def _mk_btn(symbol_fn, tooltip_fn, toggle_fn, icon_fn=None):
+            from PyQt6.QtCore import QSize
+            btn = QPushButton()
+            ic = uicon(icon_fn(obj)) if icon_fn else None
+            if ic is not None and not ic.isNull():
+                btn.setIcon(ic); btn.setIconSize(QSize(15, 15))
+            else:
+                btn.setText(symbol_fn(obj))
             btn.setFixedSize(22, 22)
             btn.setToolTip(tooltip_fn(obj))
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -5762,11 +7506,13 @@ class ObjectListPanel(QWidget):
             lambda o: "👁" if o.visible else "🚫",
             lambda o: ("Hide layer" if o.visible else "Show layer"),
             lambda o: setattr(o, 'visible', not o.visible),
+            icon_fn=lambda o: 'visible' if o.visible else 'hidden',
         )
         lock_btn = _mk_btn(
             lambda o: "🔒" if o.locked else "🔓",
             lambda o: ("Unlock layer" if o.locked else "Lock layer"),
             lambda o: setattr(o, 'locked', not o.locked),
+            icon_fn=lambda o: 'lock' if o.locked else 'unlock',
         )
         h.addWidget(vis_btn)
         h.addWidget(lock_btn)
@@ -5876,6 +7622,20 @@ class ObjectListPanel(QWidget):
             menu.addAction("Duplicate", lambda: (self._set_sel(oid), main._dup_obj()))
             menu.addAction("Delete",    lambda: (self._set_sel(oid), main._del_obj()))
 
+        menu.addSeparator()
+        fxm = menu.addMenu("Layer Effects")
+        fxm.addAction("Copy Effects", lambda: _copy_layer_effects(obj))
+
+        def _fx_paste():
+            _paste_layer_effects(obj)
+            self._canvas.objectChanged.emit(); self._canvas.schedule_render(); self.refresh()
+        pa = fxm.addAction("Paste Effects", _fx_paste); pa.setEnabled(_has_fx_clipboard())
+
+        def _fx_clear():
+            _clear_layer_effects(obj)
+            self._canvas.objectChanged.emit(); self._canvas.schedule_render(); self.refresh()
+        ca = fxm.addAction("Clear Effects", _fx_clear); ca.setEnabled(bool(getattr(obj, 'effects', None)))
+
         menu.exec(self._list.mapToGlobal(pos))
 
     def _set_sel(self, oid):
@@ -5984,6 +7744,60 @@ class PropPanel(QWidget):
         if suffix: s.setSuffix(suffix)
         return s
 
+    # --- Layer-effects copy / paste / clear -----------------------------
+    def _copy_effects(self):
+        _copy_layer_effects(self._obj)
+
+    def _paste_effects(self):
+        if self._obj is not None and _paste_layer_effects(self._obj):
+            try:
+                self._canvas.schedule_render(0)
+            except Exception:
+                pass
+            self.changed.emit()
+
+    def _clear_effects(self):
+        if self._obj is not None and _clear_layer_effects(self._obj):
+            try:
+                self._canvas.schedule_render(0)
+            except Exception:
+                pass
+            self.changed.emit()
+
+    def _fx_actions_row(self, fx_btn):
+        """v4.2.11.4: Layer Effects button on its OWN row, with Copy / Paste /
+        Clear layer-effect buttons on a SEPARATE row below it. Returns a single
+        container so every object-type panel lays it out the same way."""
+        from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
+                                     QPushButton)
+        from PyQt6.QtCore import QSize
+        container = QWidget()
+        v = QVBoxLayout(container)
+        v.setContentsMargins(0, 0, 0, 0); v.setSpacing(4)
+        v.addWidget(fx_btn)                      # row 1: the Layer Effects button
+
+        row = QWidget(); h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0); h.setSpacing(4)
+
+        def _mk(icon_name, glyph, tip, cb):
+            b = QPushButton(); b.setFixedSize(28, 26); b.setToolTip(tip)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            ic = uicon(icon_name)
+            if ic is not None and not ic.isNull():
+                b.setIcon(ic); b.setIconSize(QSize(15, 15))
+            else:
+                b.setText(glyph)
+            b.setStyleSheet("QPushButton{background:#2f2f44;border:none;border-radius:4px;}"
+                            "QPushButton:hover{background:#3a3a5a;}")
+            b.clicked.connect(cb)
+            return b
+        h.addWidget(_mk('duplicate', '⧉', 'Copy layer effects', self._copy_effects))
+        h.addWidget(_mk('fx', '⊕', 'Paste layer effects', self._paste_effects))
+        h.addWidget(_mk('delete', '✕', 'Clear layer effects', self._clear_effects))
+        h.addStretch(1)                          # row 2: copy / paste / clear
+        v.addWidget(row)
+        return container
+
     def _setup(self):
         """v4.1.3: Refactored properties panel.
 
@@ -6064,6 +7878,10 @@ class PropPanel(QWidget):
             b=QPushButton(lbl); b.setFixedWidth(32); b.setFixedHeight(24)
             b.setToolTip(tip)
             b.setStyleSheet(BTN_FONT + "padding:0;")
+            _icn = uicon('layer-%s' % op)
+            if _icn is not None and not _icn.isNull():
+                from PyQt6.QtCore import QSize
+                b.setText(""); b.setIcon(_icn); b.setIconSize(QSize(15, 15))
             b.clicked.connect(lambda _,o=op:self._canvas._layer_op(o))
             hly.addWidget(b)
         hly.addStretch()
@@ -6105,6 +7923,7 @@ class PropPanel(QWidget):
         self._stack.addWidget(self._mk_line())     # 5 Line
         self._stack.addWidget(self._mk_table())    # 6 Table
         self._stack.addWidget(self._mk_subdoc())   # 7 SubDocumentBox
+        self._stack.addWidget(self._mk_pagesetup()) # 8 Document page setup (doc body)
 
         # ── 3. Visibility & Locking ─────────────────────────────────────
         g_lock=QGroupBox("Visibility & Locking")
@@ -6227,6 +8046,226 @@ class PropPanel(QWidget):
         l.addWidget(lbl); l.addStretch()
         return w
 
+    def _mk_pagesetup(self):
+        """v4.2.11.41: document page setup, shown when the doc body is selected
+        (the body itself has no meaningful per-object properties). Margins +
+        page size + header/footer enable & height, applied to doc.body and the
+        document, then repaginated."""
+        from PyQt6.QtWidgets import QGroupBox
+        w = QWidget(); vb = QVBoxLayout(w)
+        vb.setContentsMargins(6, 4, 6, 4); vb.setSpacing(5)
+
+        intro = QLabel("Document page setup. Applies to the whole document.")
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color:#8a8aa0;font:9pt 'Segoe UI';padding:2px;")
+        vb.addWidget(intro)
+
+        # Page size
+        gsz = QGroupBox("Page size"); fsz = QFormLayout(gsz)
+        fsz.setContentsMargins(8, 8, 8, 6); fsz.setSpacing(4)
+        self.cb_ps_preset = QComboBox()
+        self._ps_presets = [
+            ("A4 portrait", 210.0, 297.0), ("A4 landscape", 297.0, 210.0),
+            ("A5 portrait", 148.0, 210.0), ("A5 landscape", 210.0, 148.0),
+            ("A3 portrait", 297.0, 420.0), ("A3 landscape", 420.0, 297.0),
+            ("Letter portrait", 215.9, 279.4), ("Letter landscape", 279.4, 215.9),
+            ("Custom", None, None),
+        ]
+        for nm, _ww, _hh in self._ps_presets:
+            self.cb_ps_preset.addItem(nm)
+        self.cb_ps_preset.currentIndexChanged.connect(self._on_ps_preset)
+        fsz.addRow("Preset:", self.cb_ps_preset)
+        self.sp_ps_w = self._dspin(lo=10, hi=2000, dec=1, step=1, suffix=" mm")
+        self.sp_ps_h = self._dspin(lo=10, hi=2000, dec=1, step=1, suffix=" mm")
+        self.sp_ps_w.editingFinished.connect(self._apply_pagesetup)
+        self.sp_ps_h.editingFinished.connect(self._apply_pagesetup)
+        fsz.addRow("Width:", self.sp_ps_w)
+        fsz.addRow("Height:", self.sp_ps_h)
+        vb.addWidget(gsz)
+
+        # Margins
+        gm = QGroupBox("Margins"); fm = QFormLayout(gm)
+        fm.setContentsMargins(8, 8, 8, 6); fm.setSpacing(4)
+        self.sp_mt = self._dspin(lo=0, hi=200, dec=1, step=1, suffix=" mm")
+        self.sp_mr = self._dspin(lo=0, hi=200, dec=1, step=1, suffix=" mm")
+        self.sp_mb = self._dspin(lo=0, hi=200, dec=1, step=1, suffix=" mm")
+        self.sp_ml = self._dspin(lo=0, hi=200, dec=1, step=1, suffix=" mm")
+        for sp in (self.sp_mt, self.sp_mr, self.sp_mb, self.sp_ml):
+            sp.editingFinished.connect(self._apply_pagesetup)
+        fm.addRow("Top:", self.sp_mt); fm.addRow("Right:", self.sp_mr)
+        fm.addRow("Bottom:", self.sp_mb); fm.addRow("Left:", self.sp_ml)
+        vb.addWidget(gm)
+
+        # Header / footer
+        ghf = QGroupBox("Header & footer"); fhf = QFormLayout(ghf)
+        fhf.setContentsMargins(8, 8, 8, 6); fhf.setSpacing(4)
+        self.cb_hdr_on = QCheckBox("Enable header")
+        self.cb_hdr_on.toggled.connect(self._apply_pagesetup)
+        fhf.addRow("", self.cb_hdr_on)
+        self.sp_hdr_h = self._dspin(lo=3, hi=100, dec=1, step=1, suffix=" mm")
+        self.sp_hdr_h.editingFinished.connect(self._apply_pagesetup)
+        fhf.addRow("Header height:", self.sp_hdr_h)
+        self.cb_ftr_on = QCheckBox("Enable footer")
+        self.cb_ftr_on.toggled.connect(self._apply_pagesetup)
+        fhf.addRow("", self.cb_ftr_on)
+        self.sp_ftr_h = self._dspin(lo=3, hi=100, dec=1, step=1, suffix=" mm")
+        self.sp_ftr_h.editingFinished.connect(self._apply_pagesetup)
+        fhf.addRow("Footer height:", self.sp_ftr_h)
+        # v4.2.11.46: page numbering start + odd/even template sets
+        self.sp_pn_start = QSpinBox(); self.sp_pn_start.setRange(1, 9999)
+        self.sp_pn_start.setValue(1)
+        self.sp_pn_start.editingFinished.connect(self._apply_pagesetup)
+        fhf.addRow("First page number:", self.sp_pn_start)
+        self.cb_odd_even = QCheckBox("Different odd && even pages")
+        self.cb_odd_even.setToolTip(
+            "Pages with an even page number use their own header/footer.\n"
+            "Edit them by double-clicking the band on an even page.")
+        self.cb_odd_even.toggled.connect(self._apply_pagesetup)
+        fhf.addRow("", self.cb_odd_even)
+        # v4.2.11.48: text fitting for the bands. Stored in the persisted band
+        # style (header_style/footer_style), applied on every page.
+        self.cb_hdr_shrink = QCheckBox("Header: auto-shrink text")
+        self.cb_hdr_fill   = QCheckBox("Header: auto-fill (grow to fit)")
+        self.cb_ftr_shrink = QCheckBox("Footer: auto-shrink text")
+        self.cb_ftr_fill   = QCheckBox("Footer: auto-fill (grow to fit)")
+        for cb in (self.cb_hdr_shrink, self.cb_hdr_fill,
+                   self.cb_ftr_shrink, self.cb_ftr_fill):
+            cb.toggled.connect(self._apply_pagesetup)
+            fhf.addRow("", cb)
+        hint = QLabel("Double-click the header/footer band on the page to edit "
+                      "its text. Use the #▾ button there to insert page numbers.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#8a8aa0;font:8pt 'Segoe UI';padding:2px;")
+        vb.addWidget(ghf); vb.addWidget(hint)
+        vb.addStretch()
+        return w
+
+    def _on_ps_preset(self, idx):
+        if self._loading:
+            return
+        if 0 <= idx < len(self._ps_presets):
+            _nm, ww, hh = self._ps_presets[idx]
+            if ww is not None:
+                self.sp_ps_w.blockSignals(True); self.sp_ps_h.blockSignals(True)
+                self.sp_ps_w.setValue(ww); self.sp_ps_h.setValue(hh)
+                self.sp_ps_w.blockSignals(False); self.sp_ps_h.blockSignals(False)
+        self._apply_pagesetup()
+
+    def _load_pagesetup(self, obj):
+        doc = getattr(self._canvas, '_doc', None)
+        if doc is None:
+            return
+        body = getattr(doc, 'body', None)
+        self._loading = True
+        try:
+            pg = self._canvas._cur_page()
+            pw = float(getattr(pg, 'width', 210.0)) if pg else 210.0
+            ph = float(getattr(pg, 'height', 297.0)) if pg else 297.0
+            self.sp_ps_w.setValue(pw); self.sp_ps_h.setValue(ph)
+            # match a preset if dimensions line up, else Custom
+            sel = len(self._ps_presets) - 1
+            for i, (_nm, ww, hh) in enumerate(self._ps_presets):
+                if ww is not None and abs(ww - pw) < 0.5 and abs(hh - ph) < 0.5:
+                    sel = i; break
+            self.cb_ps_preset.setCurrentIndex(sel)
+            # margins: prefer body.page_margins_mm, else doc.margins
+            m = None
+            if body is not None and getattr(body, 'page_margins_mm', None):
+                m = body.page_margins_mm
+            elif getattr(doc, 'margins', None):
+                m = doc.margins
+            if m and len(m) == 4:
+                self.sp_mt.setValue(float(m[0])); self.sp_mr.setValue(float(m[1]))
+                self.sp_mb.setValue(float(m[2])); self.sp_ml.setValue(float(m[3]))
+            if body is not None:
+                self.cb_hdr_on.setChecked(bool(getattr(body, 'header_enabled', False)))
+                self.cb_ftr_on.setChecked(bool(getattr(body, 'footer_enabled', False)))
+                self.sp_hdr_h.setValue(float(getattr(body, 'header_height_mm', 12.0)))
+                self.sp_ftr_h.setValue(float(getattr(body, 'footer_height_mm', 12.0)))
+                self.sp_pn_start.setValue(int(getattr(body, 'page_number_start', 1) or 1))
+                self.cb_odd_even.setChecked(bool(getattr(body, 'hf_odd_even', False)))
+                hs = getattr(body, 'header_style', None) or {}
+                fs = getattr(body, 'footer_style', None) or {}
+                self.cb_hdr_shrink.setChecked(bool(hs.get('auto_shrink')))
+                self.cb_hdr_fill.setChecked(bool(hs.get('auto_fill')))
+                self.cb_ftr_shrink.setChecked(bool(fs.get('auto_shrink')))
+                self.cb_ftr_fill.setChecked(bool(fs.get('auto_fill')))
+        finally:
+            self._loading = False
+
+    def _apply_pagesetup(self):
+        if self._loading:
+            return
+        doc = getattr(self._canvas, '_doc', None)
+        if doc is None:
+            return
+        body = getattr(doc, 'body', None)
+        pw = float(self.sp_ps_w.value()); ph = float(self.sp_ps_h.value())
+        margins = (float(self.sp_mt.value()), float(self.sp_mr.value()),
+                   float(self.sp_mb.value()), float(self.sp_ml.value()))
+        try:
+            for pg in doc.pages:
+                pg.width = pw; pg.height = ph
+            doc.margins = margins
+            if body is not None:
+                body.page_margins_mm = margins
+                body.header_enabled = bool(self.cb_hdr_on.isChecked())
+                body.footer_enabled = bool(self.cb_ftr_on.isChecked())
+                body.header_height_mm = float(self.sp_hdr_h.value())
+                body.footer_height_mm = float(self.sp_ftr_h.value())
+                body.page_number_start = int(self.sp_pn_start.value())
+                body.hf_odd_even = bool(self.cb_odd_even.isChecked())
+                # v4.2.11.48: merge text-fitting flags into the persisted band
+                # styles. If a band has no stored style yet, seed it from the
+                # band box currently on the page (or engine defaults) so a
+                # later from_dict doesn't reset its other attributes.
+                def _hf_seed(role):
+                    sd = getattr(body, f'{role}_style', None)
+                    if sd:
+                        return dict(sd)
+                    try:
+                        from edof.engine.document_paginate import (
+                            find_document_header_on_page as _ffh,
+                            find_document_footer_on_page as _fff)
+                        pg2 = self._canvas._cur_page()
+                        box = (_ffh(pg2) if role == 'header' else _fff(pg2)) if pg2 else None
+                        if box is not None:
+                            return box.style.to_dict()
+                    except Exception:
+                        pass
+                    from edof.format.styles import TextStyle as _TS
+                    return _TS().to_dict()
+                for role, shr, fil in (
+                        ('header', self.cb_hdr_shrink, self.cb_hdr_fill),
+                        ('footer', self.cb_ftr_shrink, self.cb_ftr_fill)):
+                    sd = _hf_seed(role)
+                    sd['auto_shrink'] = bool(shr.isChecked())
+                    sd['auto_fill'] = bool(fil.isChecked())
+                    setattr(body, f'{role}_style', sd)
+                    if body.hf_odd_even:
+                        se = getattr(body, f'{role}_style_even', None)
+                        se = dict(se) if se else dict(sd)
+                        se['auto_shrink'] = bool(shr.isChecked())
+                        se['auto_fill'] = bool(fil.isChecked())
+                        setattr(body, f'{role}_style_even', se)
+            self._canvas._margins = margins
+            self._canvas._margins_enabled = True
+            from edof.engine.document_paginate import paginate_document
+            paginate_document(doc, dpi=self._canvas._dpi)
+            mw = self._canvas.parent()
+            if mw is not None and hasattr(mw, '_refresh_pages'):
+                try: mw._refresh_pages()
+                except Exception: pass
+            if mw is not None and hasattr(mw, '_mark_modified'):
+                try: mw._mark_modified()
+                except Exception: pass
+            try: self._canvas._invalidate_page_cache()
+            except Exception: pass
+            self._canvas.schedule_render(0)
+            self._canvas.viewport().update()
+        except Exception:
+            import traceback as _tb; _tb.print_exc()
+
     def _mk_tb(self):
         from PyQt6.QtWidgets import QGroupBox
         w=QWidget(); vb=QVBoxLayout(w); vb.setContentsMargins(6,4,6,4); vb.setSpacing(5)
@@ -6313,8 +8352,9 @@ class PropPanel(QWidget):
         btn_fx_tb = QPushButton("✨ Layer Effects…")
         btn_fx_tb.setStyleSheet("font:bold 10pt 'Segoe UI';background:#3a3a5a;padding:6px;")
         btn_fx_tb.clicked.connect(self._open_layer_effects_dialog)
-        vb.addWidget(btn_fx_tb)
-        self._btn_fx_tb = btn_fx_tb            # v4.1.23.37: toggled off for doc body
+        fx_container_tb = self._fx_actions_row(btn_fx_tb)
+        vb.addWidget(fx_container_tb)
+        self._btn_fx_tb = fx_container_tb      # v4.1.23.37: toggled off for doc body
         # v4.1.23.37: shown instead of effects when the document body is selected
         self._lbl_body_note = QLabel("Document body — special text effects are "
                                      "applied to inserted text boxes, not the page body.")
@@ -6336,7 +8376,7 @@ class PropPanel(QWidget):
         btn_fx = QPushButton("✨ Layer Effects… (blend mode, effects)")
         btn_fx.setStyleSheet("font:bold 10pt 'Segoe UI';background:#3a3a5a;padding:6px;")
         btn_fx.clicked.connect(self._open_layer_effects_dialog)
-        fl.addRow("", btn_fx)
+        fl.addRow("", self._fx_actions_row(btn_fx))
         return w
 
     def _mk_shape(self):
@@ -6371,8 +8411,23 @@ class PropPanel(QWidget):
         fl.addRow(t('prop_stroke'),rs)
 
         self.sp_cr=self._dspin(lo=0,hi=200,dec=2,suffix=" mm")
-        self.sp_cr.editingFinished.connect(lambda:self._aa_obj('corner_radius',self.sp_cr.value()))
+        self.sp_cr.editingFinished.connect(self._apply_corner_uniform)
         fl.addRow("Corner radius:",self.sp_cr)
+        # v4.2.7.1: per-corner radii [TL, TR, BR, BL] — two rows (top / bottom)
+        rcr=QWidget(); gcr=QGridLayout(rcr); gcr.setContentsMargins(0,0,0,0)
+        gcr.setHorizontalSpacing(4); gcr.setVerticalSpacing(2)
+        self.sp_cr_tl=self._dspin(lo=0,hi=200,dec=2); self.sp_cr_tl.setFixedWidth(64)
+        self.sp_cr_tr=self._dspin(lo=0,hi=200,dec=2); self.sp_cr_tr.setFixedWidth(64)
+        self.sp_cr_br=self._dspin(lo=0,hi=200,dec=2); self.sp_cr_br.setFixedWidth(64)
+        self.sp_cr_bl=self._dspin(lo=0,hi=200,dec=2); self.sp_cr_bl.setFixedWidth(64)
+        for s in (self.sp_cr_tl,self.sp_cr_tr,self.sp_cr_br,self.sp_cr_bl):
+            s.editingFinished.connect(self._apply_corner_each)
+        gcr.addWidget(QLabel("TL"),0,0); gcr.addWidget(self.sp_cr_tl,0,1)
+        gcr.addWidget(QLabel("TR"),0,2); gcr.addWidget(self.sp_cr_tr,0,3)
+        gcr.addWidget(QLabel("BL"),1,0); gcr.addWidget(self.sp_cr_bl,1,1)
+        gcr.addWidget(QLabel("BR"),1,2); gcr.addWidget(self.sp_cr_br,1,3)
+        gcr.setColumnStretch(4,1)
+        fl.addRow("Corners (mm):",rcr)
 
         # Path-only controls
         rp=QWidget(); hp=QHBoxLayout(rp); hp.setContentsMargins(0,0,0,0); hp.setSpacing(4)
@@ -6404,7 +8459,7 @@ class PropPanel(QWidget):
         btn_fx.setStyleSheet("font:bold 10pt 'Segoe UI';background:#3a3a5a;padding:6px;")
         btn_fx.setToolTip("Drop shadow, glow, bevel, stroke, overlays, blend mode, opacity")
         btn_fx.clicked.connect(self._open_layer_effects_dialog)
-        fl.addRow("", btn_fx)
+        fl.addRow("", self._fx_actions_row(btn_fx))
         return w
 
     def _smooth_path(self):
@@ -6579,7 +8634,11 @@ class PropPanel(QWidget):
             fl.addRow(t(lbl_key),row)
         self.sp_qr_brd=QSpinBox(); self.sp_qr_brd.setRange(0,20); self.sp_qr_brd.setValue(4)
         self.sp_qr_brd.editingFinished.connect(lambda:self._aa('border_modules',self.sp_qr_brd.value()))
-        fl.addRow(t('prop_qr_border'),self.sp_qr_brd); return w
+        fl.addRow(t('prop_qr_border'),self.sp_qr_brd)
+        # v4.2.7.1: QR codes support layer effects too (respect alpha)
+        btn_fx=QPushButton("✨ Layer Effects…")
+        btn_fx.clicked.connect(self._open_layer_effects_dialog)
+        fl.addRow(self._fx_actions_row(btn_fx)); return w
 
     def _mk_line(self):
         w=QWidget(); fl=QFormLayout(w); fl.setContentsMargins(8,8,8,6); fl.setSpacing(5)
@@ -6595,7 +8654,11 @@ class PropPanel(QWidget):
         self.sp_lsw=self._dspin(lo=0.01,hi=20,dec=2,step=0.1,suffix=" mm"); self.sp_lsw.setFixedWidth(80)
         self.sp_lsw.editingFinished.connect(lambda:self._apply_line_sw())
         hl.addWidget(self.btn_lstroke); hl.addWidget(self.sp_lsw); hl.addStretch()
-        fl.addRow(t('prop_stroke'),rl); return w
+        fl.addRow(t('prop_stroke'),rl)
+        # v4.2.7.1: lines support layer effects too
+        btn_fx=QPushButton("✨ Layer Effects…")
+        btn_fx.clicked.connect(self._open_layer_effects_dialog)
+        fl.addRow(self._fx_actions_row(btn_fx)); return w
 
     def _mk_table(self):
         """v4.1.0/4.1.1: Table editing UI panel."""
@@ -6645,7 +8708,7 @@ class PropPanel(QWidget):
         btn_fx = QPushButton("✨ Layer Effects…")
         btn_fx.setStyleSheet("font:bold 10pt 'Segoe UI';background:#3a3a5a;padding:6px;")
         btn_fx.clicked.connect(self._open_layer_effects_dialog)
-        fl.addRow("", btn_fx)
+        fl.addRow("", self._fx_actions_row(btn_fx))
 
         return w
 
@@ -6937,7 +9000,7 @@ class PropPanel(QWidget):
         btn_fx = QPushButton("✨ Layer Effects…")
         btn_fx.setStyleSheet("font:bold 10pt 'Segoe UI';background:#3a3a5a;padding:6px;")
         btn_fx.clicked.connect(self._open_layer_effects_dialog)
-        fl.addRow("", btn_fx)
+        fl.addRow("", self._fx_actions_row(btn_fx))
 
         return w
 
@@ -7138,7 +9201,11 @@ class PropPanel(QWidget):
             # (was duplicated in Advanced section)
 
             from edof.format.objects import Shape,SHAPE_LINE
-            if isinstance(obj,edof.TextBox):       self._load_tb(obj); self._stack.setCurrentIndex(1)
+            if self._canvas._is_document_body(obj):
+                # v4.2.11.41: the body has no useful per-object properties;
+                # show document page setup (margins / size / header-footer).
+                self._load_pagesetup(obj); self._stack.setCurrentIndex(8)
+            elif isinstance(obj,edof.TextBox):     self._load_tb(obj); self._stack.setCurrentIndex(1)
             elif isinstance(obj,edof.ImageBox):    self._load_img(obj); self._stack.setCurrentIndex(2)
             elif isinstance(obj, edof.Table):      self._load_table(obj); self._stack.setCurrentIndex(6)
             elif isinstance(obj, edof.SubDocumentBox):
@@ -7208,6 +9275,11 @@ class PropPanel(QWidget):
         self.lbl_fill_a.setText(f"{a}%")
         self.btn_stroke.setStyleSheet(_cswatch(obj.stroke.color or (0,0,0,255)))
         self.sp_sw.setValue(getattr(obj.stroke,'width',1)); self.sp_cr.setValue(getattr(obj,'corner_radius',0))
+        _rr=getattr(obj,'corner_radii',[]) or []
+        if len(_rr)==4: _cv=_rr
+        else: _cv=[getattr(obj,'corner_radius',0)]*4
+        for _s,_val in zip((self.sp_cr_tl,self.sp_cr_tr,self.sp_cr_br,self.sp_cr_bl),_cv):
+            _s.blockSignals(True); _s.setValue(_val); _s.blockSignals(False)
 
     def _load_qr(self,obj):
         self.le_qr.blockSignals(True); self.le_qr.setText(obj.data); self.le_qr.blockSignals(False)
@@ -7239,6 +9311,23 @@ class PropPanel(QWidget):
     def _aa_obj(self,key,val):
         if self._loading or not self._obj: return
         setattr(self._obj,key,val); self._canvas.schedule_render(); self.changed.emit()
+
+    def _apply_corner_uniform(self):
+        # master spin -> all corners equal (uniform); clears per-corner override
+        if self._loading or not self._obj: return
+        v=self.sp_cr.value()
+        self._obj.corner_radius=v
+        self._obj.corner_radii=[]
+        for s in (self.sp_cr_tl,self.sp_cr_tr,self.sp_cr_br,self.sp_cr_bl):
+            s.blockSignals(True); s.setValue(v); s.blockSignals(False)
+        self._canvas.schedule_render(); self.changed.emit()
+
+    def _apply_corner_each(self):
+        # per-corner spins -> corner_radii [TL,TR,BR,BL]
+        if self._loading or not self._obj: return
+        self._obj.corner_radii=[self.sp_cr_tl.value(),self.sp_cr_tr.value(),
+                                self.sp_cr_br.value(),self.sp_cr_bl.value()]
+        self._canvas.schedule_render(); self.changed.emit()
 
     def _as(self,key,val,typ):
         if self._loading or not isinstance(self._obj,edof.TextBox): return
@@ -7392,6 +9481,10 @@ class PropPanel(QWidget):
             ('color_overlay',    'Color Overlay'),
             ('gradient_overlay', 'Gradient Overlay'),
             ('texture_overlay',  'Texture Overlay'),
+            ('long_shadow',          'Long Shadow'),
+            ('chromatic_aberration', 'Chromatic Aberration'),
+            ('halftone',             'Halftone'),
+            ('light_sweep',          'Light Sweep'),
         ]
         BLEND_MODES = [
             'normal','multiply','screen','overlay','darken','lighten',
@@ -7399,49 +9492,94 @@ class PropPanel(QWidget):
             'difference','exclusion','hue','saturation','color','luminosity',
         ]
 
-        # Build a working dict of effects (use existing or default LayerEffect)
-        existing_by_type = {e.type: e for e in self._obj.effects}
-        working = {}
-        for et, _ in EFFECT_LIST:
-            if et == 'blending':
-                continue
-            if et in existing_by_type:
-                working[et] = deepcopy(existing_by_type[et])
-            else:
-                # Sensible defaults per effect type
-                e = LayerEffect(type=et, enabled=False)
-                if et == 'drop_shadow':
-                    e.color = (0, 0, 0, 220); e.opacity = 0.7
-                    e.size = 2.0; e.distance = 2.0; e.direction = 315.0  # bottom-right
-                    e.blend_mode = 'multiply'
-                elif et == 'inner_shadow':
-                    e.color = (0, 0, 0, 220); e.opacity = 0.7
-                    e.size = 2.0; e.distance = 2.0; e.direction = 315.0
-                    e.blend_mode = 'multiply'
-                elif et == 'outer_glow':
-                    e.color = (255, 255, 200, 255); e.opacity = 0.6
-                    e.size = 4.0; e.blend_mode = 'screen'
-                elif et == 'inner_glow':
-                    e.color = (255, 255, 200, 255); e.opacity = 0.6
-                    e.size = 4.0; e.blend_mode = 'screen'
-                elif et == 'bevel':
-                    e.color = (0, 0, 0, 200); e.color2 = (255, 255, 255, 255)
-                    e.size = 3.0; e.direction = 135.0; e.bevel_kind = 'inner'
-                elif et == 'stroke':
-                    e.color = (0, 0, 0, 255); e.size = 1.0
-                    e.stroke_position = 'outside'
-                elif et == 'color_overlay':
-                    e.color = (255, 0, 0, 255); e.opacity = 1.0
-                    e.blend_mode = 'normal'
-                elif et == 'gradient_overlay':
-                    e.gradient_start = (0, 0, 0, 255); e.gradient_end = (255, 255, 255, 255)
-                    e.gradient_angle = 90.0; e.opacity = 1.0
-                elif et == 'texture_overlay':
-                    e.opacity = 1.0; e.blend_mode = 'multiply'
-                working[et] = e
+        # v4.2.7.9: instance model — effects are a list of instances (so the
+        # same type can appear more than once, be duplicated and reordered).
+        DISPLAY = {
+            'drop_shadow': 'Drop Shadow', 'inner_shadow': 'Inner Shadow',
+            'outer_glow': 'Outer Glow', 'inner_glow': 'Inner Glow',
+            'bevel': 'Bevel & Emboss', 'stroke': 'Stroke',
+            'color_overlay': 'Color Overlay', 'gradient_overlay': 'Gradient Overlay',
+            'texture_overlay': 'Texture Overlay', 'long_shadow': 'Long Shadow',
+            'chromatic_aberration': 'Chromatic Aberration', 'halftone': 'Halftone',
+            'light_sweep': 'Light Sweep',
+        }
+        ADD_TYPES = [et for et, _ in EFFECT_LIST if et != 'blending']
 
-        dlg = QDialog(self); dlg.setWindowTitle("Layer Style"); dlg.setStyleSheet(QSS)
-        dlg.resize(720, 580)
+        def _make_default(et):
+            e = LayerEffect(type=et, enabled=True)
+            if et == 'drop_shadow':
+                e.color = (0, 0, 0, 220); e.opacity = 0.7
+                e.size = 2.0; e.distance = 2.0; e.direction = 315.0
+                e.blend_mode = 'multiply'
+            elif et == 'inner_shadow':
+                e.color = (0, 0, 0, 220); e.opacity = 0.7
+                e.size = 2.0; e.distance = 2.0; e.direction = 315.0
+                e.blend_mode = 'multiply'
+            elif et == 'outer_glow':
+                e.color = (255, 255, 200, 255); e.opacity = 0.6
+                e.size = 4.0; e.blend_mode = 'screen'
+            elif et == 'inner_glow':
+                e.color = (255, 255, 200, 255); e.opacity = 0.6
+                e.size = 4.0; e.blend_mode = 'screen'
+            elif et == 'bevel':
+                e.color = (0, 0, 0, 200); e.color2 = (255, 255, 255, 255)
+                e.size = 3.0; e.direction = 135.0; e.bevel_kind = 'inner'
+            elif et == 'stroke':
+                e.color = (0, 0, 0, 255); e.size = 1.0
+                e.stroke_position = 'outside'
+            elif et == 'color_overlay':
+                e.color = (255, 0, 0, 255); e.opacity = 1.0
+                e.blend_mode = 'normal'
+            elif et == 'gradient_overlay':
+                e.gradient_start = (0, 0, 0, 255); e.gradient_end = (255, 255, 255, 255)
+                e.gradient_angle = 90.0; e.opacity = 1.0
+            elif et == 'texture_overlay':
+                e.opacity = 1.0; e.blend_mode = 'multiply'
+            elif et == 'long_shadow':
+                e.color = (0, 0, 0, 180); e.direction = 315.0
+                e.ls_length = 10.0; e.ls_fade = True; e.opacity = 0.7
+                e.blend_mode = 'normal'
+            elif et == 'chromatic_aberration':
+                e.ca_offset = 0.5; e.ca_angle = 0.0; e.opacity = 1.0
+                e.blend_mode = 'normal'
+            elif et == 'halftone':
+                e.color = (0, 0, 0, 255); e.ht_dot = 1.5
+                e.ht_angle = 72.0; e.ht_shape = 'dot'; e.opacity = 1.0
+                e.blend_mode = 'normal'
+            elif et == 'light_sweep':
+                e.color2 = (255, 255, 255, 255); e.lsw_pos = 0.5
+                e.lsw_width = 0.3; e.lsw_angle = 45.0; e.opacity = 0.6
+                e.blend_mode = 'screen'
+            return e
+
+        # working: key -> LayerEffect; order: [key,...] render order
+        working = {}
+        order = []
+        _key_counter = [0]
+        def _new_key(et):
+            _key_counter[0] += 1
+            return f"{et}#{_key_counter[0]}"
+        for _e in self._obj.effects:
+            _k = _new_key(_e.type); working[_k] = deepcopy(_e); order.append(_k)
+
+        dlg = QDialog(self); dlg.setWindowTitle("Layer Style")
+        # v4.2.7.6: modern, clearer styling for the effects dialog
+        dlg.setStyleSheet(QSS + """
+            QDialog { background:#15161a; }
+            QListWidget { background:#1b1d23; border:1px solid #2a2d36; border-radius:8px;
+                          padding:4px; outline:0; }
+            QListWidget::item { padding:7px 10px; border-radius:6px; margin:1px 2px; color:#cfd2da; }
+            QListWidget::item:hover { background:#23262f; }
+            QListWidget::item:selected { background:#2a6cf0; color:#ffffff; }
+            QGroupBox { border:1px solid #2a2d36; border-radius:8px; margin-top:14px;
+                        padding:10px 12px 12px 12px; background:#1b1d23; }
+            QGroupBox::title { subcontrol-origin:margin; left:10px; padding:0 4px; color:#9aa0ad; }
+            QScrollArea { border:0; background:transparent; }
+            QSlider::groove:horizontal { height:4px; background:#2a2d36; border-radius:2px; }
+            QSlider::handle:horizontal { width:14px; background:#2a6cf0; border-radius:7px; margin:-6px 0; }
+            QSlider::sub-page:horizontal { background:#2a6cf0; border-radius:2px; }
+        """)
+        dlg.resize(820, 640)
         v = QVBoxLayout(dlg); v.setSpacing(8); v.setContentsMargins(10, 10, 10, 10)
 
         # Top header: master enable
@@ -7457,22 +9595,56 @@ class PropPanel(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setStyleSheet("QSplitter::handle{background:#444;}")
 
-        # Left: effects list with checkboxes
+        # Left: effects list (instances) with checkboxes + drag-to-reorder
+        from PyQt6.QtWidgets import QAbstractItemView
         list_w = QListWidget()
-        list_w.setMinimumWidth(180)
-        list_w.setMaximumWidth(220)
-        item_by_type = {}
-        for et, label in EFFECT_LIST:
-            it = QListWidgetItem(label)
-            it.setData(Qt.ItemDataRole.UserRole, et)
-            if et != 'blending':
-                it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                it.setCheckState(Qt.CheckState.Checked if working[et].enabled else Qt.CheckState.Unchecked)
-            item_by_type[et] = it
-            list_w.addItem(it)
+        list_w.setMinimumWidth(200)
+        list_w.setMaximumWidth(250)
+        list_w.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        list_w.setDefaultDropAction(Qt.DropAction.MoveAction)
+        UR = Qt.ItemDataRole.UserRole
+        item_by_key = {}
+        _rebuilding = [False]
+
+        def _label_for(key):
+            t = working[key].type
+            base = DISPLAY.get(t, t)
+            same = [k for k in order if working[k].type == t]
+            return f"{base} {same.index(key)+1}" if len(same) > 1 else base
+
+        def _mk_item(key):
+            it = QListWidgetItem(_label_for(key)); it.setData(UR, key)
+            it.setFlags((it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                        & ~Qt.ItemFlag.ItemIsDropEnabled)
+            it.setCheckState(Qt.CheckState.Checked if working[key].enabled
+                             else Qt.CheckState.Unchecked)
+            return it
+
+        def _blend_item():
+            it = QListWidgetItem("⚙ Blending Options"); it.setData(UR, '__blend__')
+            it.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            return it
+
+        def _rebuild_list(keep_key=None):
+            _rebuilding[0] = True
+            list_w.blockSignals(True)
+            if keep_key is None:
+                ci = list_w.currentItem()
+                keep_key = ci.data(UR) if ci else '__blend__'
+            list_w.clear(); item_by_key.clear()
+            list_w.addItem(_blend_item())
+            for k in order:
+                it = _mk_item(k); item_by_key[k] = it; list_w.addItem(it)
+            target = 0
+            for r in range(list_w.count()):
+                if list_w.item(r).data(UR) == keep_key:
+                    target = r; break
+            list_w.setCurrentRow(target)
+            list_w.blockSignals(False)
+            _rebuilding[0] = False
         splitter.addWidget(list_w)
 
-        # Right: stack of parameter widgets (one per effect type)
+        # Right: stack of parameter widgets (built lazily per instance)
         stack = QStackedWidget()
         param_widgets = {}
 
@@ -7495,18 +9667,21 @@ class PropPanel(QWidget):
 
         def _spin(lo, hi, val, suffix='', dec=2):
             sp = QDoubleSpinBox(); sp.setRange(lo, hi); sp.setValue(val); sp.setDecimals(dec); sp.setSuffix(suffix)
+            # v4.2.5: mm fields step by 0.1 mm (was 1.0); angles/percent keep 1.
+            sp.setSingleStep(0.1 if suffix.strip() == 'mm' else 1.0)
             sp.setFixedWidth(110)
             return sp
 
+        def _mm(val, mx=100.0, lo=0.0, dec=2, suffix=' mm'):
+            # v4.2.7.10: mm fields are slider + number + adjustable max (no cap)
+            return _MmField(value=val, maximum=mx, decimals=dec, suffix=suffix, minimum=lo)
+
         def _live():
-            # Apply current working state to obj
-            new_effects = []
-            for et2, _ in EFFECT_LIST:
-                if et2 == 'blending': continue
-                if working[et2].enabled and cb_master.isChecked():
-                    new_effects.append(deepcopy(working[et2]))
+            # Apply current instance list to obj (enabled, in order)
+            new_effects = [deepcopy(working[k]) for k in order
+                           if working[k].enabled and cb_master.isChecked()]
             self._obj.effects = new_effects
-            self._canvas.schedule_render(30)
+            self._canvas.schedule_render_interactive(30)
 
         # ── Page 0: Blending Options ─────────────────────────────────────────
         w_blend = QWidget(); fl_blend = QFormLayout(w_blend); fl_blend.setSpacing(10)
@@ -7534,26 +9709,25 @@ class PropPanel(QWidget):
 
         def _on_blend_change():
             self._obj.blend_mode = cb_blend_mode.currentText()
-            self._canvas.schedule_render(30)
+            self._canvas.schedule_render_interactive(30)
         def _on_opacity_change(v):
             self._obj.opacity = v / 100.0
             lbl_op_val.setText(f"{v}%")
-            self._canvas.schedule_render(30)
+            self._canvas.schedule_render_interactive(30)
         def _on_fill_change(v):
             self._obj.fill_opacity = v / 100.0
             lbl_fill_val.setText(f"{v}%")
-            self._canvas.schedule_render(30)
+            self._canvas.schedule_render_interactive(30)
         cb_blend_mode.currentTextChanged.connect(lambda _: _on_blend_change())
         sl_opacity.valueChanged.connect(_on_opacity_change)
         sl_fill.valueChanged.connect(_on_fill_change)
 
-        stack.addWidget(w_blend)
-        param_widgets['blending'] = w_blend
-
         # ── Build a parameter widget for each effect type ─────────────────────
         def _enable_in_list(et):
-            it = item_by_type[et]
-            if it.checkState() != Qt.CheckState.Checked:
+            # 'et' is now an instance key
+            working[et].enabled = True
+            it = item_by_key.get(et)
+            if it is not None and it.checkState() != Qt.CheckState.Checked:
                 it.setCheckState(Qt.CheckState.Checked)
 
         def _build_shadow_page(et, is_inner):
@@ -7567,15 +9741,20 @@ class PropPanel(QWidget):
             op_h.addWidget(sl_op); op_h.addWidget(lbl_op)
             btn_c = _color_btn(working[et].color)
             sp_dir = _spin(0, 360, working[et].direction, '°', 0)
-            sp_dist = _spin(0, 100, working[et].distance, ' mm')
-            sp_size = _spin(0, 100, working[et].size, ' mm')
+            sp_dist = _mm(working[et].distance, 100)
+            sp_size = _mm(working[et].size, 100)
 
             fl.addRow("Blend mode:", cb_bm)
             fl.addRow("Opacity:", op_row)
             fl.addRow("Color:", btn_c)
             fl.addRow("Angle:", sp_dir)
             fl.addRow("Distance:", sp_dist)
+            sl_spread = _slider_pct(int(working[et].spread * 100))
+            lbl_sp = QLabel(f"{int(working[et].spread*100)}%"); lbl_sp.setFixedWidth(40)
+            sp_row = QWidget(); sph = QHBoxLayout(sp_row); sph.setContentsMargins(0,0,0,0)
+            sph.addWidget(sl_spread); sph.addWidget(lbl_sp)
             fl.addRow("Size (blur):", sp_size)
+            fl.addRow("Choke:" if is_inner else "Spread:", sp_row)
 
             def _commit():
                 working[et].blend_mode = cb_bm.currentText()
@@ -7583,23 +9762,32 @@ class PropPanel(QWidget):
                 working[et].direction = sp_dir.value()
                 working[et].distance = sp_dist.value()
                 working[et].size = sp_size.value()
+                working[et].spread = sl_spread.value() / 100.0
                 _enable_in_list(et); _live()
+            def _on_sp(v):
+                lbl_sp.setText(f"{v}%"); _commit()
             def _on_op(v):
                 lbl_op.setText(f"{v}%"); _commit()
             def _pick_c():
                 from PyQt6.QtWidgets import QColorDialog
                 c = working[et].color
-                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True)
+                _orig_c = working[et].color
+                def _prev_c(col):
+                    working[et].color = col; _live()
+                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True, on_change=_prev_c)
                 if new_c is not None:
                     working[et].color = new_c
                     hex_rgb = f"#{new_c[0]:02x}{new_c[1]:02x}{new_c[2]:02x}"
                     btn_c.setStyleSheet(f"background:{hex_rgb};border:1px solid #888;border-radius:3px;")
                     _enable_in_list(et); _live()
+                else:
+                    working[et].color = _orig_c; _live()
             cb_bm.currentTextChanged.connect(lambda _: _commit())
             sl_op.valueChanged.connect(_on_op)
             sp_dir.valueChanged.connect(lambda _: _commit())
             sp_dist.valueChanged.connect(lambda _: _commit())
             sp_size.valueChanged.connect(lambda _: _commit())
+            sl_spread.valueChanged.connect(_on_sp)
             btn_c.clicked.connect(_pick_c)
             return w
 
@@ -7613,95 +9801,150 @@ class PropPanel(QWidget):
             op_row = QWidget(); op_h = QHBoxLayout(op_row); op_h.setContentsMargins(0,0,0,0)
             op_h.addWidget(sl_op); op_h.addWidget(lbl_op)
             btn_c = _color_btn(working[et].color)
-            sp_size = _spin(0, 100, working[et].size, ' mm')
+            sp_size = _mm(working[et].size, 100)
 
             fl.addRow("Blend mode:", cb_bm)
             fl.addRow("Opacity:", op_row)
             fl.addRow("Color:", btn_c)
+            sl_spread = _slider_pct(int(working[et].spread * 100))
+            lbl_sp = QLabel(f"{int(working[et].spread*100)}%"); lbl_sp.setFixedWidth(40)
+            sp_row = QWidget(); sph = QHBoxLayout(sp_row); sph.setContentsMargins(0,0,0,0)
+            sph.addWidget(sl_spread); sph.addWidget(lbl_sp)
             fl.addRow("Size:", sp_size)
+            fl.addRow("Choke:" if is_inner else "Spread:", sp_row)
 
             def _commit():
                 working[et].blend_mode = cb_bm.currentText()
                 working[et].opacity = sl_op.value() / 100.0
                 working[et].size = sp_size.value()
+                working[et].spread = sl_spread.value() / 100.0
                 _enable_in_list(et); _live()
+            def _on_sp(v):
+                lbl_sp.setText(f"{v}%"); _commit()
             def _on_op(v):
                 lbl_op.setText(f"{v}%"); _commit()
             def _pick_c():
                 from PyQt6.QtWidgets import QColorDialog
                 c = working[et].color
-                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True)
+                _orig_c = working[et].color
+                def _prev_c(col):
+                    working[et].color = col; _live()
+                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True, on_change=_prev_c)
                 if new_c is not None:
                     working[et].color = new_c
                     hex_rgb = f"#{new_c[0]:02x}{new_c[1]:02x}{new_c[2]:02x}"
                     btn_c.setStyleSheet(f"background:{hex_rgb};border:1px solid #888;border-radius:3px;")
                     _enable_in_list(et); _live()
+                else:
+                    working[et].color = _orig_c; _live()
             cb_bm.currentTextChanged.connect(lambda _: _commit())
             sl_op.valueChanged.connect(_on_op)
             sp_size.valueChanged.connect(lambda _: _commit())
+            sl_spread.valueChanged.connect(_on_sp)
             btn_c.clicked.connect(_pick_c)
             return w
 
-        def _build_bevel_page():
-            et = 'bevel'
-            w = QWidget(); fl = QFormLayout(w); fl.setSpacing(8); fl.setContentsMargins(20, 20, 20, 20)
+        def _build_bevel_page(et):
+            w = QWidget(); fl = QFormLayout(w); fl.setSpacing(7); fl.setContentsMargins(20, 14, 20, 14)
             fl.addRow(QLabel("<h3>Bevel & Emboss</h3>"))
-            cb_kind = QComboBox(); cb_kind.addItems(['inner','outer','emboss']); cb_kind.setCurrentText(working[et].bevel_kind)
-            sp_size = _spin(0, 50, working[et].size, ' mm')
-            sp_dir = _spin(0, 360, working[et].direction, '°', 0)
-            sl_op = _slider_pct(int(working[et].opacity * 100))
-            lbl_op = QLabel(f"{int(working[et].opacity*100)}%"); lbl_op.setFixedWidth(40)
-            op_row = QWidget(); op_h = QHBoxLayout(op_row); op_h.setContentsMargins(0,0,0,0)
-            op_h.addWidget(sl_op); op_h.addWidget(lbl_op)
-            # Highlight + blend mode
+            cb_kind = QComboBox(); cb_kind.addItems(['inner', 'outer', 'emboss', 'smooth'])
+            cb_kind.setCurrentText(working[et].bevel_kind)
+            cb_tech = QComboBox(); cb_tech.addItems(['smooth', 'chisel_hard', 'chisel_soft'])
+            cb_tech.setCurrentText(getattr(working[et], 'bevel_technique', 'smooth') or 'smooth')
+            cb_dir = QComboBox(); cb_dir.addItems(['up', 'down'])
+            cb_dir.setCurrentText(getattr(working[et], 'bevel_dir', 'up') or 'up')
+            sp_size = _mm(working[et].size, 50)
+            sp_soft = _mm(getattr(working[et], 'soften', 0.0), 30)
+            def _vslider(lo, hi, val, suffix=''):
+                sl = QSlider(Qt.Orientation.Horizontal); sl.setRange(lo, hi)
+                sl.setValue(int(val)); sl.setMinimumWidth(150)
+                lb = QLabel(f"{int(val)}{suffix}"); lb.setFixedWidth(52)
+                row = QWidget(); h = QHBoxLayout(row); h.setContentsMargins(0,0,0,0)
+                h.addWidget(sl); h.addWidget(lb)
+                return sl, lb, row
+            sl_depth, lbl_depth, depth_row = _vslider(0, 1000, getattr(working[et], 'bevel_depth', 100.0), '%')
+            sl_dir, lbl_dir, dir_row = _vslider(0, 360, working[et].direction, '°')
+            sl_alt, lbl_alt, alt_row = _vslider(0, 90, getattr(working[et], 'altitude', 45.0), '°')
+
+            def _op_row(val):
+                sl = _slider_pct(int(val * 100)); lb = QLabel(f"{int(val*100)}%"); lb.setFixedWidth(40)
+                row = QWidget(); h = QHBoxLayout(row); h.setContentsMargins(0,0,0,0); h.addWidget(sl); h.addWidget(lb)
+                return sl, lb, row
+            sl_op, lbl_op, op_row = _op_row(working[et].opacity)
+            sl_hi, lbl_hi, hiop_row = _op_row(getattr(working[et], 'highlight_opacity', 0.75))
+            sl_shd, lbl_shd, shop_row = _op_row(getattr(working[et], 'shadow_opacity', 0.75))
+
             btn_hi = _color_btn(working[et].color2)
             cb_hi_blend = _blend_combo(getattr(working[et], 'blend_mode2', 'screen') or 'screen')
-            hi_row = QWidget(); hi_h = QHBoxLayout(hi_row); hi_h.setContentsMargins(0,0,0,0); hi_h.setSpacing(4)
-            hi_h.addWidget(btn_hi); hi_h.addWidget(cb_hi_blend); hi_h.addStretch()
-            # Shadow + blend mode
+            hi_row = QWidget(); hh = QHBoxLayout(hi_row); hh.setContentsMargins(0,0,0,0); hh.setSpacing(4)
+            hh.addWidget(btn_hi); hh.addWidget(cb_hi_blend); hh.addStretch()
             btn_sh = _color_btn(working[et].color)
             cb_sh_blend = _blend_combo(getattr(working[et], 'blend_mode', 'multiply') or 'multiply')
-            sh_row = QWidget(); sh_h = QHBoxLayout(sh_row); sh_h.setContentsMargins(0,0,0,0); sh_h.setSpacing(4)
-            sh_h.addWidget(btn_sh); sh_h.addWidget(cb_sh_blend); sh_h.addStretch()
+            sh_row = QWidget(); sh2 = QHBoxLayout(sh_row); sh2.setContentsMargins(0,0,0,0); sh2.setSpacing(4)
+            sh2.addWidget(btn_sh); sh2.addWidget(cb_sh_blend); sh2.addStretch()
+
             fl.addRow("Style:", cb_kind)
+            fl.addRow("Technique:", cb_tech)
             fl.addRow("Size (face depth):", sp_size)
-            fl.addRow("Light angle:", sp_dir)
+            fl.addRow("Depth:", depth_row)
+            fl.addRow("Direction:", cb_dir)
+            fl.addRow("Light angle:", dir_row)
+            fl.addRow("Altitude:", alt_row)
+            fl.addRow("Soften:", sp_soft)
             fl.addRow("Opacity:", op_row)
             fl.addRow("Highlight:", hi_row)
+            fl.addRow("Highlight opacity:", hiop_row)
             fl.addRow("Shadow:", sh_row)
+            fl.addRow("Shadow opacity:", shop_row)
+
             def _commit():
                 working[et].bevel_kind = cb_kind.currentText()
+                working[et].bevel_technique = cb_tech.currentText()
+                working[et].bevel_dir = cb_dir.currentText()
                 working[et].size = sp_size.value()
-                working[et].direction = sp_dir.value()
+                working[et].bevel_depth = sl_depth.value()
+                working[et].soften = sp_soft.value()
+                working[et].direction = sl_dir.value()
+                working[et].altitude = sl_alt.value()
                 working[et].opacity = sl_op.value() / 100.0
+                working[et].highlight_opacity = sl_hi.value() / 100.0
+                working[et].shadow_opacity = sl_shd.value() / 100.0
                 working[et].blend_mode = cb_sh_blend.currentText()
                 working[et].blend_mode2 = cb_hi_blend.currentText()
                 _enable_in_list(et); _live()
-            def _on_op(v):
-                lbl_op.setText(f"{v}%"); _commit()
+            def _on_op(v): lbl_op.setText(f"{v}%"); _commit()
+            def _on_hi(v): lbl_hi.setText(f"{v}%"); _commit()
+            def _on_shd(v): lbl_shd.setText(f"{v}%"); _commit()
             def _pick(target_attr, btn):
                 c = getattr(working[et], target_attr)
-                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True)
+                _orig_b = getattr(working[et], target_attr)
+                def _prev_b(col):
+                    setattr(working[et], target_attr, col); _live()
+                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True, on_change=_prev_b)
                 if new_c is not None:
                     setattr(working[et], target_attr, new_c)
-                    hex_rgb = f"#{new_c[0]:02x}{new_c[1]:02x}{new_c[2]:02x}"
-                    btn.setStyleSheet(f"background:{hex_rgb};border:1px solid #888;border-radius:3px;")
+                    btn.setStyleSheet(f"background:#{new_c[0]:02x}{new_c[1]:02x}{new_c[2]:02x};border:1px solid #888;border-radius:3px;")
                     _enable_in_list(et); _live()
-            cb_kind.currentTextChanged.connect(lambda _: _commit())
-            sp_size.valueChanged.connect(lambda _: _commit())
-            sp_dir.valueChanged.connect(lambda _: _commit())
+                else:
+                    setattr(working[et], target_attr, _orig_b); _live()
+            for c in (cb_kind, cb_tech, cb_dir, cb_hi_blend, cb_sh_blend):
+                c.currentTextChanged.connect(lambda _: _commit())
+            for s in (sp_size, sp_soft):
+                s.valueChanged.connect(lambda _: _commit())
+            sl_depth.valueChanged.connect(lambda v: (lbl_depth.setText(f"{v}%"), _commit()))
+            sl_dir.valueChanged.connect(lambda v: (lbl_dir.setText(f"{v}°"), _commit()))
+            sl_alt.valueChanged.connect(lambda v: (lbl_alt.setText(f"{v}°"), _commit()))
             sl_op.valueChanged.connect(_on_op)
-            cb_hi_blend.currentTextChanged.connect(lambda _: _commit())
-            cb_sh_blend.currentTextChanged.connect(lambda _: _commit())
+            sl_hi.valueChanged.connect(_on_hi)
+            sl_shd.valueChanged.connect(_on_shd)
             btn_hi.clicked.connect(lambda: _pick('color2', btn_hi))
             btn_sh.clicked.connect(lambda: _pick('color', btn_sh))
             return w
 
-        def _build_stroke_page():
-            et = 'stroke'
+        def _build_stroke_page(et):
             w = QWidget(); fl = QFormLayout(w); fl.setSpacing(8); fl.setContentsMargins(20, 20, 20, 20)
             fl.addRow(QLabel("<h3>Stroke</h3>"))
-            sp_size = _spin(0, 20, working[et].size, ' mm')
+            sp_size = _mm(working[et].size, 20)
             cb_pos = QComboBox(); cb_pos.addItems(['outside','center','inside']); cb_pos.setCurrentText(working[et].stroke_position)
             cb_bm = _blend_combo(working[et].blend_mode)
             sl_op = _slider_pct(int(working[et].opacity * 100))
@@ -7725,12 +9968,17 @@ class PropPanel(QWidget):
             def _pick():
                 from PyQt6.QtWidgets import QColorDialog
                 c = working[et].color
-                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True)
+                _orig_c = working[et].color
+                def _prev_c(col):
+                    working[et].color = col; _live()
+                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True, on_change=_prev_c)
                 if new_c is not None:
                     working[et].color = new_c
                     hex_rgb = f"#{new_c[0]:02x}{new_c[1]:02x}{new_c[2]:02x}"
                     btn_c.setStyleSheet(f"background:{hex_rgb};border:1px solid #888;border-radius:3px;")
                     _enable_in_list(et); _live()
+                else:
+                    working[et].color = _orig_c; _live()
             sp_size.valueChanged.connect(lambda _: _commit())
             cb_pos.currentTextChanged.connect(lambda _: _commit())
             cb_bm.currentTextChanged.connect(lambda _: _commit())
@@ -7738,8 +9986,7 @@ class PropPanel(QWidget):
             btn_c.clicked.connect(_pick)
             return w
 
-        def _build_color_overlay_page():
-            et = 'color_overlay'
+        def _build_color_overlay_page(et):
             w = QWidget(); fl = QFormLayout(w); fl.setSpacing(8); fl.setContentsMargins(20, 20, 20, 20)
             fl.addRow(QLabel("<h3>Color Overlay</h3>"))
             cb_bm = _blend_combo(working[et].blend_mode)
@@ -7760,19 +10007,23 @@ class PropPanel(QWidget):
             def _pick():
                 from PyQt6.QtWidgets import QColorDialog
                 c = working[et].color
-                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True)
+                _orig_c = working[et].color
+                def _prev_c(col):
+                    working[et].color = col; _live()
+                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True, on_change=_prev_c)
                 if new_c is not None:
                     working[et].color = new_c
                     hex_rgb = f"#{new_c[0]:02x}{new_c[1]:02x}{new_c[2]:02x}"
                     btn_c.setStyleSheet(f"background:{hex_rgb};border:1px solid #888;border-radius:3px;")
                     _enable_in_list(et); _live()
+                else:
+                    working[et].color = _orig_c; _live()
             cb_bm.currentTextChanged.connect(lambda _: _commit())
             sl_op.valueChanged.connect(_on_op)
             btn_c.clicked.connect(_pick)
             return w
 
-        def _build_gradient_overlay_page():
-            et = 'gradient_overlay'
+        def _build_gradient_overlay_page(et):
             w = QWidget(); fl = QFormLayout(w); fl.setSpacing(8); fl.setContentsMargins(20, 20, 20, 20)
             fl.addRow(QLabel("<h3>Gradient Overlay</h3>"))
             cb_bm = _blend_combo(working[et].blend_mode)
@@ -7798,12 +10049,17 @@ class PropPanel(QWidget):
             def _pick(attr, btn):
                 from PyQt6.QtWidgets import QColorDialog
                 c = getattr(working[et], attr)
-                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True)
+                _orig_g = getattr(working[et], attr)
+                def _prev_g(col):
+                    setattr(working[et], attr, col); _live()
+                new_c = EdofColorDialog.get_color(dlg, c if len(c)>=4 else (*c[:3],255), alpha=True, on_change=_prev_g)
                 if new_c is not None:
                     setattr(working[et], attr, new_c)
                     hex_rgb = f"#{new_c[0]:02x}{new_c[1]:02x}{new_c[2]:02x}"
                     btn.setStyleSheet(f"background:{hex_rgb};border:1px solid #888;border-radius:3px;")
                     _enable_in_list(et); _live()
+                else:
+                    setattr(working[et], attr, _orig_g); _live()
             cb_bm.currentTextChanged.connect(lambda _: _commit())
             sl_op.valueChanged.connect(_on_op)
             sp_ang.valueChanged.connect(lambda _: _commit())
@@ -7811,8 +10067,7 @@ class PropPanel(QWidget):
             btn_c2.clicked.connect(lambda: _pick('gradient_end', btn_c2))
             return w
 
-        def _build_texture_overlay_page():
-            et = 'texture_overlay'
+        def _build_texture_overlay_page(et):
             w = QWidget(); fl = QFormLayout(w); fl.setSpacing(8); fl.setContentsMargins(20, 20, 20, 20)
             fl.addRow(QLabel("<h3>Texture Overlay</h3>"))
             cb_bm = _blend_combo(working[et].blend_mode)
@@ -7864,79 +10119,607 @@ class PropPanel(QWidget):
             btn_load.clicked.connect(_load)
             return w
 
-        # Add pages
-        for et, _ in EFFECT_LIST:
-            if et == 'blending':
-                continue
-            elif et == 'drop_shadow':
-                page = _build_shadow_page(et, is_inner=False)
-            elif et == 'inner_shadow':
-                page = _build_shadow_page(et, is_inner=True)
-            elif et == 'outer_glow':
-                page = _build_glow_page(et, is_inner=False)
-            elif et == 'inner_glow':
-                page = _build_glow_page(et, is_inner=True)
-            elif et == 'bevel':
-                page = _build_bevel_page()
-            elif et == 'stroke':
-                page = _build_stroke_page()
-            elif et == 'color_overlay':
-                page = _build_color_overlay_page()
-            elif et == 'gradient_overlay':
-                page = _build_gradient_overlay_page()
-            elif et == 'texture_overlay':
-                page = _build_texture_overlay_page()
+        def _color_commit_helper(et, btn_c, attr='color'):
+            _orig = getattr(working[et], attr)
+            def _prev(col):
+                setattr(working[et], attr, col); _live()
+            new_c = EdofColorDialog.get_color(
+                dlg, getattr(working[et], attr) if len(getattr(working[et], attr)) >= 4
+                else (*getattr(working[et], attr)[:3], 255), alpha=True, on_change=_prev)
+            if new_c is not None:
+                setattr(working[et], attr, new_c)
+                btn_c.setStyleSheet(f"background:#{new_c[0]:02x}{new_c[1]:02x}{new_c[2]:02x};border:1px solid #888;border-radius:3px;")
+                _enable_in_list(et); _live()
             else:
-                page = QWidget()
-            stack.addWidget(page)
-            param_widgets[et] = page
+                setattr(working[et], attr, _orig); _live()
+
+        def _build_long_shadow_page(et):
+            w = QWidget(); fl = QFormLayout(w); fl.setSpacing(8); fl.setContentsMargins(20, 20, 20, 20)
+            fl.addRow(QLabel("<h3>Long Shadow</h3>"))
+            cb_bm = _blend_combo(working[et].blend_mode)
+            sl_op = _slider_pct(int(working[et].opacity * 100))
+            lbl_op = QLabel(f"{int(working[et].opacity*100)}%"); lbl_op.setFixedWidth(40)
+            op_row = QWidget(); oh = QHBoxLayout(op_row); oh.setContentsMargins(0,0,0,0); oh.addWidget(sl_op); oh.addWidget(lbl_op)
+            sp_dir = _spin(0, 360, working[et].direction, '°', 0)
+            sp_len = _mm(working[et].ls_length, 200)
+
+            def _grad_row(bar):
+                row = QWidget(); hh = QHBoxLayout(row); hh.setContentsMargins(0, 0, 0, 0)
+                hh.addWidget(bar, 1)
+                bx = QPushButton("×"); bx.setFixedWidth(22)
+                bx.setToolTip("Reset stops to default")
+                hh.addWidget(bx)
+                return row, bx
+
+            # ---- BLUR: Solid | Constant | Linear | Custom -------------------
+            _bm0 = (getattr(working[et], 'ls_blur_mode', '') or '').lower()
+            if _bm0 not in ('solid', 'constant', 'linear', 'custom'):
+                _lm = (getattr(working[et], 'ls_mode', 'solid') or 'solid').lower()
+                if _lm == 'solid':
+                    _bm0 = 'solid'
+                elif _lm == 'cast':
+                    _bm0 = 'linear'
+                else:
+                    _bm0 = 'constant' if _bm0 == 'constant' else 'linear'
+            cb_blur = QComboBox(); cb_blur.addItems(['Solid', 'Constant', 'Linear', 'Custom'])
+            cb_blur.setCurrentText(_bm0.capitalize())
+            sp_size = _mm(working[et].size, 50)
+            gb_blur = _GradientStopsBar('scalar', vmax=25.0, suffix=' mm')
+            _bs = getattr(working[et], 'ls_grad_blurs', []) or []
+            gb_blur.setStops(_bs if _bs else [[0.0, 0.0], [1.0, max(0.5, float(working[et].size or 2.0))]])
+            row_b, bx_b = _grad_row(gb_blur)
+            lab_size = QLabel("Blur amount:")
+            lab_gb = QLabel("Blur gradient (mm):")
+            fl.addRow("Blend mode:", cb_bm); fl.addRow("Opacity:", op_row)
+            fl.addRow("Angle:", sp_dir); fl.addRow("Length:", sp_len)
+            fl.addRow("Mode:", cb_blur)
+            fl.addRow(lab_size, sp_size)
+            fl.addRow(lab_gb, row_b)
+
+            # ---- COLOR: Solid | Custom --------------------------------------
+            _cm0 = (getattr(working[et], 'ls_color_mode', '') or '').lower()
+            if _cm0 not in ('solid', 'custom'):
+                _cm0 = 'custom' if ((getattr(working[et], 'ls_grad_colors', []) or [])
+                                    or bool(getattr(working[et], 'ls_color_grad', False))) else 'solid'
+            cb_color = QComboBox(); cb_color.addItems(['Solid', 'Custom'])
+            cb_color.setCurrentText(_cm0.capitalize())
+            btn_c = _color_btn(working[et].color)
+            gb_color = _GradientStopsBar('color')
+            _cs = getattr(working[et], 'ls_grad_colors', []) or []
+            if not _cs:
+                _c0 = list(working[et].color[:3])
+                _c1 = list((getattr(working[et], 'color2', None) or (0, 0, 0, 255))[:3])
+                _cs = [[0.0] + [float(v) for v in _c0], [1.0] + [float(v) for v in _c1]]
+            gb_color.setStops(_cs)
+            row_c, bx_c = _grad_row(gb_color)
+            lab_col = QLabel("Color:")
+            lab_gc = QLabel("Color gradient:")
+            fl.addRow("Color mode:", cb_color)
+            fl.addRow(lab_col, btn_c)
+            fl.addRow(lab_gc, row_c)
+
+            # ---- ALPHA: Solid | Fade | Custom -------------------------------
+            _am0 = (getattr(working[et], 'ls_alpha_mode', '') or '').lower()
+            if _am0 not in ('solid', 'fade', 'custom'):
+                if getattr(working[et], 'ls_grad_alphas', []) or []:
+                    _am0 = 'custom'
+                else:
+                    _am0 = 'fade' if bool(getattr(working[et], 'ls_fade', True)) else 'solid'
+            cb_alpha = QComboBox(); cb_alpha.addItems(['Solid', 'Fade', 'Custom'])
+            cb_alpha.setCurrentText(_am0.capitalize())
+            gb_alpha = _GradientStopsBar('scalar', vmax=1.0)
+            _as = getattr(working[et], 'ls_grad_alphas', []) or []
+            gb_alpha.setStops(_as if _as else [[0.0, 1.0], [1.0, 0.0]])
+            row_a, bx_a = _grad_row(gb_alpha)
+            lab_ga = QLabel("Alpha gradient:")
+            fl.addRow("Alpha mode:", cb_alpha)
+            fl.addRow(lab_ga, row_a)
+
+            def _sync_vis():
+                bm = cb_blur.currentText().lower()
+                lab_size.setVisible(bm in ('constant', 'linear'))
+                sp_size.setVisible(bm in ('constant', 'linear'))
+                lab_size.setText("Blur amount:" if bm == 'constant' else "End blur:")
+                lab_gb.setVisible(bm == 'custom'); row_b.setVisible(bm == 'custom')
+                cm = cb_color.currentText().lower()
+                lab_col.setVisible(cm == 'solid'); btn_c.setVisible(cm == 'solid')
+                lab_gc.setVisible(cm == 'custom'); row_c.setVisible(cm == 'custom')
+                am = cb_alpha.currentText().lower()
+                lab_ga.setVisible(am == 'custom'); row_a.setVisible(am == 'custom')
+            _sync_vis()
+
+            def _commit():
+                working[et].blend_mode = cb_bm.currentText(); working[et].opacity = sl_op.value()/100.0
+                working[et].direction = sp_dir.value(); working[et].ls_length = sp_len.value()
+                bm = cb_blur.currentText().lower()
+                working[et].ls_blur_mode = bm
+                working[et].ls_mode = 'solid' if bm == 'solid' else 'soft'   # legacy readers
+                working[et].size = sp_size.value()
+                if bm == 'custom':
+                    working[et].ls_grad_blurs = gb_blur.stops()
+                cm = cb_color.currentText().lower()
+                working[et].ls_color_mode = cm
+                working[et].ls_color_grad = False                            # legacy readers: solid colour
+                if cm == 'custom':
+                    working[et].ls_grad_colors = gb_color.stops()
+                am = cb_alpha.currentText().lower()
+                working[et].ls_alpha_mode = am
+                working[et].ls_fade = (am == 'fade')                         # legacy readers
+                if am == 'custom':
+                    working[et].ls_grad_alphas = gb_alpha.stops()
+                _sync_vis(); _enable_in_list(et); _live()
+            def _on_op(v): lbl_op.setText(f"{v}%"); _commit()
+            cb_bm.currentTextChanged.connect(lambda _: _commit()); sl_op.valueChanged.connect(_on_op)
+            sp_dir.valueChanged.connect(lambda _: _commit()); sp_len.valueChanged.connect(lambda _: _commit())
+            cb_blur.currentTextChanged.connect(lambda _: _commit())
+            cb_color.currentTextChanged.connect(lambda _: _commit())
+            cb_alpha.currentTextChanged.connect(lambda _: _commit())
+            sp_size.valueChanged.connect(lambda _: _commit())
+            for gb in (gb_color, gb_alpha, gb_blur):
+                gb.changed.connect(_commit)
+            bx_b.clicked.connect(lambda: (gb_blur.setStops([[0.0, 0.0], [1.0, max(0.5, float(sp_size.value() or 2.0))]]), _commit()))
+            bx_c.clicked.connect(lambda: (gb_color.setStops([[0.0] + [float(v) for v in working[et].color[:3]], [1.0, 0.0, 0.0, 0.0]]), _commit()))
+            bx_a.clicked.connect(lambda: (gb_alpha.setStops([[0.0, 1.0], [1.0, 0.0]]), _commit()))
+            btn_c.clicked.connect(lambda: _color_commit_helper(et, btn_c, 'color'))
+            return w
+
+        def _build_chromatic_page(et):
+            w = QWidget(); fl = QFormLayout(w); fl.setSpacing(7); fl.setContentsMargins(20, 16, 20, 16)
+            fl.addRow(QLabel("<h3>Chromatic Aberration</h3>"))
+            sl_op = _slider_pct(int(working[et].opacity * 100))
+            lbl_op = QLabel(f"{int(working[et].opacity*100)}%"); lbl_op.setFixedWidth(40)
+            op_row = QWidget(); oh = QHBoxLayout(op_row); oh.setContentsMargins(0,0,0,0); oh.addWidget(sl_op); oh.addWidget(lbl_op)
+            cb_mode = QComboBox(); cb_mode.addItems(['linear', 'radial'])
+            cb_mode.setCurrentText(getattr(working[et], 'ca_mode', 'linear') or 'linear')
+            fl.addRow("Opacity:", op_row)
+            fl.addRow("Mode:", cb_mode)
+
+            # per-channel widgets: color, offset (mm), angle, distort (%)
+            chans = [('R', 'ca_r_color', 'ca_r_offset', 'ca_r_angle', 'ca_r_distort'),
+                     ('G', 'ca_g_color', 'ca_g_offset', 'ca_g_angle', 'ca_g_distort'),
+                     ('B', 'ca_b_color', 'ca_b_offset', 'ca_b_angle', 'ca_b_distort')]
+            ch_widgets = {}
+            for name, ck, ok, ak, dk in chans:
+                fl.addRow(QLabel(f"<b>{name} channel</b>"))
+                btn_c = _color_btn(getattr(working[et], ck))
+                sp_off = _mm(getattr(working[et], ok), 20)
+                sp_ang = _spin(0, 360, getattr(working[et], ak), '°', 0)
+                sp_dist = _spin(-50, 50, getattr(working[et], dk), ' %', 1)
+                fl.addRow("  Colour:", btn_c)
+                fl.addRow("  Offset:", sp_off)
+                fl.addRow("  Angle:", sp_ang)
+                fl.addRow("  Radial distort:", sp_dist)
+                ch_widgets[name] = (btn_c, sp_off, sp_ang, sp_dist, ck, ok, ak, dk)
+
+            def _sync_mode():
+                radial = (cb_mode.currentText() == 'radial')
+                for name, (btn_c, sp_off, sp_ang, sp_dist, ck, ok, ak, dk) in ch_widgets.items():
+                    sp_off.setEnabled(not radial); sp_ang.setEnabled(not radial)
+                    sp_dist.setEnabled(radial)
+            _sync_mode()
+
+            def _commit():
+                working[et].opacity = sl_op.value()/100.0
+                working[et].ca_mode = cb_mode.currentText()
+                for name, (btn_c, sp_off, sp_ang, sp_dist, ck, ok, ak, dk) in ch_widgets.items():
+                    setattr(working[et], ok, sp_off.value())
+                    setattr(working[et], ak, sp_ang.value())
+                    setattr(working[et], dk, sp_dist.value())
+                _sync_mode(); _enable_in_list(et); _live()
+            def _on_op(v): lbl_op.setText(f"{v}%"); _commit()
+            sl_op.valueChanged.connect(_on_op)
+            cb_mode.currentTextChanged.connect(lambda _: _commit())
+            for name, (btn_c, sp_off, sp_ang, sp_dist, ck, ok, ak, dk) in ch_widgets.items():
+                sp_off.valueChanged.connect(lambda _: _commit())
+                sp_ang.valueChanged.connect(lambda _: _commit())
+                sp_dist.valueChanged.connect(lambda _: _commit())
+                btn_c.clicked.connect(lambda _=False, b=btn_c, k=ck: _color_commit_helper(et, b, k))
+            return w
+
+        def _build_halftone_page(et):
+            w = QWidget(); fl = QFormLayout(w); fl.setSpacing(7); fl.setContentsMargins(20, 14, 20, 14)
+            fl.addRow(QLabel("<h3>Halftone (mosaic screen)</h3>"))
+            cb_bm = _blend_combo(working[et].blend_mode)
+            sl_op = _slider_pct(int(working[et].opacity * 100))
+            lbl_op = QLabel(f"{int(working[et].opacity*100)}%"); lbl_op.setFixedWidth(40)
+            op_row = QWidget(); oh = QHBoxLayout(op_row); oh.setContentsMargins(0,0,0,0); oh.addWidget(sl_op); oh.addWidget(lbl_op)
+            cb_cmode = QComboBox(); cb_cmode.addItems(['cmyk', 'rgb'])
+            cb_cmode.setCurrentText(getattr(working[et], 'ht_color_mode', 'cmyk') or 'cmyk')
+            cb_rmode = QComboBox(); cb_rmode.addItems(['size', 'transparency'])
+            cb_rmode.setCurrentText(getattr(working[et], 'ht_render_mode', 'size') or 'size')
+            cb_shape = QComboBox()
+            cb_shape.addItems(['circle', 'diamond', 'square', 'ring', 'cross', 'line', 'triangle', 'hex'])
+            _shp = working[et].ht_shape if working[et].ht_shape in (
+                'circle', 'diamond', 'square', 'ring', 'cross', 'line', 'triangle', 'hex') else 'circle'
+            cb_shape.setCurrentText(_shp)
+            sp_dot = _mm(working[et].ht_dot, 20, lo=0.3)
+            sp_ang = _spin(0, 180, working[et].ht_angle, '°', 0)
+            sp_sf = _spin(1, 1000, getattr(working[et], 'ht_size_factor', 115.0), ' %', 0)
+            sp_ov = _spin(0.2, 4.0, getattr(working[et], 'ht_overlay_scale', 1.5), '×', 2)
+            sp_dc = _spin(0, 100, getattr(working[et], 'ht_decentralization', 0.0), ' %', 0)
+            chk_hex = QCheckBox("Hex grid"); chk_hex.setChecked(bool(getattr(working[et], 'ht_hex', True)))
+            fl.addRow("Blend mode:", cb_bm); fl.addRow("Opacity:", op_row)
+            fl.addRow("Color mode:", cb_cmode)
+            fl.addRow("Dot driven by:", cb_rmode)
+            fl.addRow("Dot shape:", cb_shape)
+            fl.addRow("Cell size:", sp_dot)
+            fl.addRow("Screen angle step:", sp_ang)
+            fl.addRow("Dot scale:", sp_sf)
+            fl.addRow("Max dot vs cell:", sp_ov)
+            fl.addRow("Decentralization:", sp_dc)
+            fl.addRow("", chk_hex)
+            chk_rand = QCheckBox("Random dot rotation")
+            chk_rand.setChecked(bool(getattr(working[et], 'ht_random_rotate', False)))
+            fl.addRow("", chk_rand)
+
+            cb_bg = QComboBox()
+            cb_bg.addItem("Transparent (dots only)", "transparent")
+            cb_bg.addItem("Native (RGB=black / CMYK=white)", "native")
+            cb_bg.addItem("Layer content", "layer")
+            _bgv = getattr(working[et], 'ht_background', '') or (
+                'layer' if getattr(working[et], 'ht_keep_background', False) else 'native')
+            _bgi = cb_bg.findData(_bgv); cb_bg.setCurrentIndex(_bgi if _bgi >= 0 else 0)
+            fl.addRow("Background:", cb_bg)
+
+            chk_extra = QCheckBox("Extra key channel (RGB+black / CMYK+white)")
+            chk_extra.setChecked(bool(getattr(working[et], "ht_extra_channel", False)))
+            fl.addRow("", chk_extra)
+            cb_extra = QComboBox()
+            cb_extra.addItem("Auto (black for RGB, white for CMYK)", "auto")
+            cb_extra.addItem("White", "white")
+            cb_extra.addItem("Black", "black")
+            _exv = getattr(working[et], 'ht_extra_color', 'auto') or 'auto'
+            _exi = cb_extra.findData(_exv); cb_extra.setCurrentIndex(_exi if _exi >= 0 else 0)
+            fl.addRow("Extra ink:", cb_extra)
+
+            # per-channel enable (R G B [+key]  /  C M Y K [+key])
+            _ce = list(getattr(working[et], 'ht_channels_enabled', []) or [True] * 5)
+            while len(_ce) < 5:
+                _ce.append(True)
+            chk_ch = []
+            ch_row = QWidget(); ch_h = QHBoxLayout(ch_row); ch_h.setContentsMargins(0, 0, 0, 0); ch_h.setSpacing(8)
+            for i in range(5):
+                cb = QCheckBox(); cb.setChecked(bool(_ce[i])); cb.setFixedWidth(40)
+                chk_ch.append(cb); ch_h.addWidget(cb)
+            ch_h.addStretch()
+            lbl_ch = QLabel("Channels:")
+            fl.addRow(lbl_ch, ch_row)
+
+            def _relabel_channels():
+                names = (['R', 'G', 'B'] if cb_cmode.currentText() == 'rgb' else ['C', 'M', 'Y', 'K'])
+                if chk_extra.isChecked():
+                    names = names + ['K2' if cb_cmode.currentText() == 'rgb' else 'W']
+                for i, cb in enumerate(chk_ch):
+                    if i < len(names):
+                        cb.setText(names[i]); cb.setVisible(True)
+                    else:
+                        cb.setVisible(False)
+            _relabel_channels()
+
+            cb_clip = QComboBox()
+            cb_clip.addItem("Whole dots (no clip)", "whole")
+            cb_clip.addItem("Hard (clip to source)", "hard")
+            cb_clip.addItem("Soft (feather to source)", "soft")
+            _cl = getattr(working[et], 'ht_clip', 'whole') or 'whole'
+            _cli = cb_clip.findData(_cl); cb_clip.setCurrentIndex(_cli if _cli >= 0 else 0)
+            fl.addRow("Edge clip:", cb_clip)
+
+            # Custom pattern images (fallback to the built-in shape when missing)
+            # --- Patterns: mode + per-channel thumbnail slots --------------
+            def _chan_names():
+                nm = (['R', 'G', 'B'] if cb_cmode.currentText() == 'rgb' else ['C', 'M', 'Y', 'K'])
+                if chk_extra.isChecked():
+                    nm = nm + ['K2' if cb_cmode.currentText() == 'rgb' else 'W']
+                return nm
+
+            def _pats():
+                return list(getattr(working[et], 'ht_patterns', []) or [])
+
+            cb_pmode = QComboBox()
+            cb_pmode.addItem("Built-in shape", "shape")
+            cb_pmode.addItem("One image (all channels)", "single")
+            cb_pmode.addItem("Per channel (individual)", "per_channel")
+            _pm0 = getattr(working[et], 'ht_pattern_mode', 'shape') or 'shape'
+            _pmi = cb_pmode.findData(_pm0); cb_pmode.setCurrentIndex(_pmi if _pmi >= 0 else 0)
+            fl.addRow("Pattern mode:", cb_pmode)
+
+            pat_strip = QWidget(); pat_h = QHBoxLayout(pat_strip)
+            pat_h.setContentsMargins(0, 0, 0, 0); pat_h.setSpacing(4)
+            _thumb_btns = []
+            for i in range(5):
+                b = QPushButton(); b.setFixedSize(34, 34)
+                b.setStyleSheet("QPushButton{background:#26263a;border:1px solid #44445e;border-radius:5px;}"
+                                "QPushButton:hover{border-color:#6a6aa0;}")
+                pat_h.addWidget(b); _thumb_btns.append(b)
+            pat_h.addStretch()
+            fl.addRow("Patterns:", pat_strip)
+
+            def _nslots():
+                md = cb_pmode.currentData()
+                return 0 if md == 'shape' else (1 if md == 'single' else len(_chan_names()))
+
+            def _refresh_thumbs():
+                md = cb_pmode.currentData(); names = _chan_names(); pats = _pats()
+                ns = _nslots()
+                pat_strip.setVisible(md != 'shape')
+                for i, b in enumerate(_thumb_btns):
+                    if i < ns:
+                        b.setVisible(True)
+                        lab = "all" if md == 'single' else (names[i] if i < len(names) else str(i + 1))
+                        b.setToolTip(f"{lab} pattern — click to load / library / clear")
+                        b64 = pats[i] if i < len(pats) else ""
+                        pm = _ht_b64_pixmap(b64, 28) if b64 else None
+                        if pm is not None:
+                            from PyQt6.QtGui import QIcon as _QIcon
+                            from PyQt6.QtCore import QSize as _QSize
+                            b.setIcon(_QIcon(pm)); b.setIconSize(_QSize(28, 28)); b.setText("")
+                        else:
+                            b.setIcon(QIcon()); b.setText(lab)
+                    else:
+                        b.setVisible(False)
+
+            def _set_pat(idx, b64):
+                md = cb_pmode.currentData()
+                if md == 'single':
+                    working[et].ht_patterns = [b64 or ""]
+                else:
+                    pats = _pats(); n = len(_chan_names())
+                    while len(pats) < n:
+                        pats.append("")
+                    pats[idx] = b64 or ""
+                    working[et].ht_patterns = pats
+                if b64:
+                    _ht_lib_add(b64)
+                _refresh_thumbs(); _commit()
+
+            def _on_pmode():
+                md = cb_pmode.currentData()
+                cur = _pats()
+                if md == 'shape':
+                    working[et].ht_patterns = []
+                elif md == 'single':
+                    first = next((p for p in cur if p), "")
+                    working[et].ht_patterns = [first]
+                else:  # per_channel
+                    n = len(_chan_names())
+                    if len(cur) == 1 and cur[0]:
+                        working[et].ht_patterns = [cur[0]] * n
+                    else:
+                        while len(cur) < n:
+                            cur.append("")
+                        working[et].ht_patterns = cur
+                working[et].ht_pattern_mode = md
+                _refresh_thumbs(); _commit()
+
+            def _thumb_menu(idx):
+                from PyQt6.QtWidgets import QMenu, QFileDialog
+                from PyQt6.QtGui import QIcon as _QIcon
+                m = QMenu(dlg)
+                def _load():
+                    f, _f = QFileDialog.getOpenFileName(
+                        dlg, "Choose pattern image", "",
+                        "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)")
+                    if f:
+                        b64 = _ht_file_to_b64(f)
+                        if b64:
+                            _set_pat(idx, b64)
+                m.addAction("Load image…", _load)
+                lib = _ht_lib_get()
+                if lib:
+                    sub = m.addMenu("From library"); sub.setStyle(_menu_icon_style(sub, 28))
+                    for b64 in lib:
+                        pm = _ht_b64_pixmap(b64, 28); act = sub.addAction("")
+                        if pm is not None:
+                            act.setIcon(_QIcon(pm))
+                        act.triggered.connect(lambda _=False, bb=b64: _set_pat(idx, bb))
+                cur = _pats()
+                if idx < len(cur) and cur[idx]:
+                    m.addAction("Clear", lambda: _set_pat(idx, ""))
+                m.exec(_thumb_btns[idx].mapToGlobal(_thumb_btns[idx].rect().bottomLeft()))
+
+            for i, b in enumerate(_thumb_btns):
+                b.clicked.connect(lambda _=False, ix=i: _thumb_menu(ix))
+            cb_pmode.currentIndexChanged.connect(lambda _: _on_pmode())
+            _refresh_thumbs()
+
+            def _commit():
+                working[et].blend_mode = cb_bm.currentText(); working[et].opacity = sl_op.value()/100.0
+                working[et].ht_color_mode = cb_cmode.currentText()
+                working[et].ht_render_mode = cb_rmode.currentText()
+                working[et].ht_shape = cb_shape.currentText()
+                working[et].ht_dot = sp_dot.value(); working[et].ht_angle = sp_ang.value()
+                working[et].ht_size_factor = sp_sf.value()
+                working[et].ht_overlay_scale = sp_ov.value()
+                working[et].ht_decentralization = sp_dc.value()
+                working[et].ht_hex = chk_hex.isChecked()
+                working[et].ht_random_rotate = chk_rand.isChecked()
+                working[et].ht_background = cb_bg.currentData()
+                working[et].ht_keep_background = (cb_bg.currentData() == 'layer')
+                working[et].ht_extra_channel = chk_extra.isChecked()
+                working[et].ht_extra_color = cb_extra.currentData()
+                working[et].ht_channels_enabled = [cb.isChecked() for cb in chk_ch]
+                working[et].ht_clip = cb_clip.currentData()
+                _enable_in_list(et); _live()
+            def _on_op(v): lbl_op.setText(f"{v}%"); _commit()
+            cb_bm.currentTextChanged.connect(lambda _: _commit()); sl_op.valueChanged.connect(_on_op)
+            for c in (cb_cmode, cb_rmode, cb_shape):
+                c.currentTextChanged.connect(lambda _: _commit())
+            for s in (sp_dot, sp_ang, sp_sf, sp_ov, sp_dc):
+                s.valueChanged.connect(lambda _: _commit())
+            chk_hex.toggled.connect(lambda _: _commit())
+            chk_rand.toggled.connect(lambda _: _commit())
+            cb_bg.currentIndexChanged.connect(lambda _: _commit())
+            chk_extra.toggled.connect(lambda _: (_relabel_channels(), _refresh_thumbs(), _commit()))
+            cb_extra.currentIndexChanged.connect(lambda _: _commit())
+            for cb in chk_ch:
+                cb.toggled.connect(lambda _: _commit())
+            cb_clip.currentIndexChanged.connect(lambda _: _commit())
+            cb_cmode.currentTextChanged.connect(lambda _: (_relabel_channels(), _refresh_thumbs()))
+            return w
+
+        def _build_light_sweep_page(et):
+            w = QWidget(); fl = QFormLayout(w); fl.setSpacing(8); fl.setContentsMargins(20, 20, 20, 20)
+            fl.addRow(QLabel("<h3>Light Sweep</h3>"))
+            cb_bm = _blend_combo(working[et].blend_mode)
+            sl_op = _slider_pct(int(working[et].opacity * 100))
+            lbl_op = QLabel(f"{int(working[et].opacity*100)}%"); lbl_op.setFixedWidth(40)
+            op_row = QWidget(); oh = QHBoxLayout(op_row); oh.setContentsMargins(0,0,0,0); oh.addWidget(sl_op); oh.addWidget(lbl_op)
+            btn_c = _color_btn(working[et].color2)
+            sp_pos = _spin(0, 1, working[et].lsw_pos, '', 2)
+            sp_wid = _spin(0.05, 1, working[et].lsw_width, '', 2)
+            sp_ang = _spin(0, 360, working[et].lsw_angle, '°', 0)
+            fl.addRow("Blend mode:", cb_bm); fl.addRow("Opacity:", op_row); fl.addRow("Light color:", btn_c)
+            fl.addRow("Position (0-1):", sp_pos); fl.addRow("Width (0-1):", sp_wid); fl.addRow("Angle:", sp_ang)
+            def _commit():
+                working[et].blend_mode = cb_bm.currentText(); working[et].opacity = sl_op.value()/100.0
+                working[et].lsw_pos = sp_pos.value(); working[et].lsw_width = sp_wid.value()
+                working[et].lsw_angle = sp_ang.value(); _enable_in_list(et); _live()
+            def _on_op(v): lbl_op.setText(f"{v}%"); _commit()
+            cb_bm.currentTextChanged.connect(lambda _: _commit()); sl_op.valueChanged.connect(_on_op)
+            sp_pos.valueChanged.connect(lambda _: _commit()); sp_wid.valueChanged.connect(lambda _: _commit())
+            sp_ang.valueChanged.connect(lambda _: _commit())
+            btn_c.clicked.connect(lambda: _color_commit_helper(et, btn_c, 'color2'))
+            return w
+
+        # ── dispatch: build the parameter panel for a given instance key ──────
+        def _build_for(key):
+            t = working[key].type
+            if t == 'drop_shadow':   return _build_shadow_page(key, is_inner=False)
+            if t == 'inner_shadow':  return _build_shadow_page(key, is_inner=True)
+            if t == 'outer_glow':    return _build_glow_page(key, is_inner=False)
+            if t == 'inner_glow':    return _build_glow_page(key, is_inner=True)
+            if t == 'bevel':         return _build_bevel_page(key)
+            if t == 'stroke':        return _build_stroke_page(key)
+            if t == 'color_overlay': return _build_color_overlay_page(key)
+            if t == 'gradient_overlay': return _build_gradient_overlay_page(key)
+            if t == 'texture_overlay':  return _build_texture_overlay_page(key)
+            if t == 'long_shadow':   return _build_long_shadow_page(key)
+            if t == 'chromatic_aberration': return _build_chromatic_page(key)
+            if t == 'halftone':      return _build_halftone_page(key)
+            if t == 'light_sweep':   return _build_light_sweep_page(key)
+            return QWidget()
+
+        stack.addWidget(w_blend)
+        param_widgets['__blend__'] = w_blend
+
+        def _show(key):
+            if key == '__blend__':
+                stack.setCurrentWidget(w_blend); return
+            if key not in param_widgets:
+                pg = _build_for(key); param_widgets[key] = pg; stack.addWidget(pg)
+            stack.setCurrentWidget(param_widgets[key])
 
         splitter.addWidget(stack)
         splitter.setStretchFactor(0, 0); splitter.setStretchFactor(1, 1)
         v.addWidget(splitter, 1)
 
-        # When user clicks an effect in the list, show its parameters
+        def _cur_key():
+            it = list_w.currentItem()
+            return it.data(UR) if it else None
+
         def _on_select():
-            row = list_w.currentRow()
-            if row < 0: return
-            et = list_w.item(row).data(Qt.ItemDataRole.UserRole)
-            stack.setCurrentWidget(param_widgets[et])
+            k = _cur_key()
+            if k is not None:
+                _show(k)
         list_w.currentRowChanged.connect(lambda _: _on_select())
 
-        # When checkbox in list changes, update working[et].enabled and re-render
         def _on_check(item):
-            et = item.data(Qt.ItemDataRole.UserRole)
-            if et == 'blending': return
-            working[et].enabled = (item.checkState() == Qt.CheckState.Checked)
+            if _rebuilding[0]: return
+            k = item.data(UR)
+            if k == '__blend__': return
+            working[k].enabled = (item.checkState() == Qt.CheckState.Checked)
             _live()
         list_w.itemChanged.connect(_on_check)
 
-        # Master enable toggle
+        def _on_rows_moved(*_a):
+            if _rebuilding[0]: return
+            keys = [list_w.item(r).data(UR) for r in range(list_w.count())]
+            order[:] = [k for k in keys if k != '__blend__']
+            # keep Blending Options pinned at the top
+            if list_w.count() == 0 or list_w.item(0).data(UR) != '__blend__':
+                _rebuild_list(keep_key=_cur_key())
+            else:
+                # labels (ordinal suffixes) may have changed
+                for k in order:
+                    it = item_by_key.get(k)
+                    if it is not None: it.setText(_label_for(k))
+            _live()
+        list_w.model().rowsMoved.connect(_on_rows_moved)
+
         cb_master.toggled.connect(lambda _: _live())
 
-        # Buttons
+        # ── Add / Duplicate / Remove ─────────────────────────────────────────
+        from PyQt6.QtWidgets import QMenu
+        btn_row = QHBoxLayout()
+        btn_add = QPushButton("＋ Add"); btn_dup = QPushButton("⧉ Duplicate")
+        btn_del = QPushButton("－ Remove")
+        for b in (btn_add, btn_dup, btn_del):
+            b.setFixedHeight(28); b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn_row.addWidget(btn_add); btn_row.addWidget(btn_dup)
+        btn_row.addWidget(btn_del); btn_row.addStretch()
+        v.addLayout(btn_row)
+
+        def _add_effect(et2):
+            k = _new_key(et2); working[k] = _make_default(et2); order.append(k)
+            _rebuild_list(keep_key=k); _show(k); _live()
+        def _add_menu():
+            m = QMenu(dlg)
+            for et2 in ADD_TYPES:
+                act = m.addAction(DISPLAY.get(et2, et2))
+                act.triggered.connect(lambda _=False, t=et2: _add_effect(t))
+            m.exec(btn_add.mapToGlobal(btn_add.rect().bottomLeft()))
+        def _duplicate():
+            k = _cur_key()
+            if not k or k == '__blend__': return
+            nk = _new_key(working[k].type); working[nk] = deepcopy(working[k])
+            order.insert(order.index(k) + 1, nk)
+            _rebuild_list(keep_key=nk); _show(nk); _live()
+        def _remove():
+            k = _cur_key()
+            if not k or k == '__blend__': return
+            i = order.index(k); order.remove(k)
+            pw = param_widgets.pop(k, None)
+            if pw is not None:
+                stack.removeWidget(pw); pw.deleteLater()
+            working.pop(k, None)
+            nxt = order[i] if i < len(order) else (order[i-1] if order else '__blend__')
+            _rebuild_list(keep_key=nxt); _show(nxt); _live()
+        btn_add.clicked.connect(_add_menu)
+        btn_dup.clicked.connect(_duplicate)
+        btn_del.clicked.connect(_remove)
+
+        # OK / Cancel
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
         v.addWidget(bb)
 
-        # Select first item
-        list_w.setCurrentRow(0)
+        _rebuild_list(keep_key='__blend__')
+        _show('__blend__')
+        # test/debug hooks
+        self._fx_dlg_list = list_w
+        self._fx_dlg_order = order
+        self._fx_dlg_working = working
+        self._fx_dlg_ops = {'add': _add_effect, 'dup': _duplicate,
+                            'rm': _remove, 'cur': _cur_key, 'reorder': _on_rows_moved}
 
         result = dlg.exec()
         if result != QDialog.DialogCode.Accepted:
-            # Restore
             self._obj.effects = original_effects
             self._obj.blend_mode = original_blend
             self._obj.opacity = original_opacity
+            # v4.2.10.14: cancel restores the pre-dialog state, which is identical
+            # to the current history top — suppress recording so Ctrl+Z isn't left
+            # with a dead no-op step.
+            try:
+                mw = self._canvas._main_window()
+                if mw is not None: mw._arm_history_suppression()
+            except Exception:
+                pass
             self._canvas.schedule_render(); self.changed.emit()
             return
-        # Commit final state
-        new_effects = []
-        for et, _ in EFFECT_LIST:
-            if et == 'blending': continue
-            if working[et].enabled and cb_master.isChecked():
-                new_effects.append(working[et])
-        self._obj.effects = new_effects
+        # Commit final state (enabled instances, in order)
+        self._obj.effects = [deepcopy(working[k]) for k in order
+                             if working[k].enabled and cb_master.isChecked()]
         self._canvas.schedule_render(); self.changed.emit()
 
 
@@ -7996,40 +10779,65 @@ class PropPanel(QWidget):
 
     def _pick_text_color(self):
         if not isinstance(self._obj,edof.TextBox): return
-        c=EdofColorDialog.get_color(self,(*self._obj.style.color[:3],255),alpha=False)
+        orig=tuple(self._obj.style.color)
+        def _prev(col):
+            self._obj.style.color=col[:3]; self._canvas.schedule_render()
+        c=EdofColorDialog.get_color(self,(*self._obj.style.color[:3],255),alpha=False,on_change=_prev)
         if c:
             self._obj.style.color=c[:3]; self.btn_color.setStyleSheet(_cswatch(c))
             self._canvas.schedule_render(); self.changed.emit()
+        else:
+            self._obj.style.color=orig; self._canvas.schedule_render()
 
     def _pick_fill(self):
         if not hasattr(self._obj,'fill'): return
-        c=EdofColorDialog.get_color(self,self._obj.fill.color or (200,200,200,255),alpha=True)
+        orig=self._obj.fill.color
+        def _prev(col):
+            self._obj.fill.color=col; self._canvas.schedule_render()
+        c=EdofColorDialog.get_color(self,self._obj.fill.color or (200,200,200,255),alpha=True,on_change=_prev)
         if c:
             self._obj.fill.color=c; self.btn_fill.setStyleSheet(_cswatch(c))
             self.lbl_fill_a.setText(f"{int(c[3]/255*100)}%"); self._canvas.schedule_render(); self.changed.emit()
+        else:
+            self._obj.fill.color=orig; self._canvas.schedule_render()
 
     def _pick_stroke(self):
         if not hasattr(self._obj,'stroke'): return
-        c=EdofColorDialog.get_color(self,self._obj.stroke.color or (0,0,0,255),alpha=True)
+        orig=self._obj.stroke.color
+        def _prev(col):
+            self._obj.stroke.color=col; self._canvas.schedule_render()
+        c=EdofColorDialog.get_color(self,self._obj.stroke.color or (0,0,0,255),alpha=True,on_change=_prev)
         if c:
             self._obj.stroke.color=c; self.btn_stroke.setStyleSheet(_cswatch(c))
             self._canvas.schedule_render(); self.changed.emit()
+        else:
+            self._obj.stroke.color=orig; self._canvas.schedule_render()
 
     def _pick_line_stroke(self):
         if not hasattr(self._obj,'stroke'): return
-        c=EdofColorDialog.get_color(self,self._obj.stroke.color or (0,0,0,255),alpha=True)
+        orig=self._obj.stroke.color
+        def _prev(col):
+            self._obj.stroke.color=col; self._canvas.schedule_render()
+        c=EdofColorDialog.get_color(self,self._obj.stroke.color or (0,0,0,255),alpha=True,on_change=_prev)
         if c:
             self._obj.stroke.color=c; self.btn_lstroke.setStyleSheet(_cswatch(c))
             self._canvas.schedule_render(); self.changed.emit()
+        else:
+            self._obj.stroke.color=orig; self._canvas.schedule_render()
 
     def _pick_qr_color(self,attr):
         if not isinstance(self._obj,edof.QRCode): return
-        c=EdofColorDialog.get_color(self,getattr(self._obj,attr,(0,0,0,255)),alpha=True)
+        orig=getattr(self._obj,attr,(0,0,0,255))
+        def _prev(col):
+            setattr(self._obj,attr,col); self._canvas.schedule_render()
+        c=EdofColorDialog.get_color(self,getattr(self._obj,attr,(0,0,0,255)),alpha=True,on_change=_prev)
         if c:
             setattr(self._obj,attr,c)
             getattr(self,f'btn_qr_{attr}').setStyleSheet(_cswatch(c))
             getattr(self,f'lbl_qr_{attr}_a').setText(f"{int(c[3]/255*100)}%")
             self._canvas.schedule_render(); self.changed.emit()
+        else:
+            setattr(self._obj,attr,orig); self._canvas.schedule_render()
 
     def _upload_font(self):
         p,_=QFileDialog.getOpenFileName(self,"Upload font","","Fonts (*.ttf *.otf)")
@@ -8163,6 +10971,19 @@ class EdofEditor(QMainWindow):
         self._body_commit_timer.setSingleShot(True)
         self._body_commit_timer.timeout.connect(self._commit_pending_body)
         self._body_commit_delay = 700  # ms
+        # v4.2.10.13: object edits (move/resize/rotate/style via canvas drag or
+        # the property panel) coalesce into one history step per burst, mirroring
+        # the body-text model. Previously these went through _on_chg which only
+        # set the modified flag and never pushed history, so undo/redo did
+        # nothing for them in BASIC (free-design) mode. _suppress_obj_history
+        # guards programmatic doc swaps (New/Open/undo-restore) so they don't
+        # record spurious steps.
+        self._obj_pending = False
+        self._suppress_obj_history = False
+        self._obj_commit_timer = QTimer(self)
+        self._obj_commit_timer.setSingleShot(True)
+        self._obj_commit_timer.timeout.connect(self._commit_pending_obj)
+        self._obj_commit_delay = 450  # ms
         # v4.0.2: persistent settings + recent files
         self._settings = QSettings("edof", "editor")
         self._recent_files = self._settings.value("recent_files", []) or []
@@ -8338,6 +11159,7 @@ class EdofEditor(QMainWindow):
         # moves between pages on its own (cursor hop during repaginate,
         # _do_new_page after Ctrl+Enter, merge-with-previous backspace).
         self._canvas.pageChanged.connect(self._on_canvas_page_changed)
+        self._canvas.zoomChanged.connect(self._on_zoom_changed)
         self.setCentralWidget(self._canvas)
 
         # Left: pages + objects (tabbed)
@@ -8385,7 +11207,7 @@ class EdofEditor(QMainWindow):
 
         self._lbl_zoom=QLabel("100%")
         # v4.1.18: status bar DPI indicator
-        self._lbl_dpi = QLabel("DPI: 96")
+        self._lbl_dpi = QLabel("—")
         self._lbl_dpi.setToolTip("Document target DPI (used for PDF/PNG export)")
         self._status=QStatusBar(); self.setStatusBar(self._status)
         self._status.addPermanentWidget(self._lbl_dpi)
@@ -8393,11 +11215,23 @@ class EdofEditor(QMainWindow):
         self._build_toolbar(); self._build_menu()
 
     def _build_toolbar(self):
-        tb=self.addToolBar("Main"); tb.setMovable(False); tb.setIconSize(QSize(14,14))
-        def a(lbl, slot, key=None, tip=None):
+        tb=self.addToolBar("Main"); tb.setMovable(False); tb.setIconSize(QSize(16,16))
+        # v4.2.11.33: shortcuts used to be registered on BOTH the toolbar and the
+        # menu action (Ctrl+S, Ctrl+N, Ctrl+O, Ctrl+Z, ...). Qt treats a key
+        # bound to two actions as AMBIGUOUS and fires neither, so those
+        # shortcuts silently did nothing. Now there is a single registry: menu
+        # actions register first (menus display the key natively), toolbar
+        # actions only show the key in the tooltip and register afterwards only
+        # if the key is still free.
+        self._sc_reg = {}
+        self._tb_deferred_sc = []
+        def a(lbl, slot, key=None, tip=None, icon=None):
             ac=QAction(lbl,self); ac.triggered.connect(slot)
+            if icon:
+                _ic=uicon(icon)
+                if not _ic.isNull(): ac.setIcon(_ic)
             if key:
-                ac.setShortcut(QKeySequence(key))
+                self._tb_deferred_sc.append((ac, key))
                 if tip:
                     ac.setToolTip(f"{tip}  ({key})")
                     ac.setStatusTip(tip)
@@ -8409,56 +11243,60 @@ class EdofEditor(QMainWindow):
             return ac
         # v4.1.19: explicit Select / Hand tool buttons as a checkable group
         # so the active mode is visually obvious in the toolbar.
-        def add_tool(lbl, slot, key=None, tip=None):
+        def add_tool(lbl, slot, key=None, tip=None, icon=None):
             ac = QAction(lbl, self); ac.setCheckable(True)
             ac.triggered.connect(slot)
+            if icon:
+                _ic=uicon(icon)
+                if not _ic.isNull(): ac.setIcon(_ic)
             if key:
-                ac.setShortcut(QKeySequence(key))
+                self._tb_deferred_sc.append((ac, key))
                 ac.setToolTip(f"{tip}  ({key})" if tip else key)
                 ac.setStatusTip(tip or key)
             elif tip:
                 ac.setToolTip(tip); ac.setStatusTip(tip)
             tb.addAction(ac); return ac
         # v4.0.3: every toolbar button now has a descriptive tooltip
-        a("📄", self._new_doc,                "Ctrl+N",  "New document")
-        a("📂", self._open_dlg,               "Ctrl+O",  "Open .edof file")
-        a("💾", self._save,                   "Ctrl+S",  "Save")
+        # v4.2.7.3: custom UI icons (fall back to the emoji/text label if missing)
+        a("📄", self._new_doc,                "Ctrl+N",  "New document", icon="new")
+        a("📂", self._open_dlg,               "Ctrl+O",  "Open .edof file", icon="open")
+        a("💾", self._save,                   "Ctrl+S",  "Save", icon="save")
         tb.addSeparator()
-        a("↩",  self._undo,                   "Ctrl+Z",  "Undo")
-        a("↪",  self._redo,                   "Ctrl+Y",  "Redo")
+        a("↩",  self._undo,                   "Ctrl+Z",  "Undo", icon="undo")
+        a("↪",  self._redo,                   "Ctrl+Y",  "Redo", icon="redo")
         tb.addSeparator()
         # v4.1.19: tool mode selectors (cursor / hand) — exclusive group.
         # v4.1.19.3: no single-letter shortcuts (V/H) — they were stealing
         # typed characters away from the inline text editor. The buttons
         # are clearly visible in the toolbar and clickable directly.
         self._act_select_tool = add_tool("↖", lambda: self._set_tool_mode("select"),
-                                            None, "Select tool — click and drag to select/move objects")
+                                            None, "Select tool — click and drag to select/move objects", icon="select")
         self._act_hand_tool   = add_tool("✋", lambda: self._set_tool_mode("hand"),
-                                            None, "Hand tool — drag the canvas to pan")
+                                            None, "Hand tool — drag the canvas to pan", icon="hand")
         self._act_select_tool.setChecked(True)   # default
         tb.addSeparator()
-        a("T",  self._ins_textbox,             tip="Insert text box")
-        a("🖼", self._ins_image,                tip="Insert image")
-        a("⬜", lambda:self._ins_shape("rect"),    tip="Insert rectangle")
-        a("⬭", lambda:self._ins_shape("ellipse"), tip="Insert ellipse")
-        a("╱",  self._ins_line,                tip="Insert line")
-        a("⬛", self._ins_qr,                   tip="Insert QR code")
+        a("T",  self._ins_textbox,             tip="Insert text box", icon="text")
+        a("🖼", self._ins_image,                tip="Insert image", icon="image")
+        a("⬜", lambda:self._ins_shape("rect"),    tip="Insert rectangle", icon="rect")
+        a("⬭", lambda:self._ins_shape("ellipse"), tip="Insert ellipse", icon="ellipse")
+        a("╱",  self._ins_line,                tip="Insert line", icon="line")
+        a("⬛", self._ins_qr,                   tip="Insert QR code", icon="qr")
         # v4.0.3: new insert tools
-        a("⊞",  self._ins_table,               tip="Insert table…")
-        a("📄", self._ins_subdoc,              tip="Insert embedded EDOF sub-document (v4.1.2)")
-        a("✎",  self._ins_path,                tip="Pen tool — click=corner, click+drag=curve handle (Esc to cancel)")
-        a("⟨S⟩", self._ins_svg,                tip="Import SVG (raster display; double-click to convert)")
+        a("⊞",  self._ins_table,               tip="Insert table…", icon="table")
+        a("📄", self._ins_subdoc,              tip="Insert embedded EDOF sub-document (v4.1.2)", icon="subdoc")
+        a("✎",  self._ins_path,                tip="Pen tool — click=corner, click+drag=curve handle (Esc to cancel)", icon="pen")
+        a("⟨S⟩", self._ins_svg,                tip="Import SVG (raster display; double-click to convert)", icon="svg")
         tb.addSeparator()
-        a("🔍+",lambda:self._zoom_step(1.25),  "Ctrl+=", "Zoom in")
-        a("🔍-",lambda:self._zoom_step(1/1.25),"Ctrl+-", "Zoom out")
-        a("Fit",self._zoom_fit,                "Ctrl+0", "Fit page to window")
+        a("🔍+",lambda:self._zoom_step(1.25),  "Ctrl+=", "Zoom in", icon="zoom-in")
+        a("🔍-",lambda:self._zoom_step(1/1.25),"Ctrl+-", "Zoom out", icon="zoom-out")
+        a("Fit",self._zoom_fit,                "Ctrl+0", "Fit page to window", icon="fit")
         tb.addSeparator()
-        a("⧉",  self._dup_obj,                 "Ctrl+D", "Duplicate selected object")
-        a("🗑", self._del_obj,                 "Delete", "Delete selected object")
+        a("⧉",  self._dup_obj,                 "Ctrl+D", "Duplicate selected object", icon="duplicate")
+        a("🗑", self._del_obj,                 "Delete", "Delete selected object", icon="delete")
         tb.addSeparator()
-        a("PNG",self._export_png,              tip="Export current page as PNG")
-        a("PDF",self._export_pdf,              tip="Export document as PDF…")
-        a("📊 CSV",self._batch_csv,            tip="Batch generate from CSV")
+        a("PNG",self._export_png,              tip="Export current page as PNG", icon="export")
+        a("PDF",self._export_pdf,              tip="Export document as PDF…", icon="pdf")
+        a("📊 CSV",self._batch_csv,            tip="Batch generate from CSV", icon="csv")
 
         # v4.1.20: paragraph-style dropdown for document mode. Shown always
         # but only relevant when the current doc has mode == 'document' and
@@ -8533,13 +11371,27 @@ class EdofEditor(QMainWindow):
         self._canvas.schedule_render()
         self._mark_modified()
 
+    def _reg_sc(self, ac, key):
+        """Register a shortcut exactly once window-wide. A key bound to two
+        QActions is ambiguous in Qt and fires NEITHER, so duplicates are
+        silently skipped (the duplicate keeps its tooltip/menu text only)."""
+        try:
+            ks = QKeySequence(key); s = ks.toString()
+            if not s or s in self._sc_reg:
+                return False
+            self._sc_reg[s] = ac
+            ac.setShortcut(ks)
+            return True
+        except Exception:
+            return False
+
     def _build_menu(self):
         mb=self.menuBar()
         def m(tk): return mb.addMenu(t(tk))
         def a(mn,tk,slot,key=None,sep=False):
             if sep: mn.addSeparator(); return
             ac=QAction(t(tk),self); ac.triggered.connect(slot)
-            if key: ac.setShortcut(QKeySequence(key))
+            if key: self._reg_sc(ac, key)
             mn.addAction(ac)
         fm=m('menu_file')
         a(fm,'new',self._new_doc,"Ctrl+N"); a(fm,'open',self._open_dlg,"Ctrl+O")
@@ -8627,7 +11479,7 @@ class EdofEditor(QMainWindow):
         # v4.0.1: encryption / protection
         a(dm,sep=True,tk="",slot=None)
         unlock_act=QAction("Unlock for editing…",self)
-        unlock_act.setShortcut(QKeySequence("Ctrl+Shift+L"))
+        self._reg_sc(unlock_act, "Ctrl+Shift+L")
         unlock_act.triggered.connect(self._show_unlock_dialog)
         dm.addAction(unlock_act)
         protect_act=QAction("Protection…",self)
@@ -8643,7 +11495,7 @@ class EdofEditor(QMainWindow):
         a(vm,sep=True,tk="",slot=None)
         # v4.0.1: snap-to-grid toggle
         snap_act=QAction("Snap to Grid",self)
-        snap_act.setCheckable(True); snap_act.setShortcut(QKeySequence("Ctrl+G"))
+        snap_act.setCheckable(True); self._reg_sc(snap_act, "Ctrl+G")
         def _toggle_snap(chk):
             self._canvas._snap_to_grid = chk
             self._canvas.viewport().update()  # v4.1.0: redraw grid dots
@@ -8675,6 +11527,10 @@ class EdofEditor(QMainWindow):
         vm.addAction(margin_set_act)
 
         vm.addSeparator()
+        # v4.2.10.11: render performance / optimization toggles
+        perf_act = QAction("Performance / optimizations…", self)
+        perf_act.triggered.connect(self._open_perf_settings)
+        vm.addAction(perf_act)
         # v4.0.3: reset panels
         reset_panels_act=QAction("Reset Panel Layout", self)
         reset_panels_act.triggered.connect(self._reset_panels)
@@ -8683,7 +11539,7 @@ class EdofEditor(QMainWindow):
         # v4.0.3 / v4.1.0: Help menu
         hm=mb.addMenu("&Help")
         sk_act=QAction("Keyboard Shortcuts…", self)
-        sk_act.setShortcut(QKeySequence("F1"))
+        self._reg_sc(sk_act, "F1")
         sk_act.triggered.connect(self._show_shortcuts)
         hm.addAction(sk_act)
         # v4.1.23.37: editable shortcut customization
@@ -8692,7 +11548,7 @@ class EdofEditor(QMainWindow):
         hm.addAction(cust_sk_act)
         # v4.1.0: full help guide (multi-page)
         guide_act=QAction("Help Guide…", self)
-        guide_act.setShortcut(QKeySequence("F2"))
+        self._reg_sc(guide_act, "F2")
         guide_act.triggered.connect(self._show_help_guide)
         hm.addAction(guide_act)
         hm.addSeparator()
@@ -8706,11 +11562,97 @@ class EdofEditor(QMainWindow):
         donate_act.triggered.connect(self._open_donate)
         hm.addAction(donate_act)
         hm.addSeparator()
+        # v4.2.10.7: in-app debug logging toggle, independent of how the editor
+        # was launched (file association / shortcut / entry point). Removes all
+        # dependence on EDOF_DEBUG env / launcher batch quoting.
+        try:
+            from edof.engine.debug_log import is_enabled as _dbg_on
+            _dbg_state = bool(_dbg_on())
+        except Exception:
+            _dbg_state = False
+        self._dbg_log_act = QAction("Debug log (curves/keys)", self)
+        self._dbg_log_act.setCheckable(True)
+        self._dbg_log_act.setChecked(_dbg_state)
+        self._dbg_log_act.triggered.connect(self._toggle_debug_log)
+        hm.addAction(self._dbg_log_act)
+        open_log_act = QAction("Open debug log location…", self)
+        open_log_act.triggered.connect(self._open_debug_log_location)
+        hm.addAction(open_log_act)
+        hm.addSeparator()
         about_act=QAction("About edof…", self)
         about_act.triggered.connect(self._show_about)
         hm.addAction(about_act)
+        # v4.2.11.33: register toolbar shortcuts LAST -- only keys the menu did
+        # not claim get bound here, so no key is ever ambiguous (= dead).
+        for _ac, _key in getattr(self, '_tb_deferred_sc', []):
+            self._reg_sc(_ac, _key)
 
     # ── Slots ─────────────────────────────────────────────────────────────────
+    def _debug_log_path(self):
+        """Resolve where the debug log lives: EDOF_DEBUG_PATH if set, else the
+        debug_log module default (user home / edof_debug.log)."""
+        import os as _os
+        try:
+            from edof.engine.debug_log import current_path as _cp
+            return _os.path.abspath(_cp())
+        except Exception:
+            return _os.path.abspath(
+                _os.environ.get("EDOF_DEBUG_PATH")
+                or _os.path.join(_os.path.expanduser("~"), "edof_debug.log"))
+
+    def _toggle_debug_log(self, checked):
+        """v4.2.10.7: enable/disable detailed curve+key logging from the menu,
+        regardless of how the editor was launched. On enable, the log file is
+        created immediately and its exact path is shown."""
+        from PyQt6.QtWidgets import QMessageBox
+        import os as _os
+        try:
+            from edof.engine import debug_log as _dl
+        except Exception as e:
+            QMessageBox.warning(self, "Debug log", f"Debug log unavailable: {e}")
+            return
+        if checked:
+            # honour an explicit EDOF_DEBUG_PATH; otherwise use the module default
+            path = _os.environ.get("EDOF_DEBUG_PATH") or None
+            _dl.enable(path)   # writes a LOG.ENABLED line, creating the file
+            _dl.log("editor.startup", version=edof.__version__,
+                    log_path=_dl.current_path(), source="menu")
+            real = self._debug_log_path()
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Information)
+            box.setWindowTitle("Debug log enabled")
+            box.setText("Detailed curve / key logging is ON.\n\n"
+                        "Draw and edit with the pen tool, then close the editor "
+                        "and send this file:")
+            box.setInformativeText(real)
+            open_btn = box.addButton("Open folder", QMessageBox.ButtonRole.ActionRole)
+            box.addButton(QMessageBox.StandardButton.Ok)
+            box.exec()
+            if box.clickedButton() is open_btn:
+                self._open_debug_log_location()
+        else:
+            _dl.log("editor.debug.disabled")
+            _dl.disable()
+            QMessageBox.information(self, "Debug log",
+                                    "Debug logging turned off.")
+
+    def _open_debug_log_location(self):
+        """Open the folder that contains the debug log (creating the file first
+        if logging is on but nothing has been written yet)."""
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtGui import QDesktopServices
+        from PyQt6.QtCore import QUrl
+        import os as _os
+        path = self._debug_log_path()
+        folder = _os.path.dirname(path) or "."
+        exists = _os.path.exists(path)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+        msg = f"Debug log path:\n{path}\n\n"
+        msg += ("File exists." if exists else
+                "File not created yet. Enable 'Debug log (curves/keys)' in the "
+                "Help menu, then draw with the pen tool.")
+        QMessageBox.information(self, "Debug log location", msg)
+
     def _on_sel(self,obj):
         self._props.load(obj)
         self._obj_panel.refresh()
@@ -8757,6 +11699,33 @@ class EdofEditor(QMainWindow):
     def _on_chg(self):
         self._modified=True; self._upd_title()
         self._obj_panel.refresh()
+        # v4.2.10.13: record this object edit as a coalesced history step.
+        if self.doc is not None and not self._suppress_obj_history:
+            self._obj_pending = True
+            self._obj_commit_timer.start(self._obj_commit_delay)
+
+    def _commit_pending_obj(self):
+        """Flush a coalesced object-edit burst into one history step."""
+        self._obj_commit_timer.stop()
+        if not self._obj_pending or self.doc is None:
+            self._obj_pending = False
+            return
+        self._obj_pending = False
+        # Body burst (if any) must land before this object step for correct order.
+        self._commit_pending_body()
+        self.history.push(self.doc, None, "Edit")
+        self._modified = True; self._upd_title()
+
+    def _arm_history_suppression(self):
+        """v4.2.10.13: after a programmatic doc load/reset, swallow the refresh
+        signals (objectChanged/changed) so they don't record a spurious history
+        step. Cleared on the next event-loop turn once signals have drained."""
+        from PyQt6.QtCore import QTimer
+        self._suppress_obj_history = True
+        self._obj_pending = False
+        try: self._obj_commit_timer.stop()
+        except Exception: pass
+        QTimer.singleShot(0, lambda: setattr(self, '_suppress_obj_history', False))
 
     def _on_pg_sel(self,idx):
         if self.doc and 0<=idx<len(self.doc.pages):
@@ -8785,6 +11754,8 @@ class EdofEditor(QMainWindow):
                 self._pg_list.setCurrentRow(idx)
             finally:
                 self._pg_list.blockSignals(False)
+        try: self._upd_title()   # refresh DPI/mm/px status for the new page
+        except Exception: pass
 
     def _on_obj_select(self,oid):
         # v4.1.20.8: when Objects panel selects an object in document mode
@@ -9148,7 +12119,7 @@ class EdofEditor(QMainWindow):
             new_doc.mode = "empty"
 
         self.doc = new_doc; self.filepath = None; self._modified = False
-        self.history.clear(); self.history.push(self.doc, None, "New")
+        self.history.clear(); self.history.push(self.doc, None, "New"); self._arm_history_suppression()
         # v4.1.19.2: explicit cleanup before showing new doc — cancel any
         # active inline edit, clear selection, drop welcome screen. Without
         # this New could appear to do nothing if a leftover inline editor
@@ -9162,6 +12133,11 @@ class EdofEditor(QMainWindow):
         self._canvas.set_document(self.doc, 0)
         self._refresh_pages(); self._upd_title()
         self._canvas.schedule_render(0)
+        # v4.2.9.6: fit the page to the window on New as well (deferred so the
+        # viewport has its final size).
+        from PyQt6.QtCore import QTimer as _FitT2
+        _FitT2.singleShot(0, self._zoom_fit)
+        _FitT2.singleShot(80, self._zoom_fit)
 
         # v4.1.19.2: in document mode, auto-start inline editing on the
         # body textbox so the user can type immediately without having to
@@ -9304,9 +12280,14 @@ class EdofEditor(QMainWindow):
                     if password is None and recovery_key is None: return
 
             self.filepath = path; self._modified = False
-            self.history.clear(); self.history.push(self.doc, None, "Opened")
+            self.history.clear(); self.history.push(self.doc, None, "Opened"); self._arm_history_suppression()
             self._canvas.set_document(self.doc, 0)
             self._refresh_pages(); self._upd_title()
+            # v4.2.9.5: fit the page to the window on open (deferred so the
+            # viewport has its final size before we measure it).
+            from PyQt6.QtCore import QTimer as _FitT
+            _FitT.singleShot(0, self._zoom_fit)
+            _FitT.singleShot(80, self._zoom_fit)
 
             # Offer to upgrade XOR-protected v2 to real encryption
             if had_xor_password:
@@ -9449,20 +12430,50 @@ class EdofEditor(QMainWindow):
         ti=(self.doc.title or "Untitled") if self.doc else "—"
         f=os.path.basename(self.filepath) if self.filepath else "Unsaved"
         self.setWindowTitle(f"{t('app_title')} {edof.__version__} — {ti} [{f}]{'•' if self._modified else ''}")
-        # v4.1.18: keep status-bar DPI label in sync
+        # v4.2.9.4: show meaningful document info, not the internal (now
+        # dynamic) canvas render DPI: page DPI, size in mm, size in pixels.
         if hasattr(self, '_lbl_dpi'):
-            if self.doc:
-                doc_dpi = getattr(self.doc, 'default_dpi', None) or 96
-                canvas_dpi = int(getattr(self._canvas, '_dpi', 96))
-                self._lbl_dpi.setText(f"DPI: {doc_dpi} (canvas {canvas_dpi})")
+            if self.doc and self.doc.pages:
+                idx = int(getattr(self._canvas, '_page_idx', 0) or 0)
+                if not (0 <= idx < len(self.doc.pages)):
+                    idx = 0
+                pg = self.doc.pages[idx]
+                pdpi = int(getattr(pg, 'dpi', 0) or getattr(self.doc, 'default_dpi', 0) or 96)
+                wmm = float(getattr(pg, 'width', 0) or 0)
+                hmm = float(getattr(pg, 'height', 0) or 0)
+                try:
+                    wpx = int(round(mm_to_px(wmm, pdpi)))
+                    hpx = int(round(mm_to_px(hmm, pdpi)))
+                except Exception:
+                    wpx = hpx = 0
+                _gpu_badge = ""
+                try:
+                    from edof.engine import gpu as _gpu
+                    if _gpu.is_enabled() and _gpu.gpu_available():
+                        _gpu_badge = " · GPU"
+                except Exception:
+                    pass
+                self._lbl_dpi.setText(f"{pdpi} DPI · {wmm:g}×{hmm:g} mm · {wpx}×{hpx} px{_gpu_badge}")
+                self._lbl_dpi.setToolTip(
+                    "Document resolution and page size (export DPI, millimetres, "
+                    "and pixels at that DPI). On-screen sharpness is automatic "
+                    "(zoom- and display-aware) and independent of this.")
             else:
-                self._lbl_dpi.setText("DPI: —")
+                self._lbl_dpi.setText("—")
+        try: self._on_zoom_changed()
+        except Exception: pass
 
     def _push(self,d):
         if not self.doc: return
         # v4.1.23.59: commit any pending body burst FIRST so this object change
         # lands as the next, separate step in the one shared timeline.
         self._commit_pending_body()
+        # v4.2.10.13: an explicit op (add/delete/duplicate/...) supersedes any
+        # in-flight object-edit burst — its emit IS that burst — so cancel the
+        # pending step to avoid recording a duplicate snapshot of the same state.
+        self._obj_pending = False
+        if hasattr(self, '_obj_commit_timer'):
+            self._obj_commit_timer.stop()
         self.history.push(self.doc, None, d); self._modified=True; self._upd_title()
 
     def _mark_modified(self):
@@ -9509,6 +12520,9 @@ class EdofEditor(QMainWindow):
         if not self.doc: return
         # Flush an uncommitted body burst as its own step so it can be undone.
         self._commit_pending_body()
+        # v4.2.10.13: flush an in-flight object-edit burst too, so the latest
+        # move/resize/style is a committed step before we step back.
+        self._commit_pending_obj()
         res = self.history.undo()
         if res is not None:
             doc, ctx = res
@@ -9517,6 +12531,7 @@ class EdofEditor(QMainWindow):
     def _redo(self):
         if not self.doc: return
         self._commit_pending_body()
+        self._commit_pending_obj()
         res = self.history.redo()
         if res is not None:
             doc, ctx = res
@@ -9604,6 +12619,15 @@ class EdofEditor(QMainWindow):
         refreshes the view, and — for a body-text step — reopens the inline
         editor at the saved caret. For an object step, stays in object mode."""
         from PyQt6.QtCore import QTimer
+        # v4.2.10.13: restoring a snapshot mutates the doc and refreshes panels,
+        # which fires objectChanged/changed. Suppress object-history recording so
+        # the restore itself does not push a spurious step. Cleared on the next
+        # event loop turn, after the refresh signals have drained.
+        self._suppress_obj_history = True
+        self._obj_pending = False
+        try: self._obj_commit_timer.stop()
+        except Exception: pass
+        QTimer.singleShot(0, lambda: setattr(self, '_suppress_obj_history', False))
         self.doc = doc
         # The current inline editor points at the OLD document; tear it down and
         # skip the sticky auto-reentry so our explicit handling wins.
@@ -9856,11 +12880,14 @@ class EdofEditor(QMainWindow):
         pg=self._cp()
         if not pg: return
         # v4.1.17.1: drag-to-draw line
+        # v4.2.10.1: receives start (x_mm,y_mm) + SIGNED deltas (w_mm,h_mm)
         def _create(x_mm, y_mm, w_mm, h_mm):
-            sh=pg.add_shape("line", x_mm, y_mm, w_mm, h_mm)
+            ex, ey = x_mm + w_mm, y_mm + h_mm
+            sh=pg.add_shape("line", min(x_mm, ex), min(y_mm, ey),
+                            max(0.1, abs(w_mm)), max(0.1, abs(h_mm)))
             sh.stroke.color=(40,40,40,255); sh.stroke.width=0.7; sh.fill.color=None
-            # Two endpoints in scene coords spanning the drawn rect
-            sh.points=[[x_mm, y_mm], [x_mm+w_mm, y_mm+h_mm]]
+            # Endpoints in absolute page mm, preserving the drawn direction
+            sh.points=[[x_mm, y_mm], [ex, ey]]
             self._auto_name(sh, "line")
             self._canvas.set_sel_id(sh.id); self._canvas.schedule_render()
             self._push("Add Line")
@@ -9966,10 +12993,10 @@ class EdofEditor(QMainWindow):
         is_hand = (mode == 'hand')
         self._canvas._hand_tool = is_hand
         if is_hand:
-            self._canvas.viewport().setCursor(QCursor(Qt.CursorShape.OpenHandCursor))
+            self._canvas.viewport().setCursor(tcur('hand', Qt.CursorShape.OpenHandCursor))
             self._status.showMessage("Hand tool ON — drag to pan. Press V or click ↖ to return.")
         else:
-            self._canvas.viewport().setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            self._canvas.viewport().setCursor(tcur('move', Qt.CursorShape.ArrowCursor))
             self._status.showMessage("Select tool ON — click to select, drag to move.")
         # Sync toolbar button checked states
         if hasattr(self, '_act_select_tool'):
@@ -9994,7 +13021,7 @@ class EdofEditor(QMainWindow):
         self._canvas._path_points = []
         self._status.showMessage(
             "Pen tool: click=corner, click+drag=curve handle, click first point or Enter to close, Esc to cancel.")
-        self._canvas.setCursor(Qt.CursorShape.CrossCursor)
+        self._canvas.viewport().setCursor(tcur('pen', Qt.CursorShape.CrossCursor))
 
     def _dup_obj(self):
         if not self._check_perm("design", "Duplicate object"): return
@@ -10040,10 +13067,34 @@ class EdofEditor(QMainWindow):
         self._obj_panel.refresh()
 
     # ── Zoom ──────────────────────────────────────────────────────────────────
+    def _zoom_pct(self):
+        """Displayed zoom %, where 100% == 1 document pixel : 1 screen pixel.
+        Internally the canvas zoom is relative to its (dynamic) render DPI, so we
+        rescale by base_dpi / document_dpi for a meaningful figure."""
+        cz = float(getattr(self._canvas, 'zoom', 1.0) or 1.0)
+        base = float(getattr(self._canvas, '_dpi', 96) or 96)
+        docdpi = 96.0
+        try:
+            if self.doc and self.doc.pages:
+                idx = int(getattr(self._canvas, '_page_idx', 0) or 0)
+                if not (0 <= idx < len(self.doc.pages)):
+                    idx = 0
+                pg = self.doc.pages[idx]
+                docdpi = float(getattr(pg, 'dpi', 0) or getattr(self.doc, 'default_dpi', 0) or 96)
+        except Exception:
+            docdpi = 96.0
+        if docdpi <= 0:
+            docdpi = 96.0
+        return cz * base / docdpi * 100.0
+
+    def _on_zoom_changed(self, *_):
+        try: self._lbl_zoom.setText(f"{int(round(self._zoom_pct()))}%")
+        except Exception: pass
+
     def _zoom_step(self,f):
-        self._canvas.zoom=self._canvas.zoom*f; self._lbl_zoom.setText(f"{int(self._canvas.zoom*100)}%")
+        self._canvas.zoom=self._canvas.zoom*f; self._on_zoom_changed()
     def _zoom_fit(self):
-        self._canvas.zoom_fit(); self._lbl_zoom.setText(f"{int(self._canvas.zoom*100)}%")
+        self._canvas.zoom_fit(); self._on_zoom_changed()
 
     # ── Export / Print ────────────────────────────────────────────────────────
     # ── v4.0.3: View menu helpers ─────────────────────────────────────────────
@@ -10142,6 +13193,185 @@ class EdofEditor(QMainWindow):
                 import traceback; traceback.print_exc()
         self._modified=True; self._upd_title()
         self._canvas.schedule_render()
+
+    @staticmethod
+    def _format_gpu_selftest(res):
+        """v4.2.11.34: build the self-test report from ALL metrics the engine
+        returns (the old dialog hardcoded blur + CA, so the loft / halftone /
+        variable-blur parity results added in 4.2.11.28-.32 never showed up).
+        Unknown future *_diff keys are listed too, so this can't go stale."""
+        lines = [res.get('status', ''), ""]
+        shown = set()
+
+        def sec(title, mkey, xkey, scale255=True, note=None):
+            if mkey not in res:
+                return
+            shown.add(mkey); shown.add(xkey)
+            fmt = "{:.3f}" if scale255 else "{:.5f}"
+            lines.append(title + ":")
+            lines.append("   mean difference: " + fmt.format(res[mkey]))
+            if xkey in res:
+                lines.append("   max  difference: " + ("{:.1f}" if scale255 else "{:.5f}").format(res[xkey]))
+            if note:
+                lines.append("   " + note)
+            lines.append("")
+
+        sec(f"Gaussian blur, radius {res.get('radius', 0):g}px",
+            'mean_diff', 'max_diff',
+            note="(tiny diff expected: GPU sums weights in a different order)")
+        sec("Chromatic aberration", 'ca_mean_diff', 'ca_max_diff')
+        sec("Long-shadow loft sweep - coverage",
+            'loft_cov_mean_diff', 'loft_cov_max_diff')
+        sec("Long-shadow loft sweep - distance map (0..1 scale)",
+            'loft_tmap_mean_diff', 'loft_tmap_max_diff', scale255=False)
+        sec("Halftone dot stamping", 'ht_mean_diff', 'ht_max_diff')
+        sec("Variable box blur (long shadow)", 'vb_mean_diff', 'vb_max_diff',
+            note="(tiny diff expected: sequential cumsum vs parallel scan)")
+
+        # errors from individual sections
+        for k in sorted(res):
+            if k.endswith('_error'):
+                lines.append(f"{k[:-6]} section FAILED: {res[k]}")
+                lines.append("")
+                shown.add(k)
+        # future-proof: any *_diff key not covered above still gets printed
+        extra = [k for k in sorted(res)
+                 if k.endswith('_diff') and k not in shown]
+        for k in extra:
+            lines.append(f"{k}: {res[k]:.5f}")
+        if extra:
+            lines.append("")
+
+        lines.append("(differences on the 0-255 scale unless noted; lower is "
+                      f"better; 0 = exact parity. Images saved to:\n{res.get('out_dir', '?')})")
+        return "\n".join(lines)
+
+    def _run_gpu_selftest(self):
+        """v4.2.11.0: run the CPU-vs-GPU blur parity self-test and report the
+        result (status + mean/max pixel difference), opening the folder with the
+        cpu/gpu/diff images so the GPU shader can be validated on real hardware.
+        v4.2.11.34: reports ALL parity sections (blur, CA, loft, halftone,
+        variable blur), not just the first two."""
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtGui import QDesktopServices
+        from PyQt6.QtCore import QUrl
+        from edof.engine import gpu as _gpu
+        try:
+            res = _gpu.selftest(size=512, radius=8.0)
+        except Exception as e:
+            QMessageBox.warning(self, "GPU self-test", f"Self-test failed:\n{e}")
+            return
+        if not res.get("available"):
+            QMessageBox.information(
+                self, "GPU self-test",
+                "GPU is not available, so the GPU path stays disabled and "
+                "everything renders on the CPU.\n\n" + res.get("status", "") +
+                "\n\nTo enable it, install the optional dependency:\n"
+                "    pip install moderngl")
+            return
+        if res.get("error"):
+            QMessageBox.warning(self, "GPU self-test",
+                                res["status"] + "\n\n" + res["error"])
+            return
+        msg = self._format_gpu_selftest(res)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("GPU self-test")
+        box.setText("CPU vs GPU parity")
+        box.setInformativeText(msg)
+        open_btn = box.addButton("Open images", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Ok)
+        box.exec()
+        if box.clickedButton() is open_btn:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(res["out_dir"]))
+
+    def _open_perf_settings(self):
+        """v4.2.10.11: dialog to toggle render optimizations on/off. Changes
+        apply live and persist via QSettings. The idle full-quality render and
+        export always use the exact path, so these only affect interactive
+        smoothness, not final output."""
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QCheckBox, QLabel,
+                                     QDialogButtonBox, QFrame)
+        cv = self._canvas
+        dlg = QDialog(self); dlg.setWindowTitle("Performance / optimizations")
+        lay = QVBoxLayout(dlg)
+        intro = QLabel("These affect interactive smoothness only. The idle "
+                       "full-quality render and all exports are unaffected.")
+        intro.setWordWrap(True); lay.addWidget(intro)
+
+        # (settings key, label, tooltip)
+        opts = [
+            ("object_cache", "Per-object raster cache",
+             "Reuse unchanged objects' rasters. Big win on dense pages."),
+            ("dirty_region", "Dirty-region (active object only)",
+             "While editing one object, re-render only that object over a "
+             "cached background of the rest."),
+            ("adaptive_dpi", "Adaptive render DPI (zoom + HiDPI)",
+             "Render at the on-screen resolution: crisper when zoomed in, "
+             "cheaper when zoomed out / on HiDPI screens."),
+            ("supersample", "Supersample when zoomed out",
+             "Render fine detail above screen resolution and minify = "
+             "anti-aliasing (smoother halftone / thin lines when far out)."),
+            ("lowres_interaction", "Low-res preview while dragging",
+             "Render at reduced DPI during drag / resize for responsiveness, "
+             "full quality on release."),
+            ("gl_viewport", "GPU viewport (OpenGL)",
+             "Use a QOpenGLWidget viewport for GPU-accelerated pan/zoom blits. "
+             "Does not change rasterization. Toggle off if you see a black "
+             "viewport or artifacts on your GPU/driver."),
+        ]
+        boxes = {}
+        for key, label, tip in opts:
+            cb = QCheckBox(label)
+            cb.setChecked(bool(getattr(cv, "_opt_" + key, True)))
+            cb.setToolTip(tip)
+            sub = QLabel(tip); sub.setWordWrap(True)
+            sub.setStyleSheet("color: gray; margin-left: 22px; font-size: 11px;")
+            cb.toggled.connect(lambda v, k=key: cv.set_render_opt(k, v))
+            lay.addWidget(cb); lay.addWidget(sub)
+            boxes[key] = cb
+
+        line = QFrame(); line.setFrameShape(QFrame.Shape.HLine); lay.addWidget(line)
+        note = QLabel("Tip: turning everything off gives the simplest, most "
+                      "predictable render path (slowest, but a good baseline "
+                      "for comparison).")
+        note.setWordWrap(True); note.setStyleSheet("color: gray; font-size: 11px;")
+        lay.addWidget(note)
+
+        # v4.2.11.0: GPU (experimental) — Build 5 groundwork. The GPU path is not
+        # wired into the live renderer yet; this runs a CPU-vs-GPU parity
+        # self-test so the blur shader can be validated on real hardware first.
+        line2 = QFrame(); line2.setFrameShape(QFrame.Shape.HLine); lay.addWidget(line2)
+        from edof.engine import gpu as _gpu
+        gpu_title = QLabel("<b>GPU acceleration (experimental)</b>")
+        lay.addWidget(gpu_title)
+        gpu_stat = QLabel(_gpu.gpu_status()); gpu_stat.setWordWrap(True)
+        gpu_stat.setStyleSheet("color: gray; font-size: 11px;")
+        lay.addWidget(gpu_stat)
+        gpu_cb = QCheckBox("Use GPU for effect blur (shadow / glow / bevel)")
+        gpu_cb.setChecked(bool(getattr(cv, "_opt_gpu_effects", False)))
+        gpu_cb.setEnabled(_gpu.gpu_available())
+        gpu_cb.setToolTip("Run the Gaussian blur behind drop/inner shadow, "
+                          "outer/inner glow and bevel-soften on the GPU. Falls "
+                          "back to CPU per-effect on any miss. Output matches the "
+                          "CPU within ~0.35/255 mean. Export stays on CPU.")
+        gpu_cb.toggled.connect(lambda v: cv.set_render_opt("gpu_effects", v))
+        lay.addWidget(gpu_cb)
+        if not _gpu.gpu_available():
+            hint = QLabel("Enable by installing the optional dependency: "
+                          "pip install moderngl")
+            hint.setWordWrap(True); hint.setStyleSheet("color: gray; font-size: 11px;")
+            lay.addWidget(hint)
+        from PyQt6.QtWidgets import QPushButton as _QPB
+        gpu_btn = _QPB("Run GPU self-test…")
+        gpu_btn.clicked.connect(self._run_gpu_selftest)
+        lay.addWidget(gpu_btn)
+
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        bb.rejected.connect(dlg.accept); bb.accepted.connect(dlg.accept)
+        lay.addWidget(bb)
+        dlg.resize(440, dlg.sizeHint().height())
+        dlg.exec()
 
     def _reset_panels(self):
         """Reset all dock widget sizes/positions to defaults."""
@@ -11357,11 +14587,19 @@ populating the cells.</p>
                 btn_bg.setText(""); btn_bg.setToolTip(f"RGBA({r},{g},{b},{a})")
         _refresh_bg_btn()
         def _pick_bg():
-            new_c = EdofColorDialog.get_color(dlg, tuple(bg_state), alpha=True)
+            def _prev(col):
+                pg.background = tuple(col)
+                try: self._canvas.schedule_render()
+                except Exception: pass
+            new_c = EdofColorDialog.get_color(dlg, tuple(bg_state), alpha=True, on_change=_prev)
             if new_c is not None:
                 bg_state[0]=new_c[0]; bg_state[1]=new_c[1]
                 bg_state[2]=new_c[2]; bg_state[3]=new_c[3]
                 _refresh_bg_btn()
+            # reconcile live preview back to the committed state (revert if cancelled)
+            pg.background = tuple(bg_state)
+            try: self._canvas.schedule_render()
+            except Exception: pass
         btn_bg.clicked.connect(_pick_bg)
         # Quick presets
         btn_white = QPushButton("White"); btn_white.setFixedHeight(24)
@@ -11414,6 +14652,12 @@ populating the cells.</p>
                 self._status.showMessage("Page background updated.", 3000)
             else:
                 self._status.showMessage("Page settings updated.", 3000)
+        else:
+            # dialog cancelled: undo any live background preview
+            if pg.background != tuple(bg_init):
+                pg.background = tuple(bg_init)
+                try: self._canvas.schedule_render()
+                except Exception: pass
 
     def _show_vars(self):
         if not self.doc: return
@@ -12074,7 +15318,7 @@ populating the cells.</p>
                 rep.recommend_reason or rep.summary())
         # Adopt the imported document (fresh, unsaved).
         self.doc = new_doc; self.filepath = None; self._modified = True
-        self.history.clear(); self.history.push(self.doc, None, "Import DOCX")
+        self.history.clear(); self.history.push(self.doc, None, "Import DOCX"); self._arm_history_suppression()
         self._canvas.set_document(self.doc, 0)
         self._refresh_pages(); self._upd_title()
         self._status.showMessage(
@@ -12353,6 +15597,17 @@ def main():
         except Exception:
             pass
     sys.excepthook = _excepthook
+
+    # v4.2.10.6: guaranteed startup line. The moment the editor launches with
+    # EDOF_DEBUG enabled, create the log file immediately with a header showing
+    # the resolved path, so the file appears even before any curve/key event.
+    # This gives instant confirmation that logging is on and where it lives.
+    try:
+        from edof.engine.debug_log import is_enabled as _dbg_on, log as _dlog, current_path as _dbg_path
+        if _dbg_on():
+            _dlog("editor.startup", version=edof.__version__, log_path=_dbg_path())
+    except Exception:
+        pass
 
     app=QApplication(sys.argv); app.setApplicationName("EDOF Editor")
     app.setApplicationVersion(edof.__version__)

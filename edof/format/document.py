@@ -979,9 +979,10 @@ class Document:
     # ── Serialization ─────────────────────────────────────────────────────────
 
     def to_dict(self) -> dict:
-        from edof.version import FORMAT_VERSION_STR
+        from edof.version import FORMAT_VERSION_STR, __version__
         return {
             "edof_version":   FORMAT_VERSION_STR,
+            "writer_version": __version__,
             "id":             self.id,
             "title":          self.title,
             "author":         self.author,

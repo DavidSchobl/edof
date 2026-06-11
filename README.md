@@ -241,6 +241,21 @@ discount_label.visible_if = "discount > 0"
 
 Per-object compositing modes: `normal`, `multiply`, `screen`, `darken`, `lighten`, `overlay`. Implemented for the Pillow renderer.
 
+### Layer effects
+
+Photoshop-style, non-destructive effects on any object: drop / inner shadow, outer / inner glow, stroke, color / gradient / texture overlay, bevel, chromatic aberration, halftone, light sweep, and a flat-design **long shadow** built on a per-point ray model with three independent mode selectors (blur: Solid / Constant / Linear / Custom; colour: Solid / Custom; alpha: Solid / Fade / Custom) and Photoshop-style multi-stop gradients along the ray. The long shadow ray field, the variable blur, halftone, and chromatic aberration are GPU-accelerated when `moderngl` is available, with CPU fallbacks.
+
+```python
+from edof import LayerEffect
+tb.effects.append(LayerEffect(
+    type="long_shadow", direction=25.0, ls_length=15.0,
+    ls_blur_mode="custom",  ls_grad_blurs=[[0.0, 0.0], [0.6, 4.5], [1.0, 1.0]],
+    ls_color_mode="custom", ls_grad_colors=[[0.0, 200, 30, 30], [1.0, 40, 60, 210]],
+    ls_alpha_mode="fade"))
+```
+
+Full reference: [docs/reference/12-effects.md](docs/reference/12-effects.md). Runnable demo: [examples/04_layer_effects.py](examples/04_layer_effects.py).
+
 ### Per-object locks (independent of encryption)
 
 ```python
@@ -601,8 +616,8 @@ A non-exhaustive note on what other libraries do better: reportlab has the most 
 If you want to keep multiple edof versions on the same machine for testing or downgrade safety, use isolated virtualenvs:
 
 ```cmd
-mkdir D:\apps\Edof_V401\edof-python
-cd D:\apps\Edof_V401\edof-python
+mkdir C:\edof\edof-python
+cd C:\edof\edof-python
 :: extract this version's source here
 python -m venv .venv
 .venv\Scripts\activate
@@ -614,8 +629,8 @@ A small `.bat` makes switching painless:
 
 ```bat
 @echo off
-call D:\apps\Edof_V401\edof-python\.venv\Scripts\activate.bat
-cd /d D:\apps\Edof_V401\edof-python
+call C:\edof\edof-python\.venv\Scripts\activate.bat
+cd /d C:\edof\edof-python
 cmd /k prompt [edof v4.2.2] $P$G
 ```
 

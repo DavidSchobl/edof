@@ -11,7 +11,7 @@ v3.1.0:
 from __future__ import annotations
 import io, os, platform, warnings
 from typing import Optional
-from PIL import ImageDraw, ImageFont
+from PIL import ImageFont
 from edof.engine.transform import mm_to_px
 from edof.format.styles import TextStyle
 
@@ -94,6 +94,13 @@ def invalidate_font_cache():
     global _FONT_DB, _FONT_CACHE
     _FONT_DB = None
     _FONT_CACHE.clear()
+    _LW_CACHE.clear()
+    _ASC_CACHE.clear()
+    try:
+        from edof.engine.text_layout import clear_glyph_cache
+        clear_glyph_cache()
+    except Exception:
+        pass
 
 def list_system_fonts() -> list:
     return sorted(v.get('_display', k) for k, v in _get_db().items())
@@ -176,12 +183,42 @@ def _lh(font, mult: float) -> int:
         except Exception: h = 12
     return max(1, int(h * mult))
 
+_LW_CACHE: dict = {}      # (id(font), text) -> (font_ref, width)
+_ASC_CACHE: dict = {}     # id(font) -> (font_ref, ascender)
+
+
 def _lw(font, text: str) -> int:
     if not text: return 0
-    try: bb = font.getbbox(text); return max(0, bb[2] - bb[0])
-    except Exception: pass
-    try: return int(font.getlength(text))
-    except Exception: return len(text) * 7
+    # v4.2.11.33: measurement cache. getbbox is a pure function of
+    # (font, text) and dominates layout cost on long documents (every word is
+    # re-measured on every keystroke / fitting-scale probe / repagination).
+    # Keeping a strong ref to the font in the value pins id(font) for the
+    # cache's lifetime, so keys can never alias after a GC.
+    key = (id(font), text)
+    hit = _LW_CACHE.get(key)
+    if hit is not None:
+        return hit[1]
+    try: bb = font.getbbox(text); w = max(0, bb[2] - bb[0])
+    except Exception:
+        try: w = int(font.getlength(text))
+        except Exception: w = len(text) * 7
+    if len(_LW_CACHE) > 400000:
+        _LW_CACHE.clear()
+    _LW_CACHE[key] = (font, w)
+    return w
+
+
+def _font_ascender(font, fallback: int) -> int:
+    key = id(font)
+    hit = _ASC_CACHE.get(key)
+    if hit is not None:
+        return hit[1]
+    try: asc, _ = font.getmetrics()
+    except Exception: asc = fallback
+    if len(_ASC_CACHE) > 20000:
+        _ASC_CACHE.clear()
+    _ASC_CACHE[key] = (font, asc)
+    return asc
 
 def wrap_lines(text: str, font, max_w: Optional[int]) -> list:
     raw = text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
@@ -417,8 +454,7 @@ def _layout_runs(runs, parent_style, max_w_px: int, dpi: float,
     def _measure(run, text):
         rs   = run.resolve(parent_style, scale)
         font, sz_px = _run_to_font(rs, dpi)
-        try: asc, _ = font.getmetrics()
-        except Exception: asc = sz_px
+        asc = _font_ascender(font, sz_px)
         w = _lw(font, text)
         return rs, font, sz_px, asc, w
 

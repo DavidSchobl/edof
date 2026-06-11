@@ -22,8 +22,8 @@ import io
 import math
 import struct
 import zlib
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import List, Dict, Optional, Tuple
 
 
 # WinAnsiEncoding table (PDF standard for Latin-1 text + Czech)
@@ -73,11 +73,6 @@ def _pdf_string(text: str) -> bytes:
         else:                out.append(b)
     out.extend(b")")
     return bytes(out)
-
-
-def _pdf_hex_string(data: bytes) -> bytes:
-    """PDF hex string syntax: <ABCDEF...>."""
-    return b"<" + data.hex().encode("ascii") + b">"
 
 
 def _pdf_name(name: str) -> bytes:

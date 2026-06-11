@@ -155,6 +155,29 @@ The main payload. Schema (simplified):
 }
 ```
 
+### Layer effects in `document.json`
+
+Each object may carry an `"effects"` array of effect dictionaries (the serialized form of `LayerEffect`). Only the fields that differ from defaults matter; unknown fields are ignored on load, so newer files degrade gracefully in older readers.
+
+```json
+"effects": [
+  {
+    "type": "long_shadow",
+    "enabled": true,
+    "direction": 25.0,
+    "ls_length": 15.0,
+    "ls_blur_mode": "custom",
+    "ls_grad_blurs": [[0.0, 0.0], [0.6, 4.5], [1.0, 1.0]],
+    "ls_color_mode": "custom",
+    "ls_grad_colors": [[0.0, 200, 30, 30], [1.0, 40, 60, 210]],
+    "ls_alpha_mode": "fade",
+    "color": "#282828ff"
+  }
+]
+```
+
+Long-shadow specifics (format ≥ 4.2.19): the three mode selectors are `ls_blur_mode` (`solid` / `constant` / `linear` / `custom`), `ls_color_mode` (`solid` / `custom`), and `ls_alpha_mode` (`solid` / `fade` / `custom`); the gradient stop arrays are `[t, ...]` rows with `t` in 0–1 (`ls_grad_colors` → `[t, r, g, b]`, `ls_grad_alphas` → `[t, a01]`, `ls_grad_blurs` → `[t, mm]`). Files older than 4.2.19 carry the legacy controls (`ls_mode`, `ls_fade`, `ls_color_grad`); when the mode fields are empty the reader derives them from the legacy controls, so old documents render unchanged.
+
 ### `resources/<id>`
 
 Each binary resource is stored as a separate file in the `resources/` directory. The filename is the resource ID.

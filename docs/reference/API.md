@@ -1,6 +1,6 @@
 # API reference
 
-_Generated from `edof` 4.2.5 (format 4.2.0)._
+_Generated from `edof` 4.3.0 (format 4.2.19)._
 
 
 This page documents the complete public API exported by `import edof`. It is generated directly from the code with `docs/_gen_api.py`, so the signatures and descriptions match the installed version exactly.
@@ -228,7 +228,7 @@ Examples:
 ### `render_page`
 
 ```python
-render_page(page, resources, variables, dpi=None, color_space=None, bit_depth=None, show_transparency_checker=True) -> 'Image.Image'
+render_page(page, resources, variables, dpi=None, color_space=None, bit_depth=None, show_transparency_checker=True, use_cache=False) -> 'Image.Image'
 ```
 
 Render a page to an RGBA image.
@@ -896,10 +896,10 @@ Return True if this object's text/runs can be modified.
 ### `Shape`
 
 ```python
-Shape(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, shape_type: 'str' = 'rect', fill: 'FillStyle' = <factory>, stroke: 'StrokeStyle' = <factory>, corner_radius: 'float' = 0.0, points: 'List[Any]' = <factory>, path_data: 'List[Any]' = <factory>, path_point_types: 'List[str]' = <factory>) -> None
+Shape(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, shape_type: 'str' = 'rect', fill: 'FillStyle' = <factory>, stroke: 'StrokeStyle' = <factory>, corner_radius: 'float' = 0.0, corner_radii: 'List[float]' = <factory>, points: 'List[Any]' = <factory>, path_data: 'List[Any]' = <factory>, path_point_types: 'List[str]' = <factory>) -> None
 ```
 
-Shape(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, shape_type: 'str' = 'rect', fill: 'FillStyle' = <factory>, stroke: 'StrokeStyle' = <factory>, corner_radius: 'float' = 0.0, points: 'List[Any]' = <factory>, path_data: 'List[Any]' = <factory>, path_point_types: 'List[str]' = <factory>)
+Shape(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, shape_type: 'str' = 'rect', fill: 'FillStyle' = <factory>, stroke: 'StrokeStyle' = <factory>, corner_radius: 'float' = 0.0, corner_radii: 'List[float]' = <factory>, points: 'List[Any]' = <factory>, path_data: 'List[Any]' = <factory>, path_point_types: 'List[str]' = <factory>)
 
 
 **Methods**
@@ -1484,7 +1484,7 @@ Multi-stop gradient for FillStyle. v4.0 feature.
 ### `LayerEffect`
 
 ```python
-LayerEffect(type: 'str' = 'drop_shadow', enabled: 'bool' = True, color: 'Color' = (0, 0, 0, 200), color2: 'Color' = (255, 255, 255, 200), blend_mode: 'str' = 'normal', blend_mode2: 'str' = 'normal', opacity: 'float' = 1.0, size: 'float' = 2.0, distance: 'float' = 2.0, direction: 'float' = 135.0, stroke_position: 'str' = 'outside', bevel_kind: 'str' = 'outer', gradient_start: 'Color' = (0, 0, 0, 255), gradient_end: 'Color' = (255, 255, 255, 255), gradient_angle: 'float' = 90.0, texture_path: 'Optional[str]' = None, texture_scale: 'float' = 100.0, texture_data: 'Optional[bytes]' = None, texture_fit: 'str' = 'tile', texture_anchor: 'str' = 'top-left') -> None
+LayerEffect(type: 'str' = 'drop_shadow', enabled: 'bool' = True, color: 'Color' = (0, 0, 0, 200), color2: 'Color' = (255, 255, 255, 200), blend_mode: 'str' = 'normal', blend_mode2: 'str' = 'normal', opacity: 'float' = 1.0, size: 'float' = 2.0, distance: 'float' = 2.0, direction: 'float' = 135.0, spread: 'float' = 0.0, stroke_position: 'str' = 'outside', bevel_kind: 'str' = 'outer', bevel_technique: 'str' = 'smooth', bevel_depth: 'float' = 100.0, bevel_dir: 'str' = 'up', soften: 'float' = 0.0, altitude: 'float' = 45.0, highlight_opacity: 'float' = 0.75, shadow_opacity: 'float' = 0.75, ls_length: 'float' = 10.0, ls_fade: 'bool' = True, ls_taper: 'float' = 1.0, ls_mode: 'str' = 'solid', ls_blur_mode: 'str' = 'linear', ls_color_grad: 'bool' = False, ls_light_angle: 'float' = 45.0, ls_light_size: 'float' = 0.0, ls_grad_colors: 'List[List[float]]' = <factory>, ls_grad_alphas: 'List[List[float]]' = <factory>, ls_grad_blurs: 'List[List[float]]' = <factory>, ls_alpha_mode: 'str' = '', ls_color_mode: 'str' = '', ca_offset: 'float' = 0.5, ca_angle: 'float' = 0.0, ca_mode: 'str' = 'linear', ca_r_color: 'Color' = (255, 0, 0, 255), ca_g_color: 'Color' = (0, 255, 0, 255), ca_b_color: 'Color' = (0, 0, 255, 255), ca_r_offset: 'float' = 0.5, ca_r_angle: 'float' = 0.0, ca_g_offset: 'float' = 0.0, ca_g_angle: 'float' = 0.0, ca_b_offset: 'float' = 0.5, ca_b_angle: 'float' = 180.0, ca_r_distort: 'float' = 2.0, ca_g_distort: 'float' = 0.0, ca_b_distort: 'float' = -2.0, ht_dot: 'float' = 1.5, ht_angle: 'float' = 72.0, ht_shape: 'str' = 'circle', ht_color_mode: 'str' = 'cmyk', ht_render_mode: 'str' = 'size', ht_size_factor: 'float' = 115.0, ht_overlay_scale: 'float' = 1.5, ht_decentralization: 'float' = 0.0, ht_hex: 'bool' = True, ht_random_rotate: 'bool' = False, ht_pattern_mode: 'str' = 'shape', ht_patterns: 'List[str]' = <factory>, ht_keep_background: 'bool' = False, ht_background: 'str' = 'transparent', ht_clip: 'str' = 'whole', ht_extra_channel: 'bool' = False, ht_extra_color: 'str' = 'auto', ht_channels_enabled: 'List[bool]' = <factory>, lsw_pos: 'float' = 0.5, lsw_width: 'float' = 0.3, lsw_angle: 'float' = 45.0, gradient_start: 'Color' = (0, 0, 0, 255), gradient_end: 'Color' = (255, 255, 255, 255), gradient_angle: 'float' = 90.0, texture_path: 'Optional[str]' = None, texture_scale: 'float' = 100.0, texture_data: 'Optional[bytes]' = None, texture_fit: 'str' = 'tile', texture_anchor: 'str' = 'top-left') -> None
 ```
 
 A Photoshop-style layer effect.
@@ -1865,9 +1865,9 @@ and a fallback font is used instead.
 | Name | Value |
 |------|-------|
 
-| `__version__` | `'4.2.5'` |
+| `__version__` | `'4.3.0'` |
 
-| `FORMAT_VERSION_STR` | `'4.2.0'` |
+| `FORMAT_VERSION_STR` | `'4.2.19'` |
 
 
 ---

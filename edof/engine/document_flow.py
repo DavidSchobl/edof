@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict
 
 from edof.format.document_body import DocumentBody, Paragraph, resolve_paragraph_style
-from edof.format.styles import TextRun, TextStyle
+from edof.format.styles import TextStyle
 
 
 @dataclass
