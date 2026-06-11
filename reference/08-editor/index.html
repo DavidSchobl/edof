@@ -1,0 +1,2791 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Easy Document Format — programmatic document creation, editing and export">
+      
+      
+      
+        <link rel="canonical" href="https://davidschobl.github.io/edof/reference/08-editor/">
+      
+      
+        <link rel="prev" href="../07-encryption/">
+      
+      
+        <link rel="next" href="../09-cli/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Desktop editor - EDOF</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#reference-desktop-editor" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="EDOF" class="md-header__button md-logo" aria-label="EDOF" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EDOF
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Desktop editor
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/DavidSchobl/edof" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    DavidSchobl/edof
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="EDOF" class="md-nav__button md-logo" aria-label="EDOF" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    EDOF
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/DavidSchobl/edof" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    DavidSchobl/edof
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUICKSTART/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-document/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Document model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-objects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Objects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-styles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Styles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../06-import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import (PDF / RTF)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../11-docx/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Word (.docx)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../07-encryption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encryption
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Desktop editor
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Desktop editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#menus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Menus
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Menus">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#edit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Edit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#insert" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Insert
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Page
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Document
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        View
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Help
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#canvas-interactions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Canvas interactions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Canvas interactions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manipulation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manipulation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#group-dragging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Group dragging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#edit-text-inline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Edit text inline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rotation-handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotation handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resize-anchors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resize anchors
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#properties-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Properties panel
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Properties panel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#textbox-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TextBox properties
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#imagebox-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ImageBox properties
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shape-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shape properties
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#qrcode-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        QRCode properties
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#table-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table properties
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-properties-for-any-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common properties (for any selection)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pages-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pages panel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-list-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object list panel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#variables-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variables panel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#status-bar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Status bar
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#encryption-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encryption workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Encryption workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#opening-an-encrypted-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opening an encrypted file
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#setting-up-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting up encryption
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permission-aware-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission-aware UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keyboard-shortcuts-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keyboard shortcuts summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#localization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Localization
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#settings-persistence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings persistence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../09-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../10-helpers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helpers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cookbook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Cookbook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/invoice/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Invoice
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/certificate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Certificate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/batch-pdf/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Batch PDF
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/pdf-import-edit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PDF import & edit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/encrypted-template/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encrypted template
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Advanced
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/file-format/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    File format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#menus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Menus
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Menus">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#edit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Edit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#insert" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Insert
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Page
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Document
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        View
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Help
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#canvas-interactions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Canvas interactions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Canvas interactions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manipulation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manipulation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#group-dragging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Group dragging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#edit-text-inline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Edit text inline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rotation-handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotation handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resize-anchors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resize anchors
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#properties-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Properties panel
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Properties panel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#textbox-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TextBox properties
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#imagebox-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ImageBox properties
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shape-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shape properties
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#qrcode-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        QRCode properties
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#table-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table properties
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-properties-for-any-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common properties (for any selection)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pages-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pages panel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-list-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object list panel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#variables-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variables panel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#status-bar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Status bar
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#encryption-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encryption workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Encryption workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#opening-an-encrypted-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opening an encrypted file
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#setting-up-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting up encryption
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permission-aware-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission-aware UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keyboard-shortcuts-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keyboard shortcuts summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#localization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Localization
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#settings-persistence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings persistence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="reference-desktop-editor">Reference: Desktop Editor<a class="headerlink" href="#reference-desktop-editor" title="Permanent link">&para;</a></h1>
+<p><code>edof-editor</code> is a PyQt6 GUI for visual editing. Requires <code>pip install edof[pyqt6]</code>.</p>
+<p>Launch:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>edof-editor<span class="w">                   </span><span class="c1"># open with empty document</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>edof-editor<span class="w"> </span>template.edof<span class="w">     </span><span class="c1"># open a specific file</span>
+</code></pre></div></p>
+<p>The editor produces files that round-trip through the API without loss.</p>
+<hr />
+<h2 id="layout">Layout<a class="headerlink" href="#layout" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>┌──────────────────────────────────────────────────────────────────────┐
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>│  Menu Bar (File, Edit, Insert, Page, Document, View, Help)           │
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├──────────────────────────────────────────────────────────────────────┤
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│  Toolbar (New, Open, Save, Insert*, Undo/Redo, Zoom, Layer ops)      │
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>├────────┬───────────────────────────────────────────────────┬─────────┤
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│ Pages  │                                                   │         │
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│ panel  │                                                   │ Props   │
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│        │           Canvas (the page being edited)          │ panel   │
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>│ Object │                                                   │         │
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>│ list   │                                                   │ Variab- │
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>│        │                                                   │ les     │
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>├────────┴───────────────────────────────────────────────────┴─────────┤
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>│  Status bar (cursor pos, zoom, protection state, messages)           │
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>└──────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+<hr />
+<h2 id="menus">Menus<a class="headerlink" href="#menus" title="Permanent link">&para;</a></h2>
+<h3 id="file">File<a class="headerlink" href="#file" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Shortcut</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>New</td>
+<td>Ctrl+N</td>
+<td>Create empty document</td>
+</tr>
+<tr>
+<td>New from Template…</td>
+<td>—</td>
+<td>Choose a starter template (Blank A4 P/L, Business Card, Certificate, Invoice with Table)</td>
+</tr>
+<tr>
+<td>Open…</td>
+<td>Ctrl+O</td>
+<td>Open an <code>.edof</code> file (auto-detects encrypted)</td>
+</tr>
+<tr>
+<td>Import PDF…</td>
+<td>—</td>
+<td>Reconstruct an editable document from a PDF (best-effort)</td>
+</tr>
+<tr>
+<td>Save</td>
+<td>Ctrl+S</td>
+<td>Save to current file</td>
+</tr>
+<tr>
+<td>Save As…</td>
+<td>Ctrl+Shift+S</td>
+<td>Choose a new file</td>
+</tr>
+<tr>
+<td>Save as v3 (downgrade)…</td>
+<td>—</td>
+<td>Lossy export to v3 format</td>
+</tr>
+<tr>
+<td>Export PNG…</td>
+<td>—</td>
+<td>Current page as PNG</td>
+</tr>
+<tr>
+<td>Export All Pages…</td>
+<td>—</td>
+<td>Every page as separate PNGs</td>
+</tr>
+<tr>
+<td>Export PDF…</td>
+<td>—</td>
+<td>Whole document to PDF</td>
+</tr>
+<tr>
+<td>Export SVG…</td>
+<td>—</td>
+<td>Current page as SVG</td>
+</tr>
+<tr>
+<td>Batch from CSV…</td>
+<td>—</td>
+<td>Fill variables from each CSV row, export per-row PNGs/PDFs</td>
+</tr>
+<tr>
+<td>Print…</td>
+<td>Ctrl+P</td>
+<td>Send to printer</td>
+</tr>
+<tr>
+<td>Quit</td>
+<td>Ctrl+Q</td>
+<td>Close (prompts to save changes)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="edit">Edit<a class="headerlink" href="#edit" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Shortcut</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Undo</td>
+<td>Ctrl+Z</td>
+<td>Step back in history (60 levels)</td>
+</tr>
+<tr>
+<td>Redo</td>
+<td>Ctrl+Y</td>
+<td>Step forward</td>
+</tr>
+<tr>
+<td>Duplicate</td>
+<td>Ctrl+D</td>
+<td>Copy selected object, offset by 8mm</td>
+</tr>
+<tr>
+<td>Delete</td>
+<td>Delete</td>
+<td>Remove selected object(s)</td>
+</tr>
+<tr>
+<td>Find &amp; Replace…</td>
+<td>Ctrl+F</td>
+<td>Search across all TextBoxes (regex / case-sensitive options)</td>
+</tr>
+<tr>
+<td>Gradient Editor…</td>
+<td>—</td>
+<td>Visual stop editor for the selected object's gradient</td>
+</tr>
+</tbody>
+</table>
+<h3 id="insert">Insert<a class="headerlink" href="#insert" title="Permanent link">&para;</a></h3>
+<p>Insert specific object types. All inserts respect permission levels — users without <code>design</code> permission see a "needs design password" dialog.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Shortcut</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Text Box</td>
+<td>T</td>
+<td>Insert text box at default size</td>
+</tr>
+<tr>
+<td>Image…</td>
+<td>I</td>
+<td>Choose an image file, embed and place</td>
+</tr>
+<tr>
+<td>Rectangle</td>
+<td>R</td>
+<td>Insert rectangle</td>
+</tr>
+<tr>
+<td>Ellipse</td>
+<td>E</td>
+<td>Insert ellipse</td>
+</tr>
+<tr>
+<td>Line</td>
+<td>L</td>
+<td>Insert line</td>
+</tr>
+<tr>
+<td>QR Code</td>
+<td>Q</td>
+<td>Insert QR code with default URL</td>
+</tr>
+</tbody>
+</table>
+<p>Most inserts can also be done via the toolbar.</p>
+<h3 id="page">Page<a class="headerlink" href="#page" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Add Page</td>
+<td>Append new page to document</td>
+</tr>
+<tr>
+<td>Duplicate Page</td>
+<td>Copy current page</td>
+</tr>
+<tr>
+<td>Delete Page</td>
+<td>Remove current page (prompts if it's the only page)</td>
+</tr>
+<tr>
+<td>Page Settings…</td>
+<td>Edit width, height, DPI, color space, background</td>
+</tr>
+</tbody>
+</table>
+<h3 id="document">Document<a class="headerlink" href="#document" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Shortcut</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Variables…</td>
+<td>—</td>
+<td>Manage typed variables (define, edit, set values)</td>
+</tr>
+<tr>
+<td>Doc Info…</td>
+<td>—</td>
+<td>Title, author, description, document ID</td>
+</tr>
+<tr>
+<td>Validate</td>
+<td>—</td>
+<td>Check for missing required variables, invalid references, etc.</td>
+</tr>
+<tr>
+<td>Unlock for editing…</td>
+<td>Ctrl+Shift+L</td>
+<td>Prompt for password (when document is encrypted)</td>
+</tr>
+<tr>
+<td>Protection…</td>
+<td>—</td>
+<td>Manage encryption: set/change/remove passwords, switch encryption mode, clear all protection</td>
+</tr>
+<tr>
+<td>Re-lock (forget password)</td>
+<td>—</td>
+<td>Forget the cached content key</td>
+</tr>
+</tbody>
+</table>
+<h3 id="view">View<a class="headerlink" href="#view" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Shortcut</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Zoom In</td>
+<td>Ctrl+=</td>
+<td>Zoom 25% larger</td>
+</tr>
+<tr>
+<td>Zoom Out</td>
+<td>Ctrl+-</td>
+<td>Zoom 25% smaller</td>
+</tr>
+<tr>
+<td>Fit Page</td>
+<td>Ctrl+0</td>
+<td>Fit page to canvas</td>
+</tr>
+<tr>
+<td>Snap to Grid</td>
+<td>Ctrl+G</td>
+<td>Toggle 5mm grid snapping. Affects move, resize, and rotation (rotation snaps to 15°). Hold <strong>Alt</strong> to bypass for one operation.</td>
+</tr>
+<tr>
+<td>Show Alignment Guides</td>
+<td>—</td>
+<td>Toggle magnetic snap to other objects' edges</td>
+</tr>
+</tbody>
+</table>
+<h3 id="help">Help<a class="headerlink" href="#help" title="Permanent link">&para;</a></h3>
+<p>About dialog, version info, link to documentation.</p>
+<hr />
+<h2 id="canvas-interactions">Canvas interactions<a class="headerlink" href="#canvas-interactions" title="Permanent link">&para;</a></h2>
+<h3 id="selection">Selection<a class="headerlink" href="#selection" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Single click</strong> on an object → select it</li>
+<li><strong>Click empty space</strong> → deselect</li>
+<li><strong>Ctrl+click</strong> on object → toggle add/remove from multi-selection</li>
+<li><strong>Drag-select</strong> on empty space → lasso multi-select (in selection mode)</li>
+</ul>
+<h3 id="manipulation">Manipulation<a class="headerlink" href="#manipulation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Drag selected object</strong> → move (snaps to grid if Ctrl+G is on)</li>
+<li><strong>Drag corner handle</strong> → resize (preserves aspect ratio with Shift)</li>
+<li><strong>Drag rotation handle</strong> (above the object) → rotate</li>
+<li><strong>Hold Alt while dragging</strong> → bypass grid snap for one operation</li>
+<li><strong>Arrow keys</strong> with selection → nudge by 1mm (Shift+Arrow = 10mm)</li>
+<li><strong>Delete / Backspace</strong> → remove selected</li>
+<li><strong>Ctrl+D</strong> → duplicate</li>
+<li><strong>Middle-mouse drag</strong> → pan canvas</li>
+<li><strong>Mouse wheel</strong> → zoom (toward cursor position)</li>
+</ul>
+<h3 id="group-dragging">Group dragging<a class="headerlink" href="#group-dragging" title="Permanent link">&para;</a></h3>
+<p>When multiple objects are selected, dragging any of them moves all of them together (preserving relative positions).</p>
+<h3 id="edit-text-inline">Edit text inline<a class="headerlink" href="#edit-text-inline" title="Permanent link">&para;</a></h3>
+<p><strong>Double-click a TextBox</strong> → enter inline edit mode. Type to change content. Click outside or press Esc to commit.</p>
+<p>The inline editor uses WYSIWYG sizing — text shows at the same size as final rendering, regardless of zoom level.</p>
+<h3 id="rotation-handle">Rotation handle<a class="headerlink" href="#rotation-handle" title="Permanent link">&para;</a></h3>
+<p>When an object is selected, a small handle appears above it. Drag this handle to rotate. Hold Shift to constrain to 15° increments.</p>
+<h3 id="resize-anchors">Resize anchors<a class="headerlink" href="#resize-anchors" title="Permanent link">&para;</a></h3>
+<p>Eight handles around the bounding box (corners + midpoints). Drag to resize. The opposite corner stays fixed (e.g. dragging top-left keeps bottom-right in place).</p>
+<hr />
+<h2 id="properties-panel">Properties panel<a class="headerlink" href="#properties-panel" title="Permanent link">&para;</a></h2>
+<p>Right-side dock. Adapts to the selected object type:</p>
+<h3 id="textbox-properties">TextBox properties<a class="headerlink" href="#textbox-properties" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Text content (multiline editor; supports <code>{variable}</code> placeholders)</li>
+<li>Font family (dropdown of installed fonts)</li>
+<li>Font size (numeric field)</li>
+<li>Bold / Italic / Underline / Strikethrough (toggles)</li>
+<li>Text color (color picker)</li>
+<li>Alignment (left/center/right/justify)</li>
+<li>Vertical alignment (top/middle/bottom)</li>
+<li>Wrap, auto-shrink, auto-fill (toggles)</li>
+<li>Padding</li>
+<li>Background color</li>
+<li>Border style and color</li>
+<li>Variable binding (dropdown of defined variables)</li>
+</ul>
+<h3 id="imagebox-properties">ImageBox properties<a class="headerlink" href="#imagebox-properties" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Resource (re-pick image from disk)</li>
+<li>Fit mode (contain/cover/fill/stretch)</li>
+<li>H-align, V-align</li>
+<li>Variable binding</li>
+</ul>
+<h3 id="shape-properties">Shape properties<a class="headerlink" href="#shape-properties" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Shape type (rect/ellipse/line/polygon/arrow/path)</li>
+<li>Fill color OR gradient (with Gradient Editor button)</li>
+<li>Stroke color, width, dash pattern</li>
+<li>Corner radius (rectangle only)</li>
+</ul>
+<h3 id="qrcode-properties">QRCode properties<a class="headerlink" href="#qrcode-properties" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Data (or variable binding)</li>
+<li>Error correction (L/M/Q/H)</li>
+<li>Foreground, background colors</li>
+</ul>
+<h3 id="table-properties">Table properties<a class="headerlink" href="#table-properties" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Number of rows / columns</li>
+<li>Column widths (per column)</li>
+<li>Cell-level styling: select cell → bg color, padding, borders, runs</li>
+<li>Add/remove rows/columns</li>
+</ul>
+<h3 id="common-properties-for-any-selection">Common properties (for any selection)<a class="headerlink" href="#common-properties-for-any-selection" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Position X, Y (mm)</li>
+<li>Size W, H (mm)</li>
+<li>Rotation (degrees)</li>
+<li>Layer (z-order)</li>
+<li>Opacity (0-100%)</li>
+<li>Visible (toggle)</li>
+<li>Visible if (expression)</li>
+<li>Lock level (none/fill/edit/design/admin)</li>
+<li>Lock text (toggle)</li>
+<li>Tags (free-form list)</li>
+</ul>
+<hr />
+<h2 id="pages-panel">Pages panel<a class="headerlink" href="#pages-panel" title="Permanent link">&para;</a></h2>
+<p>Left-side dock showing all pages as thumbnails.</p>
+<ul>
+<li>Click a page → switch to it</li>
+<li>Right-click → menu (duplicate, delete, page settings)</li>
+<li>Drag to reorder</li>
+</ul>
+<hr />
+<h2 id="object-list-panel">Object list panel<a class="headerlink" href="#object-list-panel" title="Permanent link">&para;</a></h2>
+<p>Below pages panel. Shows all objects on the current page in layer order (top item = topmost).</p>
+<ul>
+<li>Click an object → select it on canvas</li>
+<li>Drag to reorder layers</li>
+<li>Eye toggle: show/hide</li>
+<li>Lock toggle: prevent editing (UI lock — separate from <code>lock_level</code>)</li>
+</ul>
+<hr />
+<h2 id="variables-panel">Variables panel<a class="headerlink" href="#variables-panel" title="Permanent link">&para;</a></h2>
+<p>Right side, below properties. Lists all defined variables and their current values.</p>
+<ul>
+<li>Click value to edit inline</li>
+<li>Add new variable button</li>
+<li>Delete button per variable</li>
+<li>Type / required indicators</li>
+</ul>
+<hr />
+<h2 id="status-bar">Status bar<a class="headerlink" href="#status-bar" title="Permanent link">&para;</a></h2>
+<p>Bottom of window, always visible. Shows:</p>
+<ul>
+<li><strong>Cursor position</strong> in mm (live during mouse move on canvas)</li>
+<li><strong>Zoom level</strong> (percentage)</li>
+<li><strong>Protection state</strong>:</li>
+<li>🔓 Plain document — full edit access</li>
+<li>🔒 Document is locked — view only</li>
+<li>🔓 Unlocked: \&lt;level name&gt;</li>
+<li><strong>Most recent action message</strong> (e.g. "Saved: template.edof", "Imported 4 pages from PDF")</li>
+</ul>
+<hr />
+<h2 id="encryption-workflow">Encryption workflow<a class="headerlink" href="#encryption-workflow" title="Permanent link">&para;</a></h2>
+<h3 id="opening-an-encrypted-file">Opening an encrypted file<a class="headerlink" href="#opening-an-encrypted-file" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>File → Open…</strong> → choose the encrypted <code>.edof</code></li>
+<li>The editor detects encryption and shows a password prompt:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>┌─ Encrypted Document ──────────────┐
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>│  This document is encrypted.       │
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>│  Enter a password or recovery key: │
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>│                                    │
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>│  ( ) Password                      │
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│  ( ) Recovery key                  │
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│                                    │
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>│  [____________________]            │
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>│                                    │
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>│              [ Open ]  [ Cancel ]  │
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>└────────────────────────────────────┘
+</code></pre></div>
+<ol>
+<li>After successful unlock, a dialog shows what your level allows:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>┌─ Unlocked ────────────────────────────────┐
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>│ Unlocked at level: Edit text              │
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>│                                            │
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>│ ✓ You CAN:                                │
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>│   • Everything in Fill                    │
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>│   • Change text content of objects        │
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>│   • Change rich-text run contents         │
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>│                                            │
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>│ ✗ You CANNOT:                             │
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>│   • Change fonts, colors, sizes           │
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>│   • Move, resize, rotate objects          │
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>│   • Add or remove objects                 │
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>│   • Manage passwords                      │
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>│                                            │
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>│                              [ OK ]        │
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>└────────────────────────────────────────────┘
+</code></pre></div>
+<ol>
+<li>Three wrong attempts close the prompt. Use <strong>File → Open</strong> to try again.</li>
+</ol>
+<h3 id="setting-up-encryption">Setting up encryption<a class="headerlink" href="#setting-up-encryption" title="Permanent link">&para;</a></h3>
+<p><strong>Document → Protection…</strong> opens the management dialog:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>┌─ Document Protection ──────────────────────────┐
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>│ Status: 🔓 Plain (no encryption)              │
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>│ Add a password below to enable encryption.    │
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>│                                                │
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>│ Set / change passwords:                       │
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>│   fill   (empty):      [____________________] │
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>│   edit   (empty):      [____________________] │
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>│   design (empty):      [____________________] │
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>│   admin  (empty):      [____________________] │
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>│                                                │
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>│ Levels: fill=template, edit=text,             │
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>│ design=full edit, admin=manage protection.    │
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>│                                                │
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>│ [ Remove all protection ]   [ Apply ] [Cancel]│
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>└────────────────────────────────────────────────┘
+</code></pre></div>
+<p>After clicking Apply on first password setup, a <strong>recovery key dialog</strong> appears:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>┌─ Recovery Key — SAVE THIS NOW ────────────┐
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>│ ⚠ Save this recovery key NOW              │
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>│                                            │
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>│ If you lose all your passwords, this is   │
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>│ the only way to recover the document.     │
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>│ It will not be shown again. Store it in   │
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>│ a password manager or print it to paper.  │
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>│                                            │
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>│ ┌────────────────────────────────────────┐│
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>│ │ 7K3F-9XQM-2N8P-VR4A-HT6L-Z5BJ          ││
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>│ └────────────────────────────────────────┘│
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>│                                            │
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>│ [ Copy to clipboard ]  [I have saved this]│
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>└────────────────────────────────────────────┘
+</code></pre></div>
+<p>The "I have saved this key" button confirms before closing — if you click it without copying first, it asks again.</p>
+<h3 id="permission-aware-ui">Permission-aware UI<a class="headerlink" href="#permission-aware-ui" title="Permanent link">&para;</a></h3>
+<p>When the current session lacks permission for an action:</p>
+<ul>
+<li><strong>Toolbar buttons and menu items</strong> for that action are disabled (greyed out)</li>
+<li>Pressing a keyboard shortcut for a disabled action shows a clear dialog:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>┌─ Permission required ────────────────────┐
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>│ This action (Add TextBox) requires        │
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>│ permission level:                         │
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>│    Design or higher                       │
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>│                                            │
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>│ You are currently at:                     │
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>│    Edit text                              │
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>│                                            │
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>│ Use Document → Unlock for editing… to    │
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>│ enter a higher-level password.            │
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>│                                            │
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>│                              [ OK ]        │
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>└────────────────────────────────────────────┘
+</code></pre></div>
+<ul>
+<li><strong>Per-object locks</strong> are also enforced — you can't drag an object whose <code>lock_level</code> exceeds your current permission, or edit text on an object with <code>lock_text=True</code>.</li>
+</ul>
+<hr />
+<h2 id="keyboard-shortcuts-summary">Keyboard shortcuts summary<a class="headerlink" href="#keyboard-shortcuts-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Shortcut</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ctrl+N</td>
+<td>New</td>
+</tr>
+<tr>
+<td>Ctrl+O</td>
+<td>Open</td>
+</tr>
+<tr>
+<td>Ctrl+S</td>
+<td>Save</td>
+</tr>
+<tr>
+<td>Ctrl+Shift+S</td>
+<td>Save As</td>
+</tr>
+<tr>
+<td>Ctrl+Q</td>
+<td>Quit</td>
+</tr>
+<tr>
+<td>Ctrl+Z</td>
+<td>Undo</td>
+</tr>
+<tr>
+<td>Ctrl+Y</td>
+<td>Redo</td>
+</tr>
+<tr>
+<td>Ctrl+D</td>
+<td>Duplicate</td>
+</tr>
+<tr>
+<td>Delete</td>
+<td>Delete selection</td>
+</tr>
+<tr>
+<td>Ctrl+F</td>
+<td>Find &amp; Replace</td>
+</tr>
+<tr>
+<td>Ctrl+G</td>
+<td>Toggle snap to grid</td>
+</tr>
+<tr>
+<td>Ctrl+= / Ctrl++</td>
+<td>Zoom in</td>
+</tr>
+<tr>
+<td>Ctrl+-</td>
+<td>Zoom out</td>
+</tr>
+<tr>
+<td>Ctrl+0</td>
+<td>Fit page</td>
+</tr>
+<tr>
+<td>Ctrl+P</td>
+<td>Print</td>
+</tr>
+<tr>
+<td>Ctrl+Shift+L</td>
+<td>Unlock for editing</td>
+</tr>
+<tr>
+<td>T</td>
+<td>Insert text box</td>
+</tr>
+<tr>
+<td>I</td>
+<td>Insert image</td>
+</tr>
+<tr>
+<td>R</td>
+<td>Insert rectangle</td>
+</tr>
+<tr>
+<td>E</td>
+<td>Insert ellipse</td>
+</tr>
+<tr>
+<td>L</td>
+<td>Insert line</td>
+</tr>
+<tr>
+<td>Q</td>
+<td>Insert QR code</td>
+</tr>
+<tr>
+<td>Arrow keys</td>
+<td>Nudge selection by 1mm</td>
+</tr>
+<tr>
+<td>Shift+Arrow</td>
+<td>Nudge by 10mm</td>
+</tr>
+<tr>
+<td>Esc</td>
+<td>Cancel current operation / exit text edit</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="localization">Localization<a class="headerlink" href="#localization" title="Permanent link">&para;</a></h2>
+<p>The editor's UI strings live in JSON files in <code>edof/editor_lang/</code>:</p>
+<ul>
+<li><code>en.json</code> — English (default, always present)</li>
+<li>Add <code>XX.json</code> for other languages (<code>cs.json</code>, <code>de.json</code>, etc.)</li>
+</ul>
+<p>Set the language environment variable before launching:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">EDOF_LANG</span><span class="o">=</span>cs<span class="w"> </span>edof-editor
+</code></pre></div>
+<p>If a key is missing in the chosen language file, the editor falls back to English.</p>
+<hr />
+<h2 id="settings-persistence">Settings persistence<a class="headerlink" href="#settings-persistence" title="Permanent link">&para;</a></h2>
+<p>The editor remembers across sessions (via Qt's <code>QSettings</code>):
+- Window geometry (size and position)
+- Snap-to-grid on/off
+- Show alignment guides on/off
+- Recent files list (up to 10)</p>
+<p>Settings are stored in standard system locations:
+- <strong>Windows</strong>: registry under <code>HKEY_CURRENT_USER\Software\edof\editor</code>
+- <strong>Linux</strong>: <code>~/.config/edof/editor.conf</code>
+- <strong>macOS</strong>: <code>~/Library/Preferences/edof.editor.plist</code></p>
+<p>Delete to reset all preferences.</p>
+<hr />
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<p><strong>Editor doesn't start, no error:</strong> Check the console output — sometimes PyQt6 errors go to stderr without appearing in a dialog. Run <code>edof-editor</code> from a terminal to see them.</p>
+<p><strong>Editor crashes on a specific file:</strong> Try the API to load it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">edof</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;problem.edof&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">doc</span><span class="o">.</span><span class="n">errors</span><span class="p">)</span>
+</code></pre></div>
+<p>If the API loads it cleanly but the editor crashes, file a bug. If the API errors too, the file is likely corrupt.</p>
+<p><strong>Fonts don't appear in dropdown:</strong> edof discovers fonts at startup. If you install a font while the editor is running, restart to pick it up.</p>
+<p><strong>Slow performance with large documents:</strong> Lower the canvas DPI in View settings (default 96). Re-rendering is the expensive part; the document data itself is fast.</p>
+<p><strong>Password dialog keeps rejecting correct password:</strong> Check Caps Lock and keyboard layout. The recovery key field is case-insensitive and ignores dashes; the password field is case-sensitive.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      © 2025 DavidSchobl — MIT License
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "content.code.copy", "search.suggest", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2157 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Easy Document Format — programmatic document creation, editing and export">
+      
+      
+      
+        <link rel="canonical" href="https://davidschobl.github.io/edof/reference/05-export/">
+      
+      
+        <link rel="prev" href="../04-variables/">
+      
+      
+        <link rel="next" href="../06-import/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Export - EDOF</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#reference-export" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="EDOF" class="md-header__button md-logo" aria-label="EDOF" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EDOF
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Export
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/DavidSchobl/edof" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    DavidSchobl/edof
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="EDOF" class="md-nav__button md-logo" aria-label="EDOF" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    EDOF
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/DavidSchobl/edof" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    DavidSchobl/edof
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUICKSTART/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-document/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Document model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-objects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Objects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-styles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Styles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#pdf-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDF export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PDF export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docexport_pdfpath-vectortrue-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        doc.export_pdf(path, vector=True, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vector-pdf-font-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vector PDF font handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-size-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File size comparison
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bitmap-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bitmap export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Bitmap export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docexport_bitmappath-page0-dpi300-formatnone-color_spacenone-bit_depth8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        doc.export_bitmap(path, page=0, dpi=300, format=None, color_space=None, bit_depth=8)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#format-auto-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Format auto-detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#standalone-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standalone function
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multi-page-bitmap-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-page bitmap export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Multi-page bitmap export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#edofexport_all_pagesdoc-path_pattern-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        edof.export_all_pages(doc, path_pattern, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#svg-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SVG export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SVG export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docexport_svgpath-page0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        doc.export_svg(path, page=0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#svg-output-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SVG output features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bytes-export-no-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bytes export (no file)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Bytes export (no file)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#edofexport_to_bytesdoc-formatpng-page0-kwargs-bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        edof.export_to_bytes(doc, format="png", page=0, **kwargs) → bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#render-functions-low-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Render functions (low-level)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Render functions (low-level)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#edofrender_pagedoc-page_index0-dpi300-pilimage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        edof.render_page(doc, page_index=0, dpi=300, ...) → PIL.Image
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#edofrender_documentdoc-dpi300-listpilimage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        edof.render_document(doc, dpi=300, ...) → list[PIL.Image]
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#printing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Printing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Printing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docprint_documentprinter_namenone-copies1-dpinone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        doc.print_document(printer_name=None, copies=1, dpi=None)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export-and-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export and encryption
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance tips
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../06-import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import (PDF / RTF)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../11-docx/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Word (.docx)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../07-encryption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encryption
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../08-editor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Desktop editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../09-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../10-helpers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helpers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cookbook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Cookbook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/invoice/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Invoice
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/certificate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Certificate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/batch-pdf/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Batch PDF
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/pdf-import-edit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PDF import & edit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/encrypted-template/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encrypted template
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Advanced
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/file-format/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    File format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#pdf-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDF export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PDF export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docexport_pdfpath-vectortrue-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        doc.export_pdf(path, vector=True, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vector-pdf-font-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vector PDF font handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-size-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File size comparison
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bitmap-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bitmap export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Bitmap export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docexport_bitmappath-page0-dpi300-formatnone-color_spacenone-bit_depth8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        doc.export_bitmap(path, page=0, dpi=300, format=None, color_space=None, bit_depth=8)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#format-auto-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Format auto-detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#standalone-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standalone function
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#multi-page-bitmap-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-page bitmap export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Multi-page bitmap export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#edofexport_all_pagesdoc-path_pattern-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        edof.export_all_pages(doc, path_pattern, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#svg-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SVG export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SVG export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docexport_svgpath-page0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        doc.export_svg(path, page=0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#svg-output-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SVG output features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bytes-export-no-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bytes export (no file)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Bytes export (no file)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#edofexport_to_bytesdoc-formatpng-page0-kwargs-bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        edof.export_to_bytes(doc, format="png", page=0, **kwargs) → bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#render-functions-low-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Render functions (low-level)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Render functions (low-level)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#edofrender_pagedoc-page_index0-dpi300-pilimage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        edof.render_page(doc, page_index=0, dpi=300, ...) → PIL.Image
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#edofrender_documentdoc-dpi300-listpilimage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        edof.render_document(doc, dpi=300, ...) → list[PIL.Image]
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#printing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Printing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Printing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#docprint_documentprinter_namenone-copies1-dpinone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        doc.print_document(printer_name=None, copies=1, dpi=None)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export-and-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export and encryption
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance tips
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="reference-export">Reference: Export<a class="headerlink" href="#reference-export" title="Permanent link">&para;</a></h1>
+<p>edof can render documents to several output formats: PDF (vector or raster), bitmap (PNG/JPEG/TIFF/BMP), and SVG.</p>
+<h2 id="pdf-export">PDF export<a class="headerlink" href="#pdf-export" title="Permanent link">&para;</a></h2>
+<h3 id="docexport_pdfpath-vectortrue-kwargs"><code>doc.export_pdf(path, vector=True, **kwargs)</code><a class="headerlink" href="#docexport_pdfpath-vectortrue-kwargs" title="Permanent link">&para;</a></h3>
+<p>Export the entire document to a PDF.</p>
+<p><strong>Parameters:</strong>
+- <code>path: str</code> — output PDF path
+- <code>vector: bool</code> — <code>True</code> (default) uses the built-in pure-Python vector PDF writer; <code>False</code> falls back to raster PDF via <code>reportlab</code> (requires <code>pip install edof[pdf]</code>)</p>
+<p><strong>Vector mode (default):</strong>
+- Pure Python, no external dependencies
+- Vector text (selectable, copyable, searchable in PDF readers)
+- Vector shapes (resolution-independent)
+- Significantly smaller files than raster
+- WinAnsiEncoding for Latin-1 characters including Czech diacritics
+- Standard 14 PDF fonts (Helvetica / Times / Courier with bold and italic variants)</p>
+<p><strong>Raster mode (<code>vector=False</code>):</strong>
+- Requires <code>reportlab</code> and <code>Pillow</code>
+- Each page is rendered to a bitmap, then embedded in the PDF
+- File size is much larger (depends on DPI and content)
+- Text is NOT selectable (it's part of the image)
+- Supports any TTF font (since it goes through Pillow)
+- Useful when you need a custom font or when the vector writer can't handle a feature</p>
+<h3 id="vector-pdf-font-handling">Vector PDF font handling<a class="headerlink" href="#vector-pdf-font-handling" title="Permanent link">&para;</a></h3>
+<p>The vector writer maps font families to the Standard 14 PDF fonts:</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Maps to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Helvetica</code>, <code>Arial</code>, <code>sans-serif</code></td>
+<td>Helvetica (with bold / italic variants)</td>
+</tr>
+<tr>
+<td><code>Times New Roman</code>, <code>Times</code>, <code>serif</code></td>
+<td>Times-Roman</td>
+</tr>
+<tr>
+<td><code>Courier</code>, <code>monospace</code></td>
+<td>Courier</td>
+</tr>
+</tbody>
+</table>
+<p>Any other font family falls back to Helvetica with a warning logged to <code>doc.errors</code>.</p>
+<p>If you need a specific TTF in PDF output, use raster mode:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_pdf</span><span class="p">(</span><span class="s2">&quot;output.pdf&quot;</span><span class="p">,</span> <span class="n">vector</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="file-size-comparison">File size comparison<a class="headerlink" href="#file-size-comparison" title="Permanent link">&para;</a></h3>
+<p>For an A4 page with text, shapes, and a table:</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Typical size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vector=True</code></td>
+<td>5–10 KB</td>
+</tr>
+<tr>
+<td><code>vector=False</code> at 300 DPI</td>
+<td>80–135 KB</td>
+</tr>
+<tr>
+<td><code>vector=False</code> at 600 DPI</td>
+<td>250–400 KB</td>
+</tr>
+</tbody>
+</table>
+<p>These ratios depend heavily on content. Pages dominated by photographic images don't compress with vector mode (the bottleneck is the image data, which is the same either way).</p>
+<h3 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_pdf</span><span class="p">(</span><span class="s2">&quot;output.pdf&quot;</span><span class="p">)</span>                       <span class="c1"># vector</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_pdf</span><span class="p">(</span><span class="s2">&quot;output_raster.pdf&quot;</span><span class="p">,</span> <span class="n">vector</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>  <span class="c1"># raster fallback</span>
+</code></pre></div>
+<hr />
+<h2 id="bitmap-export">Bitmap export<a class="headerlink" href="#bitmap-export" title="Permanent link">&para;</a></h2>
+<h3 id="docexport_bitmappath-page0-dpi300-formatnone-color_spacenone-bit_depth8"><code>doc.export_bitmap(path, page=0, dpi=300, format=None, color_space=None, bit_depth=8)</code><a class="headerlink" href="#docexport_bitmappath-page0-dpi300-formatnone-color_spacenone-bit_depth8" title="Permanent link">&para;</a></h3>
+<p>Export a single page to an image file.</p>
+<p><strong>Parameters:</strong>
+- <code>path: str</code> — output file path
+- <code>page: int</code> — 0-based page index (default: 0, the first page)
+- <code>dpi: int</code> — dots per inch (default: 300)
+- <code>format: str</code> — image format: <code>"PNG"</code>, <code>"JPEG"</code>, <code>"TIFF"</code>, <code>"BMP"</code>, etc. If <code>None</code>, auto-detected from path extension.
+- <code>color_space: str</code> — override page's <code>color_space</code> field (<code>"RGB"</code>, <code>"RGBA"</code>, <code>"L"</code>, <code>"1"</code>, <code>"CMYK"</code>)
+- <code>bit_depth: int</code> — <code>8</code> (default) or <code>16</code></p>
+<p><strong>Returns:</strong> the filepath written.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_bitmap</span><span class="p">(</span><span class="s2">&quot;output.png&quot;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_bitmap</span><span class="p">(</span><span class="s2">&quot;output.jpg&quot;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">150</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">&quot;JPEG&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_bitmap</span><span class="p">(</span><span class="s2">&quot;page2.png&quot;</span><span class="p">,</span> <span class="n">page</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">600</span><span class="p">)</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_bitmap</span><span class="p">(</span><span class="s2">&quot;grayscale.png&quot;</span><span class="p">,</span> <span class="n">color_space</span><span class="o">=</span><span class="s2">&quot;L&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="resolution">Resolution<a class="headerlink" href="#resolution" title="Permanent link">&para;</a></h3>
+<p>Pixel dimensions = <code>(width_mm / 25.4) * dpi</code>. So an A4 page (210 × 297 mm) at 300 DPI is 2480 × 3508 pixels.</p>
+<h3 id="format-auto-detection">Format auto-detection<a class="headerlink" href="#format-auto-detection" title="Permanent link">&para;</a></h3>
+<p>If <code>format=None</code>, the format is taken from the file extension:
+- <code>.png</code> → PNG
+- <code>.jpg</code> / <code>.jpeg</code> → JPEG
+- <code>.tif</code> / <code>.tiff</code> → TIFF
+- <code>.bmp</code> → BMP
+- <code>.gif</code> → GIF</p>
+<h3 id="standalone-function">Standalone function<a class="headerlink" href="#standalone-function" title="Permanent link">&para;</a></h3>
+<p><code>edof.export_page_bitmap(doc, page_index, path, **kwargs)</code> is the same operation but as a standalone function. Useful when you want to export a page in a function-style pipeline:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof</span><span class="w"> </span><span class="kn">import</span> <span class="n">export_page_bitmap</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">export_page_bitmap</span><span class="p">(</span><span class="n">doc</span><span class="p">,</span> <span class="n">page_index</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="s2">&quot;page1.png&quot;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h2 id="multi-page-bitmap-export">Multi-page bitmap export<a class="headerlink" href="#multi-page-bitmap-export" title="Permanent link">&para;</a></h2>
+<h3 id="edofexport_all_pagesdoc-path_pattern-kwargs"><code>edof.export_all_pages(doc, path_pattern, **kwargs)</code><a class="headerlink" href="#edofexport_all_pagesdoc-path_pattern-kwargs" title="Permanent link">&para;</a></h3>
+<p>Export every page to a separate file, using a path pattern with <code>{n}</code> (or <code>{page}</code>) placeholder.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof</span><span class="w"> </span><span class="kn">import</span> <span class="n">export_all_pages</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">paths</span> <span class="o">=</span> <span class="n">export_all_pages</span><span class="p">(</span><span class="n">doc</span><span class="p">,</span> <span class="s2">&quot;out/page_</span><span class="si">{n}</span><span class="s2">.png&quot;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nb">print</span><span class="p">(</span><span class="n">paths</span><span class="p">)</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># [&#39;out/page_1.png&#39;, &#39;out/page_2.png&#39;, &#39;out/page_3.png&#39;, ...]</span>
+</code></pre></div>
+<p>The placeholder is replaced with the 1-based page number (so <code>page_1.png</code>, not <code>page_0.png</code>). Returns the list of written paths.</p>
+<p><code>{page}</code> is an alias for <code>{n}</code> for compatibility.</p>
+<hr />
+<h2 id="svg-export">SVG export<a class="headerlink" href="#svg-export" title="Permanent link">&para;</a></h2>
+<h3 id="docexport_svgpath-page0"><code>doc.export_svg(path, page=0)</code><a class="headerlink" href="#docexport_svgpath-page0" title="Permanent link">&para;</a></h3>
+<p>Export a single page to SVG.</p>
+<p><strong>Parameters:</strong>
+- <code>path: str</code> — output <code>.svg</code> path
+- <code>page: int</code> — 0-based page index (default: 0)</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_svg</span><span class="p">(</span><span class="s2">&quot;output.svg&quot;</span><span class="p">)</span>           <span class="c1"># first page</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_svg</span><span class="p">(</span><span class="s2">&quot;page3.svg&quot;</span><span class="p">,</span> <span class="n">page</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="svg-output-features">SVG output features<a class="headerlink" href="#svg-output-features" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Text rendered as <code>&lt;text&gt;</code> elements (selectable in browsers, searchable, accessible)</li>
+<li>Shapes rendered as native SVG primitives (<code>&lt;rect&gt;</code>, <code>&lt;ellipse&gt;</code>, <code>&lt;line&gt;</code>, <code>&lt;polygon&gt;</code>, <code>&lt;path&gt;</code>)</li>
+<li>Gradients exported as <code>&lt;linearGradient&gt;</code> / <code>&lt;radialGradient&gt;</code> definitions</li>
+<li>Images base64-embedded inline (the SVG is self-contained, no external files)</li>
+<li>QR codes rendered as inline SVG paths</li>
+</ul>
+<p>The SVG output is suitable for web embedding, vector editing in Inkscape / Illustrator, and conversion via other tools.</p>
+<h3 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Drop shadows and blend modes have limited SVG filter support</li>
+<li>Custom path-rendering effects from the bitmap renderer don't carry over</li>
+</ul>
+<hr />
+<h2 id="bytes-export-no-file">Bytes export (no file)<a class="headerlink" href="#bytes-export-no-file" title="Permanent link">&para;</a></h2>
+<h3 id="edofexport_to_bytesdoc-formatpng-page0-kwargs-bytes"><code>edof.export_to_bytes(doc, format="png", page=0, **kwargs) → bytes</code><a class="headerlink" href="#edofexport_to_bytesdoc-formatpng-page0-kwargs-bytes" title="Permanent link">&para;</a></h3>
+<p>Render to bytes without writing to disk. Useful for sending to a network, embedding in a database, or piping through other tools.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof</span><span class="w"> </span><span class="kn">import</span> <span class="n">export_to_bytes</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">png_bytes</span> <span class="o">=</span> <span class="n">export_to_bytes</span><span class="p">(</span><span class="n">doc</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">&quot;png&quot;</span><span class="p">,</span> <span class="n">page</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">pdf_bytes</span> <span class="o">=</span> <span class="n">export_to_bytes</span><span class="p">(</span><span class="n">doc</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">&quot;pdf&quot;</span><span class="p">)</span>     <span class="c1"># whole document</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="c1"># Send to API</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="kn">import</span><span class="w"> </span><span class="nn">requests</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">requests</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">&quot;https://api.example.com/upload&quot;</span><span class="p">,</span> <span class="n">files</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;file&quot;</span><span class="p">:</span> <span class="n">png_bytes</span><span class="p">})</span>
+</code></pre></div>
+<hr />
+<h2 id="render-functions-low-level">Render functions (low-level)<a class="headerlink" href="#render-functions-low-level" title="Permanent link">&para;</a></h2>
+<p>For advanced use, you can render directly to Pillow <code>Image</code> objects:</p>
+<h3 id="edofrender_pagedoc-page_index0-dpi300-pilimage"><code>edof.render_page(doc, page_index=0, dpi=300, ...) → PIL.Image</code><a class="headerlink" href="#edofrender_pagedoc-page_index0-dpi300-pilimage" title="Permanent link">&para;</a></h3>
+<p>Render one page to a Pillow <code>Image</code>. Useful for further processing (cropping, filtering, compositing).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof</span><span class="w"> </span><span class="kn">import</span> <span class="n">render_page</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">PIL</span><span class="w"> </span><span class="kn">import</span> <span class="n">Image</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">img</span> <span class="o">=</span> <span class="n">render_page</span><span class="p">(</span><span class="n">doc</span><span class="p">,</span> <span class="n">page_index</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">img</span><span class="o">.</span><span class="n">thumbnail</span><span class="p">((</span><span class="mi">200</span><span class="p">,</span> <span class="mi">200</span><span class="p">))</span>             <span class="c1"># resize</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">img</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="s2">&quot;thumbnail.png&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="edofrender_documentdoc-dpi300-listpilimage"><code>edof.render_document(doc, dpi=300, ...) → list[PIL.Image]</code><a class="headerlink" href="#edofrender_documentdoc-dpi300-listpilimage" title="Permanent link">&para;</a></h3>
+<p>Render every page, return a list of Images.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof</span><span class="w"> </span><span class="kn">import</span> <span class="n">render_document</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">images</span> <span class="o">=</span> <span class="n">render_document</span><span class="p">(</span><span class="n">doc</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">150</span><span class="p">)</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">img</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">images</span><span class="p">):</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">img</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;thumb_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">.png&quot;</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h2 id="printing">Printing<a class="headerlink" href="#printing" title="Permanent link">&para;</a></h2>
+<h3 id="docprint_documentprinter_namenone-copies1-dpinone"><code>doc.print_document(printer_name=None, copies=1, dpi=None)</code><a class="headerlink" href="#docprint_documentprinter_namenone-copies1-dpinone" title="Permanent link">&para;</a></h3>
+<p>Send the document to a system printer. Requires <code>pip install edof[pyqt6]</code>.</p>
+<p><strong>Parameters:</strong>
+- <code>printer_name: str | None</code> — name of the printer; <code>None</code> uses the default
+- <code>copies: int</code> — number of copies (default: 1)
+- <code>dpi: int | None</code> — print resolution; <code>None</code> uses the printer's native (capped at 300)</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">doc</span><span class="o">.</span><span class="n">print_document</span><span class="p">()</span>                                 <span class="c1"># default printer</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">print_document</span><span class="p">(</span><span class="n">printer_name</span><span class="o">=</span><span class="s2">&quot;HP LaserJet&quot;</span><span class="p">,</span> <span class="n">copies</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+</code></pre></div>
+<p>To list available printers programmatically (PyQt6):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">PyQt6.QtPrintSupport</span><span class="w"> </span><span class="kn">import</span> <span class="n">QPrinterInfo</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">for</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">QPrinterInfo</span><span class="o">.</span><span class="n">availablePrinters</span><span class="p">():</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">info</span><span class="o">.</span><span class="n">printerName</span><span class="p">())</span>
+</code></pre></div>
+<hr />
+<h2 id="export-and-encryption">Export and encryption<a class="headerlink" href="#export-and-encryption" title="Permanent link">&para;</a></h2>
+<p>When a document is encrypted (<code>encryption_mode != "none"</code>), exporting works as follows:</p>
+<ul>
+<li><strong>Plain export</strong> (PDF, PNG, SVG) is <strong>always allowed</strong> regardless of permission level — the user can render what they're allowed to see.</li>
+<li>The exported file itself is <strong>never encrypted</strong> — encryption is a property of the <code>.edof</code> file format, not the rendered output.</li>
+<li>If the document is <strong>locked</strong> (encrypted but not yet unlocked), export fails with an exception. Unlock first.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;secret.edof&quot;</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="s2">&quot;myPass&quot;</span><span class="p">)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_pdf</span><span class="p">(</span><span class="s2">&quot;output.pdf&quot;</span><span class="p">)</span>   <span class="c1"># works</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_bitmap</span><span class="p">(</span><span class="s2">&quot;output.png&quot;</span><span class="p">)</span>  <span class="c1"># works</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="n">doc</span><span class="o">.</span><span class="n">lock</span><span class="p">()</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_pdf</span><span class="p">(</span><span class="s2">&quot;output2.pdf&quot;</span><span class="p">)</span>   <span class="c1"># raises — content key forgotten</span>
+</code></pre></div>
+<hr />
+<h2 id="performance-tips">Performance tips<a class="headerlink" href="#performance-tips" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Vector PDF is faster than raster PDF.</strong> Less computation, smaller output.</li>
+<li><strong>Higher DPI dramatically increases bitmap render time.</strong> 300 DPI = standard print quality; 150 DPI suffices for screen viewing.</li>
+<li><strong><code>render_document()</code> reuses font / resource caches</strong> across pages — exporting all pages at once is faster than calling <code>render_page()</code> in a loop.</li>
+<li><strong>For large documents with many template repetitions</strong>, build the document once, then export multiple variations:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;template.edof&quot;</span><span class="p">)</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="k">for</span> <span class="n">record</span> <span class="ow">in</span> <span class="n">customer_data</span><span class="p">:</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    <span class="n">doc</span><span class="o">.</span><span class="n">fill_variables</span><span class="p">(</span><span class="n">record</span><span class="p">)</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="n">doc</span><span class="o">.</span><span class="n">export_pdf</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;out/customer_</span><span class="si">{</span><span class="n">record</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">.pdf&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      © 2025 DavidSchobl — MIT License
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "content.code.copy", "search.suggest", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2512 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Easy Document Format — programmatic document creation, editing and export">
+      
+      
+      
+        <link rel="canonical" href="https://davidschobl.github.io/edof/reference/02-objects/">
+      
+      
+        <link rel="prev" href="../01-document/">
+      
+      
+        <link rel="next" href="../03-styles/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Objects - EDOF</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#reference-objects" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="EDOF" class="md-header__button md-logo" aria-label="EDOF" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EDOF
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Objects
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/DavidSchobl/edof" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    DavidSchobl/edof
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="EDOF" class="md-nav__button md-logo" aria-label="EDOF" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    EDOF
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/DavidSchobl/edof" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    DavidSchobl/edof
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUICKSTART/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-document/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Document model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Objects
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Objects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#common-fields-on-every-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common fields (on every object)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common fields (on every object)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#position-transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Position &amp; transform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layering-visibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layering &amp; visibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conditional-visibility-visible_if" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conditional visibility (visible_if)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#locking-template-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Locking (template protection)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#effects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Effects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#other" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#textbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TextBox
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TextBox">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fields-specific-to-textbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields specific to TextBox
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rich-text-via-textrun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rich text via TextRun
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-sizing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-sizing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#variable-placeholder-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variable placeholder syntax
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imagebox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ImageBox
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ImageBox">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loading-from-variable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading from variable
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shape
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Shape">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#common-shape-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Shape fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#type-specific-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Type-specific fields
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Type-specific fields">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rect-and-ellipse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "rect" and "ellipse"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "line"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#polygon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "polygon"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#arrow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "arrow"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "path"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shapefrom_svg_pathd-str-shape-classmethod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shape.from_svg_path(d: str) → Shape (classmethod)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#qrcode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        QRCode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="QRCode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fields_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Table">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fields_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tablecell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TableCell
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#make_table-helper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        make_table() helper
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Group
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Group">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fields_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-equality-and-copying" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object equality and copying
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-styles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Styles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../06-import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import (PDF / RTF)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../11-docx/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Word (.docx)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../07-encryption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encryption
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../08-editor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Desktop editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../09-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../10-helpers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helpers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cookbook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Cookbook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/invoice/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Invoice
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/certificate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Certificate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/batch-pdf/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Batch PDF
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/pdf-import-edit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PDF import & edit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/encrypted-template/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encrypted template
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Advanced
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/file-format/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    File format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#common-fields-on-every-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common fields (on every object)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common fields (on every object)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#position-transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Position &amp; transform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layering-visibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layering &amp; visibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conditional-visibility-visible_if" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conditional visibility (visible_if)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#locking-template-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Locking (template protection)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#effects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Effects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#other" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#textbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TextBox
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TextBox">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic usage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fields-specific-to-textbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields specific to TextBox
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rich-text-via-textrun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rich text via TextRun
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-sizing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-sizing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#variable-placeholder-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variable placeholder syntax
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imagebox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ImageBox
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ImageBox">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loading-from-variable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading from variable
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shape
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Shape">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#common-shape-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Shape fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#type-specific-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Type-specific fields
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Type-specific fields">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rect-and-ellipse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "rect" and "ellipse"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "line"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#polygon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "polygon"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#arrow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "arrow"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "path"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shapefrom_svg_pathd-str-shape-classmethod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shape.from_svg_path(d: str) → Shape (classmethod)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#qrcode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        QRCode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="QRCode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fields_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Table">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fields_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tablecell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TableCell
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#make_table-helper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        make_table() helper
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Group
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Group">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fields_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-equality-and-copying" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object equality and copying
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="reference-objects">Reference: Objects<a class="headerlink" href="#reference-objects" title="Permanent link">&para;</a></h1>
+<p>Every object that can appear on a page inherits from <code>EdofObject</code>. There are six concrete types: <code>TextBox</code>, <code>ImageBox</code>, <code>Shape</code>, <code>QRCode</code>, <code>Table</code>, <code>Group</code>.</p>
+<h2 id="common-fields-on-every-object">Common fields (on every object)<a class="headerlink" href="#common-fields-on-every-object" title="Permanent link">&para;</a></h2>
+<p>These fields are available on <strong>all</strong> object types via inheritance from <code>EdofObject</code>.</p>
+<h3 id="identity">Identity<a class="headerlink" href="#identity" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>id: str</code> — UUID, generated automatically. Used for <code>page.get_object()</code>, lookups, and references between objects.</li>
+<li><code>name: str</code> — optional human-readable name. Useful for <code>page.get_by_name()</code>.</li>
+<li><code>tags: list[str]</code> — optional list of free-form tags. Useful for <code>page.get_by_tag()</code> and conditional logic.</li>
+</ul>
+<h3 id="position-transform">Position &amp; transform<a class="headerlink" href="#position-transform" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>transform: Transform</code> — combined position, size, rotation, flip. See <a href="../03-styles/#transform">reference/03-styles.md</a>.</li>
+<li><code>transform.x</code>, <code>transform.y</code> — top-left in mm</li>
+<li><code>transform.width</code>, <code>transform.height</code> — in mm</li>
+<li><code>transform.rotation</code> — in degrees, clockwise</li>
+<li><code>transform.flip_h</code>, <code>transform.flip_v</code> — booleans</li>
+</ul>
+<p>Shortcut helpers exist on the object directly:</p>
+<ul>
+<li><code>obj.move(dx, dy)</code> — translate by delta</li>
+<li><code>obj.move_to(x, y)</code> — set absolute position</li>
+<li><code>obj.resize(w, h)</code> — set size</li>
+<li><code>obj.rotate(degrees)</code> — add to rotation</li>
+<li><code>obj.center()</code> — centerpoint as <code>(cx, cy)</code> tuple</li>
+</ul>
+<h3 id="layering-visibility">Layering &amp; visibility<a class="headerlink" href="#layering-visibility" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>layer: int</code> — stacking order. Higher = front. Set automatically when adding objects (incremental); can be overridden.</li>
+<li><code>visible: bool</code> — global show/hide</li>
+<li><code>visible_if: str</code> — small Python-style expression evaluated against <code>doc.variables</code> at render time (see below)</li>
+<li><code>opacity: float</code> — 0.0 to 1.0</li>
+<li><code>blend_mode: str</code> — one of <code>"normal"</code>, <code>"multiply"</code>, <code>"screen"</code>, <code>"darken"</code>, <code>"lighten"</code>, <code>"overlay"</code>. Implemented in the Pillow renderer.</li>
+</ul>
+<h3 id="conditional-visibility-visible_if">Conditional visibility (<code>visible_if</code>)<a class="headerlink" href="#conditional-visibility-visible_if" title="Permanent link">&para;</a></h3>
+<p>Set <code>obj.visible_if</code> to an expression evaluated as a boolean. Variables are resolved from <code>doc.variables</code>. The expression supports:</p>
+<ul>
+<li>Boolean operators: <code>and</code>, <code>or</code>, <code>not</code></li>
+<li>Comparisons: <code>==</code>, <code>!=</code>, <code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&gt;=</code></li>
+<li>Arithmetic: <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code></li>
+<li>Numeric and string literals</li>
+<li>Variable names</li>
+</ul>
+<p>Not allowed: function calls, attribute access, imports, comprehensions. The evaluator is a safe AST whitelist.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">discount_label</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_textbox</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">200</span><span class="p">,</span> <span class="mi">180</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="s2">&quot;DISCOUNT: -</span><span class="si">{discount}</span><span class="s2"> CZK&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">discount_label</span><span class="o">.</span><span class="n">visible_if</span> <span class="o">=</span> <span class="s2">&quot;discount &gt; 0&quot;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">vip_badge</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_textbox</span><span class="p">(</span><span class="mi">160</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">40</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="s2">&quot;VIP&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">vip_badge</span><span class="o">.</span><span class="n">visible_if</span> <span class="o">=</span> <span class="s2">&quot;tier == &#39;gold&#39; or score &gt;= 90&quot;</span>
+</code></pre></div>
+<h3 id="locking-template-protection">Locking (template protection)<a class="headerlink" href="#locking-template-protection" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>locked: bool</code> — UI-level lock; the editor refuses to move/edit a locked object</li>
+<li><code>lock_level: str</code> — <code>""</code>, <code>"fill"</code>, <code>"edit"</code>, <code>"design"</code>, or <code>"admin"</code>. Modifying this object requires at least the named permission level.</li>
+<li><code>lock_text: bool</code> — hard text lock; <code>.text</code> and <code>.runs</code> cannot be changed even by <code>admin</code> until <code>lock_text</code> is set back to <code>False</code>. Clearing <code>lock_text</code> itself requires <code>admin</code>.</li>
+</ul>
+<p>Helper methods:</p>
+<ul>
+<li><code>obj.can_modify(doc) → bool</code></li>
+<li><code>obj.can_modify_text(doc) → bool</code></li>
+</ul>
+<p>These respect both per-object locks and document-level encryption permissions. See <a href="../07-encryption/">reference/07-encryption.md</a>.</p>
+<h3 id="effects">Effects<a class="headerlink" href="#effects" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>shadow: ShadowStyle | None</code> — drop shadow. See <a href="../03-styles/#shadowstyle">reference/03-styles.md</a>.</li>
+</ul>
+<h3 id="other">Other<a class="headerlink" href="#other" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>OBJECT_TYPE: str</code> (class attribute) — the type tag in serialized form (<code>"textbox"</code>, <code>"imagebox"</code>, etc.)</li>
+<li><code>obj.copy()</code> — return a deep copy with a new ID</li>
+<li><code>obj.to_dict()</code> — JSON-serializable dict</li>
+<li><code>EdofObject.from_dict(d)</code> (classmethod) — reconstruct from dict</li>
+</ul>
+<hr />
+<h2 id="textbox">TextBox<a class="headerlink" href="#textbox" title="Permanent link">&para;</a></h2>
+<p>Renders text within a rectangular frame.</p>
+<h3 id="basic-usage">Basic usage<a class="headerlink" href="#basic-usage" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">tb</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_textbox</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span> <span class="n">w</span><span class="o">=</span><span class="mi">180</span><span class="p">,</span> <span class="n">h</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="s2">&quot;Hello world&quot;</span><span class="p">)</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">tb</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">font_family</span> <span class="o">=</span> <span class="s2">&quot;Helvetica&quot;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">tb</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">font_size</span>   <span class="o">=</span> <span class="mi">14</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">tb</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">bold</span>        <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">tb</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">color</span>       <span class="o">=</span> <span class="p">(</span><span class="mi">50</span><span class="p">,</span> <span class="mi">80</span><span class="p">,</span> <span class="mi">160</span><span class="p">)</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">tb</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">alignment</span>   <span class="o">=</span> <span class="s2">&quot;center&quot;</span>
+</code></pre></div>
+<h3 id="fields-specific-to-textbox">Fields specific to TextBox<a class="headerlink" href="#fields-specific-to-textbox" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>text: str</code> — plain text content. Supports <code>\n</code> for line breaks. Supports <code>{variable}</code> placeholders.</li>
+<li><code>runs: list[TextRun]</code> — optional rich-text segments. When non-empty, takes priority over <code>text</code>. See below.</li>
+<li><code>style: TextStyle</code> — text styling. See <a href="../03-styles/#textstyle">reference/03-styles.md</a>.</li>
+<li><code>padding: tuple[float, ...]</code> — <code>(top, right, bottom, left)</code> in mm. Can be a single float for uniform.</li>
+<li><code>border: BorderStyle | None</code> — frame border around the text box</li>
+<li><code>fill: FillStyle | None</code> — background color or gradient</li>
+<li><code>variable: str</code> — if set, the textbox displays the value of this variable directly (overrides <code>text</code>)</li>
+</ul>
+<h3 id="rich-text-via-textrun">Rich text via <code>TextRun</code><a class="headerlink" href="#rich-text-via-textrun" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof</span><span class="w"> </span><span class="kn">import</span> <span class="n">TextRun</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">tb</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_textbox</span><span class="p">(</span><span class="mi">15</span><span class="p">,</span> <span class="mi">30</span><span class="p">,</span> <span class="mi">180</span><span class="p">,</span> <span class="mi">18</span><span class="p">)</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">tb</span><span class="o">.</span><span class="n">runs</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">TextRun</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;Awarded to &quot;</span><span class="p">),</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">TextRun</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;Jan &quot;</span><span class="p">,</span>     <span class="n">font_size</span><span class="o">=</span><span class="mi">24</span><span class="p">),</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">TextRun</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;Novák&quot;</span><span class="p">,</span>    <span class="n">font_size</span><span class="o">=</span><span class="mi">24</span><span class="p">,</span> <span class="n">bold</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="p">(</span><span class="mi">150</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">0</span><span class="p">)),</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="n">TextRun</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot; for excellence&quot;</span><span class="p">,</span> <span class="n">italic</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="p">]</span>
+</code></pre></div>
+<p><code>TextRun</code> fields:
+- <code>text: str</code>
+- <code>font_family: str | None</code>
+- <code>font_size: float | None</code>
+- <code>bold, italic, underline, strikethrough: bool | None</code>
+- <code>color: tuple | None</code> — RGB or RGBA
+- <code>background: tuple | None</code> — highlight color</p>
+<p><code>None</code> means "inherit from the textbox's <code>style</code>". Fields are merged at render time.</p>
+<h3 id="auto-sizing">Auto-sizing<a class="headerlink" href="#auto-sizing" title="Permanent link">&para;</a></h3>
+<p>Set in <code>tb.style</code>:
+- <code>auto_shrink: bool</code> — reduces font size until text fits within the box
+- <code>auto_fill: bool</code> — increases font size until text fills the box
+- <code>wrap: bool</code> — soft-wrap on whitespace (default: <code>True</code>)</p>
+<p>These are mutually exclusive; setting both is undefined behavior.</p>
+<h3 id="variable-placeholder-syntax">Variable placeholder syntax<a class="headerlink" href="#variable-placeholder-syntax" title="Permanent link">&para;</a></h3>
+<p>Plain text and run text both support <code>{variable_name}</code> substitutions. At render time, placeholders are replaced with the variable's current value.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">doc</span><span class="o">.</span><span class="n">define_variable</span><span class="p">(</span><span class="s2">&quot;client&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;Customer&quot;</span><span class="p">)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">page</span><span class="o">.</span><span class="n">add_textbox</span><span class="p">(</span><span class="mi">15</span><span class="p">,</span> <span class="mi">15</span><span class="p">,</span> <span class="mi">180</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="s2">&quot;Hello </span><span class="si">{client}</span><span class="s2">, welcome.&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>If a variable is undefined, the placeholder is left as-is and a warning goes to <code>doc.errors</code>.</p>
+<hr />
+<h2 id="imagebox">ImageBox<a class="headerlink" href="#imagebox" title="Permanent link">&para;</a></h2>
+<p>Renders an embedded raster image.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">img_id</span> <span class="o">=</span> <span class="n">doc</span><span class="o">.</span><span class="n">add_resource_from_file</span><span class="p">(</span><span class="s2">&quot;logo.png&quot;</span><span class="p">)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">ib</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_image</span><span class="p">(</span><span class="n">img_id</span><span class="p">,</span> <span class="n">x</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span> <span class="n">w</span><span class="o">=</span><span class="mi">40</span><span class="p">,</span> <span class="n">h</span><span class="o">=</span><span class="mi">40</span><span class="p">)</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">ib</span><span class="o">.</span><span class="n">fit_mode</span> <span class="o">=</span> <span class="s2">&quot;contain&quot;</span>
+</code></pre></div>
+<h3 id="fields">Fields<a class="headerlink" href="#fields" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>resource_id: str</code> — ID of the resource (returned by <code>doc.add_resource()</code>)</li>
+<li><code>fit_mode: str</code> — how to fit the image in the box:</li>
+<li><code>"contain"</code> — preserve aspect, letterbox if needed (default)</li>
+<li><code>"cover"</code> — preserve aspect, crop to fill</li>
+<li><code>"fill"</code> — preserve aspect, fit short side, crop overflow (alias for cover with center anchor)</li>
+<li><code>"stretch"</code> — distort to fill exactly</li>
+<li><code>align_h: str</code> — <code>"left"</code>, <code>"center"</code>, <code>"right"</code> — anchor when image doesn't fill horizontally</li>
+<li><code>align_v: str</code> — <code>"top"</code>, <code>"middle"</code>, <code>"bottom"</code></li>
+<li><code>variable: str</code> — if set, swaps the image at render time. The variable should be of type <code>image</code> and contain a resource_id or path.</li>
+</ul>
+<h3 id="loading-from-variable">Loading from variable<a class="headerlink" href="#loading-from-variable" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">doc</span><span class="o">.</span><span class="n">define_variable</span><span class="p">(</span><span class="s2">&quot;logo&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;image&quot;</span><span class="p">)</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">ib</span><span class="o">.</span><span class="n">variable</span> <span class="o">=</span> <span class="s2">&quot;logo&quot;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># At render:</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">doc</span><span class="o">.</span><span class="n">set_variable</span><span class="p">(</span><span class="s2">&quot;logo&quot;</span><span class="p">,</span> <span class="s2">&quot;/path/to/customer_logo.png&quot;</span><span class="p">)</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">doc</span><span class="o">.</span><span class="n">export_pdf</span><span class="p">(</span><span class="s2">&quot;output.pdf&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>When the variable is set to a path, edof loads it as a fresh resource (no permanent storage in the document).</p>
+<hr />
+<h2 id="shape">Shape<a class="headerlink" href="#shape" title="Permanent link">&para;</a></h2>
+<p>Vector primitive. Supports six subtypes via the <code>shape_type</code> field:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span><span class="n">Shape</span><span class="p">,</span> <span class="n">SHAPE_RECT</span><span class="p">,</span> <span class="n">SHAPE_ELLIPSE</span><span class="p">,</span> <span class="n">SHAPE_LINE</span><span class="p">,</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>                   <span class="n">SHAPE_POLYGON</span><span class="p">,</span> <span class="n">SHAPE_ARROW</span><span class="p">,</span> <span class="n">SHAPE_PATH</span><span class="p">)</span>
+</code></pre></div>
+<p>(Or use string literals: <code>"rect"</code>, <code>"ellipse"</code>, etc.)</p>
+<h3 id="common-shape-fields">Common Shape fields<a class="headerlink" href="#common-shape-fields" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>shape_type: str</code> — see above</li>
+<li><code>fill: FillStyle | None</code> — color or gradient</li>
+<li><code>stroke: StrokeStyle | None</code> — outline</li>
+<li><code>corner_radius: float</code> — for rectangles only</li>
+</ul>
+<h3 id="type-specific-fields">Type-specific fields<a class="headerlink" href="#type-specific-fields" title="Permanent link">&para;</a></h3>
+<h4 id="rect-and-ellipse"><code>"rect"</code> and <code>"ellipse"</code><a class="headerlink" href="#rect-and-ellipse" title="Permanent link">&para;</a></h4>
+<p>Use the <code>transform</code> for size and position. No additional fields. Set <code>corner_radius &gt; 0</code> for rounded corners on rectangles.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">rect</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_shape</span><span class="p">(</span><span class="s2">&quot;rect&quot;</span><span class="p">,</span> <span class="mi">15</span><span class="p">,</span> <span class="mi">15</span><span class="p">,</span> <span class="mi">180</span><span class="p">,</span> <span class="mi">30</span><span class="p">)</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">rect</span><span class="o">.</span><span class="n">fill</span><span class="o">.</span><span class="n">color</span> <span class="o">=</span> <span class="p">(</span><span class="mi">240</span><span class="p">,</span> <span class="mi">240</span><span class="p">,</span> <span class="mi">240</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">rect</span><span class="o">.</span><span class="n">corner_radius</span> <span class="o">=</span> <span class="mi">5</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">ellipse</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_shape</span><span class="p">(</span><span class="s2">&quot;ellipse&quot;</span><span class="p">,</span> <span class="mi">15</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">)</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">ellipse</span><span class="o">.</span><span class="n">fill</span><span class="o">.</span><span class="n">color</span> <span class="o">=</span> <span class="p">(</span><span class="mi">255</span><span class="p">,</span> <span class="mi">200</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+</code></pre></div>
+<h4 id="line"><code>"line"</code><a class="headerlink" href="#line" title="Permanent link">&para;</a></h4>
+<p>Has <code>points: list[[x, y]]</code> — list of <code>[x, y]</code> pairs. For a single line, use exactly 2 points. The points are in <strong>local coordinates relative to the transform's <code>(x, y)</code></strong>, in mm.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">line</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_shape</span><span class="p">(</span><span class="s2">&quot;line&quot;</span><span class="p">,</span> <span class="mi">15</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">180</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">line</span><span class="o">.</span><span class="n">points</span> <span class="o">=</span> <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">180</span><span class="p">,</span> <span class="mi">0</span><span class="p">]]</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">line</span><span class="o">.</span><span class="n">stroke</span><span class="o">.</span><span class="n">color</span> <span class="o">=</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">line</span><span class="o">.</span><span class="n">stroke</span><span class="o">.</span><span class="n">width</span> <span class="o">=</span> <span class="mf">0.5</span>
+</code></pre></div>
+<h4 id="polygon"><code>"polygon"</code><a class="headerlink" href="#polygon" title="Permanent link">&para;</a></h4>
+<p>Like <code>"line"</code> but closed. The renderer connects the last point back to the first.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">poly</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_shape</span><span class="p">(</span><span class="s2">&quot;polygon&quot;</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">60</span><span class="p">,</span> <span class="mi">60</span><span class="p">)</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">poly</span><span class="o">.</span><span class="n">points</span> <span class="o">=</span> <span class="p">[[</span><span class="mi">30</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">60</span><span class="p">,</span> <span class="mi">60</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">60</span><span class="p">]]</span>   <span class="c1"># triangle</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">poly</span><span class="o">.</span><span class="n">fill</span><span class="o">.</span><span class="n">color</span> <span class="o">=</span> <span class="p">(</span><span class="mi">200</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+</code></pre></div>
+<h4 id="arrow"><code>"arrow"</code><a class="headerlink" href="#arrow" title="Permanent link">&para;</a></h4>
+<p>A line with an arrowhead. <code>points</code> defines start and end. <code>stroke.width</code> controls thickness; arrowhead size scales with width.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">arrow</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_shape</span><span class="p">(</span><span class="s2">&quot;arrow&quot;</span><span class="p">,</span> <span class="mi">15</span><span class="p">,</span> <span class="mi">150</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">20</span><span class="p">)</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">arrow</span><span class="o">.</span><span class="n">points</span> <span class="o">=</span> <span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">],</span> <span class="p">[</span><span class="mi">100</span><span class="p">,</span> <span class="mi">10</span><span class="p">]]</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">arrow</span><span class="o">.</span><span class="n">stroke</span><span class="o">.</span><span class="n">color</span> <span class="o">=</span> <span class="p">(</span><span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">arrow</span><span class="o">.</span><span class="n">stroke</span><span class="o">.</span><span class="n">width</span> <span class="o">=</span> <span class="mf">1.5</span>
+</code></pre></div>
+<h4 id="path"><code>"path"</code><a class="headerlink" href="#path" title="Permanent link">&para;</a></h4>
+<p>SVG-style Bezier path. Has <code>path_data: list</code> containing command tuples.</p>
+<p>Commands supported:
+- <code>["M", x, y]</code> — move to
+- <code>["L", x, y]</code> — line to
+- <code>["H", x]</code> — horizontal line to
+- <code>["V", y]</code> — vertical line to
+- <code>["C", x1, y1, x2, y2, x, y]</code> — cubic Bezier
+- <code>["Q", x1, y1, x, y]</code> — quadratic Bezier
+- <code>["Z"]</code> — close path</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">sh</span> <span class="o">=</span> <span class="n">Shape</span><span class="p">(</span><span class="n">shape_type</span><span class="o">=</span><span class="s2">&quot;path&quot;</span><span class="p">)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">sh</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="mi">50</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">sh</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="mi">100</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">sh</span><span class="o">.</span><span class="n">path_data</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="p">[</span><span class="s2">&quot;M&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="p">[</span><span class="s2">&quot;L&quot;</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="p">[</span><span class="s2">&quot;C&quot;</span><span class="p">,</span> <span class="mi">70</span><span class="p">,</span> <span class="mi">20</span><span class="p">,</span> <span class="mi">80</span><span class="p">,</span> <span class="mi">20</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span>   <span class="c1"># Bezier curve</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="p">[</span><span class="s2">&quot;Z&quot;</span><span class="p">],</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="p">]</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="n">sh</span><span class="o">.</span><span class="n">fill</span><span class="o">.</span><span class="n">color</span> <span class="o">=</span> <span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">200</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="n">page</span><span class="o">.</span><span class="n">add_object</span><span class="p">(</span><span class="n">sh</span><span class="p">)</span>
+</code></pre></div>
+<h4 id="shapefrom_svg_pathd-str-shape-classmethod"><code>Shape.from_svg_path(d: str) → Shape</code> (classmethod)<a class="headerlink" href="#shapefrom_svg_pathd-str-shape-classmethod" title="Permanent link">&para;</a></h4>
+<p>Parse an SVG-style path string into a <code>path</code> shape:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">heart</span> <span class="o">=</span> <span class="n">Shape</span><span class="o">.</span><span class="n">from_svg_path</span><span class="p">(</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    <span class="s2">&quot;M 50 10 C 40 0 0 0 0 30 C 0 60 50 90 50 90 &quot;</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="s2">&quot;C 50 90 100 60 100 30 C 100 0 60 0 50 10 Z&quot;</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="p">)</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="n">heart</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="mi">75</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="n">heart</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="mi">100</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="n">heart</span><span class="o">.</span><span class="n">fill</span><span class="o">.</span><span class="n">color</span> <span class="o">=</span> <span class="p">(</span><span class="mi">220</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="n">page</span><span class="o">.</span><span class="n">add_object</span><span class="p">(</span><span class="n">heart</span><span class="p">)</span>
+</code></pre></div>
+<p>Supported SVG commands: <code>M m L l H h V v C c S s Q q T t A Z z</code>.</p>
+<hr />
+<h2 id="qrcode">QRCode<a class="headerlink" href="#qrcode" title="Permanent link">&para;</a></h2>
+<p>QR code rendered from a data string. Requires <code>pip install edof[qr]</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">qr</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_qrcode</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="mi">170</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span> <span class="n">w</span><span class="o">=</span><span class="mi">25</span><span class="p">,</span> <span class="n">h</span><span class="o">=</span><span class="mi">25</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="s2">&quot;https://example.com&quot;</span><span class="p">)</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">qr</span><span class="o">.</span><span class="n">error_correction</span> <span class="o">=</span> <span class="s2">&quot;M&quot;</span>
+</code></pre></div>
+<h3 id="fields_1">Fields<a class="headerlink" href="#fields_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>data: str</code> — text or URL to encode (UTF-8)</li>
+<li><code>error_correction: str</code> — <code>"L"</code> (7%), <code>"M"</code> (15%), <code>"Q"</code> (25%), <code>"H"</code> (30%) recovery levels</li>
+<li><code>fg_color: tuple</code> — foreground RGBA (default: black)</li>
+<li><code>bg_color: tuple</code> — background RGBA (default: white)</li>
+<li><code>border_modules: int</code> — quiet zone width in QR module units (default: 4)</li>
+<li><code>variable: str</code> — if set, the QR encodes the variable's value at render time</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">doc</span><span class="o">.</span><span class="n">define_variable</span><span class="p">(</span><span class="s2">&quot;verify_url&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;url&quot;</span><span class="p">)</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">qr</span><span class="o">.</span><span class="n">variable</span> <span class="o">=</span> <span class="s2">&quot;verify_url&quot;</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="n">doc</span><span class="o">.</span><span class="n">set_variable</span><span class="p">(</span><span class="s2">&quot;verify_url&quot;</span><span class="p">,</span> <span class="s2">&quot;https://example.com/verify/abc123&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>Without <code>[qr]</code>, QR objects render as a placeholder rectangle with a warning logged to <code>doc.errors</code>.</p>
+<hr />
+<h2 id="table">Table<a class="headerlink" href="#table" title="Permanent link">&para;</a></h2>
+<p>Multi-cell formatted table.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof</span><span class="w"> </span><span class="kn">import</span> <span class="n">Table</span><span class="p">,</span> <span class="n">TableCell</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="n">t</span> <span class="o">=</span> <span class="n">Table</span><span class="p">()</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="n">t</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="mi">15</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">t</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="mi">50</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="n">t</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">width</span>  <span class="o">=</span> <span class="mi">180</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="n">t</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">height</span> <span class="o">=</span> <span class="mi">60</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="n">t</span><span class="o">.</span><span class="n">col_widths</span> <span class="o">=</span> <span class="p">[</span><span class="mi">80</span><span class="p">,</span> <span class="mi">25</span><span class="p">,</span> <span class="mi">30</span><span class="p">,</span> <span class="mi">45</span><span class="p">]</span>   <span class="c1"># in mm; 0 = auto-distribute remaining</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="n">t</span><span class="o">.</span><span class="n">row_heights</span> <span class="o">=</span> <span class="p">[</span><span class="mi">10</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span>     <span class="c1"># 0 = auto-distribute</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="n">t</span><span class="o">.</span><span class="n">cells</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>    <span class="p">[</span><span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;Item&quot;</span><span class="p">),</span>    <span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;Qty&quot;</span><span class="p">),</span> <span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;Price&quot;</span><span class="p">),</span> <span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;Total&quot;</span><span class="p">)],</span>
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>    <span class="p">[</span><span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;Widget&quot;</span><span class="p">),</span>  <span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;3&quot;</span><span class="p">),</span>   <span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;100&quot;</span><span class="p">),</span>   <span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;300&quot;</span><span class="p">)],</span>
+<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>    <span class="p">[</span><span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;Gadget&quot;</span><span class="p">),</span>  <span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;1&quot;</span><span class="p">),</span>   <span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;250&quot;</span><span class="p">),</span>   <span class="n">TableCell</span><span class="p">(</span><span class="n">text</span><span class="o">=</span><span class="s2">&quot;250&quot;</span><span class="p">)],</span>
+<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a><span class="p">]</span>
+<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a><span class="c1"># Style header row</span>
+<a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a><span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">t</span><span class="o">.</span><span class="n">cells</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+<a id="__codelineno-15-18" name="__codelineno-15-18" href="#__codelineno-15-18"></a>    <span class="n">c</span><span class="o">.</span><span class="n">bg_color</span> <span class="o">=</span> <span class="p">(</span><span class="mi">50</span><span class="p">,</span> <span class="mi">80</span><span class="p">,</span> <span class="mi">160</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+<a id="__codelineno-15-19" name="__codelineno-15-19" href="#__codelineno-15-19"></a>    <span class="n">c</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">color</span> <span class="o">=</span> <span class="p">(</span><span class="mi">255</span><span class="p">,</span> <span class="mi">255</span><span class="p">,</span> <span class="mi">255</span><span class="p">)</span>
+<a id="__codelineno-15-20" name="__codelineno-15-20" href="#__codelineno-15-20"></a>    <span class="n">c</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">bold</span> <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-15-21" name="__codelineno-15-21" href="#__codelineno-15-21"></a>
+<a id="__codelineno-15-22" name="__codelineno-15-22" href="#__codelineno-15-22"></a><span class="n">page</span><span class="o">.</span><span class="n">add_object</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="fields_2">Fields<a class="headerlink" href="#fields_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>cells: list[list[TableCell]]</code> — 2D matrix of cells</li>
+<li><code>col_widths: list[float]</code> — widths per column in mm; <code>0</code> means "auto-distribute"</li>
+<li><code>row_heights: list[float]</code> — heights per row; <code>0</code> means "auto-distribute"</li>
+<li><code>table_border: BorderStyle | None</code> — outer border around the entire table</li>
+<li><code>cell_padding: tuple</code> — default cell padding <code>(t, r, b, l)</code> in mm</li>
+</ul>
+<p><code>num_rows</code> and <code>num_cols</code> are read-only properties derived from <code>cells</code>.</p>
+<h3 id="tablecell">TableCell<a class="headerlink" href="#tablecell" title="Permanent link">&para;</a></h3>
+<p>Each cell is independently styled.</p>
+<ul>
+<li><code>text: str</code> — plain text content</li>
+<li><code>runs: list[TextRun]</code> — rich text (overrides <code>text</code>)</li>
+<li><code>style: TextStyle</code> — text styling</li>
+<li><code>bg_color: tuple</code> — RGBA background</li>
+<li><code>padding: tuple</code> — overrides table-level <code>cell_padding</code></li>
+<li><code>colspan: int</code> — span this cell over multiple columns (default: 1)</li>
+<li><code>rowspan: int</code> — span this cell over multiple rows (default: 1)</li>
+<li><code>border_top, border_right, border_bottom, border_left: CellBorder</code> — independent borders per side. Each <code>CellBorder</code> has <code>enabled</code>, <code>color</code>, <code>width</code>, <code>style</code> (<code>"solid"</code>, <code>"dashed"</code>, <code>"dotted"</code>).</li>
+</ul>
+<h3 id="make_table-helper"><code>make_table()</code> helper<a class="headerlink" href="#make_table-helper" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_table</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="n">t</span> <span class="o">=</span> <span class="n">make_table</span><span class="p">(</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>    <span class="p">[[</span><span class="s2">&quot;Name&quot;</span><span class="p">,</span> <span class="s2">&quot;Score&quot;</span><span class="p">],</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>     <span class="p">[</span><span class="s2">&quot;Alice&quot;</span><span class="p">,</span> <span class="mi">98</span><span class="p">],</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>     <span class="p">[</span><span class="s2">&quot;Bob&quot;</span><span class="p">,</span> <span class="mi">87</span><span class="p">]],</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>    <span class="n">header</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>         <span class="c1"># first row is styled as header</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>    <span class="n">alternating</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>    <span class="c1"># zebra-stripe data rows</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>    <span class="n">style</span><span class="o">=</span><span class="s2">&quot;default&quot;</span><span class="p">,</span>     <span class="c1"># presets: &quot;default&quot;, &quot;modern&quot;, &quot;minimal&quot;</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="p">)</span>
+</code></pre></div>
+<p>Returns a <code>Table</code> configured with reasonable defaults. Adjust further in code.</p>
+<hr />
+<h2 id="group">Group<a class="headerlink" href="#group" title="Permanent link">&para;</a></h2>
+<p>A container that holds child objects and applies transformations / clipping uniformly.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof</span><span class="w"> </span><span class="kn">import</span> <span class="n">Group</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="n">g</span> <span class="o">=</span> <span class="n">Group</span><span class="p">()</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="n">g</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">x</span> <span class="o">=</span> <span class="mi">50</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="n">g</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="mi">50</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="n">g</span><span class="o">.</span><span class="n">children</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>    <span class="n">page</span><span class="o">.</span><span class="n">add_textbox</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">12</span><span class="p">,</span> <span class="s2">&quot;Header&quot;</span><span class="p">),</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>    <span class="n">page</span><span class="o">.</span><span class="n">add_shape</span><span class="p">(</span><span class="s2">&quot;line&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">14</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="p">]</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="c1"># Move them out of page.objects and into the group</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="k">for</span> <span class="n">child</span> <span class="ow">in</span> <span class="n">g</span><span class="o">.</span><span class="n">children</span><span class="p">:</span>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a>    <span class="n">page</span><span class="o">.</span><span class="n">objects</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">child</span><span class="p">)</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="n">page</span><span class="o">.</span><span class="n">add_object</span><span class="p">(</span><span class="n">g</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="fields_3">Fields<a class="headerlink" href="#fields_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>children: list[EdofObject]</code> — child objects</li>
+<li><code>clip: bool</code> — if <code>True</code>, children are clipped to the group's transform bounds</li>
+</ul>
+<p>Coordinates of children are interpreted <strong>relative to the group's transform</strong> (not absolute page coordinates). Rotating the group rotates all children together; resizing scales them.</p>
+<p><code>Group.copy()</code> deep-copies all children with new IDs. <code>Group.duplicate()</code> (alias).</p>
+<hr />
+<h2 id="object-equality-and-copying">Object equality and copying<a class="headerlink" href="#object-equality-and-copying" title="Permanent link">&para;</a></h2>
+<p>All objects are dataclasses underneath, but equality is identity-based (each object has a unique ID). Use <code>obj.copy()</code> for a deep copy with a new ID:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">template</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_textbox</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">12</span><span class="p">,</span> <span class="s2">&quot;Template&quot;</span><span class="p">)</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">template</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">bold</span> <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="c1"># Make 5 copies, each shifted down</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">6</span><span class="p">):</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>    <span class="n">new</span> <span class="o">=</span> <span class="n">template</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>    <span class="n">new</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">y</span> <span class="o">=</span> <span class="mi">10</span> <span class="o">+</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">15</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>    <span class="n">new</span><span class="o">.</span><span class="n">text</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Row </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>    <span class="n">page</span><span class="o">.</span><span class="n">add_object</span><span class="p">(</span><span class="n">new</span><span class="p">)</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      © 2025 DavidSchobl — MIT License
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "content.code.copy", "search.suggest", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

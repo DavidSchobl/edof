@@ -1,0 +1,2417 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Easy Document Format — programmatic document creation, editing and export">
+      
+      
+      
+        <link rel="canonical" href="https://davidschobl.github.io/edof/reference/07-encryption/">
+      
+      
+        <link rel="prev" href="../11-docx/">
+      
+      
+        <link rel="next" href="../08-editor/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Encryption - EDOF</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#reference-encryption-permissions" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="EDOF" class="md-header__button md-logo" aria-label="EDOF" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            EDOF
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Encryption
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/DavidSchobl/edof" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    DavidSchobl/edof
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="EDOF" class="md-nav__button md-logo" aria-label="EDOF" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    EDOF
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/DavidSchobl/edof" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    DavidSchobl/edof
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../INSTALL/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUICKSTART/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-document/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Document model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-objects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Objects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-styles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Styles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../06-import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import (PDF / RTF)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../11-docx/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Word (.docx)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encryption
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encryption
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick example
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#permission-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission levels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#encryption-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encryption modes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Encryption modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-to-use-partial-vs-full" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use partial vs full
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loading-partial-documents-without-a-password" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading partial documents without a password
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setting-up-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting up encryption
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Setting up encryption">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-the-first-password" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding the first password
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-more-passwords" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding more passwords
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permissions-for-password-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permissions for password operations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loading-encrypted-documents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading encrypted documents
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Loading encrypted documents">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#with-a-password" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With a password
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#with-the-recovery-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With the recovery key
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#permission-checking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission checking
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Permission checking">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#per-object-permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-object permissions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#password-rotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Password rotation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#removing-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Removing protection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recovery-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery key
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recovery key">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#generating-a-new-recovery-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating a new recovery key
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cryptographic-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cryptographic details
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cryptographic details">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#slot-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slot structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#content-key-wrapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Content key wrapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authenticated-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authenticated encryption
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-encryption-protects-against" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What encryption protects against
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-encryption-does-not-protect-against" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What encryption does NOT protect against
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#editor-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Editor integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="API summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#on-the-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On the document
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#on-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On objects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#module-imports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Module imports
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../08-editor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Desktop editor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../09-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../10-helpers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Helpers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../API/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Full API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cookbook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Cookbook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/invoice/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Invoice
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/certificate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Certificate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/batch-pdf/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Batch PDF
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/pdf-import-edit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PDF import & edit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cookbook/encrypted-template/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Encrypted template
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Advanced
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Advanced
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/file-format/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    File format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../advanced/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick example
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#permission-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission levels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#encryption-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encryption modes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Encryption modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-to-use-partial-vs-full" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use partial vs full
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loading-partial-documents-without-a-password" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading partial documents without a password
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setting-up-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting up encryption
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Setting up encryption">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-the-first-password" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding the first password
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-more-passwords" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding more passwords
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#permissions-for-password-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permissions for password operations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loading-encrypted-documents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading encrypted documents
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Loading encrypted documents">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#with-a-password" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With a password
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#with-the-recovery-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With the recovery key
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#permission-checking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission checking
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Permission checking">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#per-object-permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-object permissions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#password-rotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Password rotation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#removing-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Removing protection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recovery-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery key
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recovery key">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#generating-a-new-recovery-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating a new recovery key
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cryptographic-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cryptographic details
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cryptographic details">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#slot-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slot structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#content-key-wrapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Content key wrapping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authenticated-encryption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authenticated encryption
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-encryption-protects-against" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What encryption protects against
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-encryption-does-not-protect-against" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What encryption does NOT protect against
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#editor-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Editor integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API summary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="API summary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#on-the-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On the document
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#on-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On objects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#module-imports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Module imports
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="reference-encryption-permissions">Reference: Encryption &amp; Permissions<a class="headerlink" href="#reference-encryption-permissions" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Requires <code>pip install edof[crypto]</code></p>
+</blockquote>
+<p>EDOF supports AES-256-GCM document encryption with multi-level password protection and recovery keys. By default, documents are plain (no encryption) — encryption is opt-in and adds zero friction when you don't use it.</p>
+<h2 id="quick-example">Quick example<a class="headerlink" href="#quick-example" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">edof</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof.crypto</span><span class="w"> </span><span class="kn">import</span> <span class="n">EDIT</span><span class="p">,</span> <span class="n">ADMIN</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Build a document</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s2">&quot;Confidential&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">page</span> <span class="o">=</span> <span class="n">doc</span><span class="o">.</span><span class="n">add_page</span><span class="p">()</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">page</span><span class="o">.</span><span class="n">add_textbox</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">12</span><span class="p">,</span> <span class="s2">&quot;TOP SECRET&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Set up multi-level passwords (writes recovery key to your safe!)</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">recovery_key</span> <span class="o">=</span> <span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="s2">&quot;admin&quot;</span><span class="p">,</span>  <span class="s2">&quot;ownerSecret&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="s2">&quot;design&quot;</span><span class="p">,</span> <span class="s2">&quot;designerPwd&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="s2">&quot;edit&quot;</span><span class="p">,</span>   <span class="s2">&quot;editorPwd&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="s2">&quot;fill&quot;</span><span class="p">,</span>   <span class="s2">&quot;templateUser&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RECOVERY KEY:&quot;</span><span class="p">,</span> <span class="n">recovery_key</span><span class="p">)</span>   <span class="c1"># 24-character key, shown ONLY ONCE</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="n">doc</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="s2">&quot;secret.edof&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="c1"># Loading</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;secret.edof&quot;</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="s2">&quot;editorPwd&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="nb">print</span><span class="p">(</span><span class="n">doc</span><span class="o">.</span><span class="n">permission_level</span><span class="p">)</span>            <span class="c1"># Permission.EDIT</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="n">doc</span><span class="o">.</span><span class="n">can</span><span class="p">(</span><span class="n">ADMIN</span><span class="p">)</span>                         <span class="c1"># False</span>
+</code></pre></div>
+<hr />
+<h2 id="permission-levels">Permission levels<a class="headerlink" href="#permission-levels" title="Permanent link">&para;</a></h2>
+<p>There are five hierarchical permission levels. Higher levels imply all lower levels.</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Constant</th>
+<th>Allows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>view</code></td>
+<td><code>VIEW</code></td>
+<td>Render, print, export. No modifications.</td>
+</tr>
+<tr>
+<td><code>fill</code></td>
+<td><code>FILL</code></td>
+<td>view + change variable values (template filling).</td>
+</tr>
+<tr>
+<td><code>edit</code></td>
+<td><code>EDIT</code></td>
+<td>fill + change object <code>.text</code> and rich-text run text.</td>
+</tr>
+<tr>
+<td><code>design</code></td>
+<td><code>DESIGN</code></td>
+<td>edit + change styles, fonts, colors, layout, structure (add/remove objects and pages).</td>
+</tr>
+<tr>
+<td><code>admin</code></td>
+<td><code>ADMIN</code></td>
+<td>design + manage passwords, recovery key, override per-object locks.</td>
+</tr>
+</tbody>
+</table>
+<p>Import them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof.crypto</span><span class="w"> </span><span class="kn">import</span> <span class="n">VIEW</span><span class="p">,</span> <span class="n">FILL</span><span class="p">,</span> <span class="n">EDIT</span><span class="p">,</span> <span class="n">DESIGN</span><span class="p">,</span> <span class="n">ADMIN</span><span class="p">,</span> <span class="n">Permission</span>
+</code></pre></div>
+<p><code>Permission</code> is an <code>IntEnum</code>, so you can compare them directly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">if</span> <span class="n">doc</span><span class="o">.</span><span class="n">permission_level</span> <span class="o">&gt;=</span> <span class="n">EDIT</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Can edit text&quot;</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h2 id="encryption-modes">Encryption modes<a class="headerlink" href="#encryption-modes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>What's encrypted</th>
+<th>What's visible without password</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>none</code> (default)</td>
+<td>Nothing</td>
+<td>Everything (plain ZIP)</td>
+</tr>
+<tr>
+<td><code>partial</code></td>
+<td>Object text, rich-text runs, image data, QR data, table cell text, variable values</td>
+<td>Page count, page sizes, fonts, colors, layout, structure, document title</td>
+</tr>
+<tr>
+<td><code>full</code></td>
+<td>Everything</td>
+<td>Only "encrypted=true" + KDF parameters + slot count</td>
+</tr>
+</tbody>
+</table>
+<p>Set the mode after enabling encryption:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="s2">&quot;admin&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">encryption_mode</span> <span class="o">=</span> <span class="s2">&quot;partial&quot;</span>          <span class="c1"># default after first password is &quot;full&quot;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">doc</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="s2">&quot;template.edof&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="when-to-use-partial-vs-full">When to use partial vs full<a class="headerlink" href="#when-to-use-partial-vs-full" title="Permanent link">&para;</a></h3>
+<p><strong>Use <code>partial</code></strong> when you want to share a layout / template publicly, but the actual content is private. Example: an invoice template — anyone can see how it's structured (placement of fields, fonts, branding), but the actual invoice numbers, prices, and customer data are encrypted.</p>
+<p><strong>Use <code>full</code></strong> for private documents where even the existence of pages, layout, and the title should be hidden. Example: a confidential contract that's stored on a shared drive.</p>
+<h3 id="loading-partial-documents-without-a-password">Loading partial documents without a password<a class="headerlink" href="#loading-partial-documents-without-a-password" title="Permanent link">&para;</a></h3>
+<p>If you load a <code>partial</code> document without supplying a password, it loads in a <strong>redacted view</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;partial.edof&quot;</span><span class="p">)</span>    <span class="c1"># no password</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">print</span><span class="p">(</span><span class="n">doc</span><span class="o">.</span><span class="n">title</span><span class="p">)</span>                   <span class="c1"># visible</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">doc</span><span class="o">.</span><span class="n">pages</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">objects</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">text</span><span class="p">)</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># &#39;█&#39; — placeholder, real text is encrypted</span>
+</code></pre></div>
+<p>The placeholder is a single <code>█</code> character, replacing all sensitive text content. The user can see the layout and structure but no actual content.</p>
+<p>This mode lets the editor render a "preview" of an encrypted template even without a password — useful in file managers, thumbnails, etc.</p>
+<hr />
+<h2 id="setting-up-encryption">Setting up encryption<a class="headerlink" href="#setting-up-encryption" title="Permanent link">&para;</a></h2>
+<h3 id="adding-the-first-password">Adding the first password<a class="headerlink" href="#adding-the-first-password" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">new</span><span class="p">()</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">recovery_key</span> <span class="o">=</span> <span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="s2">&quot;admin&quot;</span><span class="p">,</span> <span class="s2">&quot;myMasterPassword&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>When you set the <strong>first</strong> password on a document:
+1. A 32-byte random content key is generated. This key encrypts all sensitive data.
+2. A 24-character recovery key is generated, shown to you exactly once. <strong>Save it.</strong>
+3. The document switches to <code>encryption_mode = "full"</code>.
+4. Your password and the recovery key both wrap the same content key (independent slots).
+5. Your session is granted ADMIN permission (you're the one who set the password).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nb">print</span><span class="p">(</span><span class="n">recovery_key</span><span class="p">)</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># &quot;7K3F-9XQM-2N8P-VR4A-HT6L-Z5BJ&quot;</span>
+</code></pre></div>
+<h3 id="adding-more-passwords">Adding more passwords<a class="headerlink" href="#adding-more-passwords" title="Permanent link">&para;</a></h3>
+<p>Subsequent <code>set_password</code> calls add slots without generating new recovery keys:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="s2">&quot;design&quot;</span><span class="p">,</span> <span class="s2">&quot;designerPwd&quot;</span><span class="p">)</span>    <span class="c1"># returns None</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="s2">&quot;edit&quot;</span><span class="p">,</span>   <span class="s2">&quot;editorPwd&quot;</span><span class="p">)</span>      <span class="c1"># returns None</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="s2">&quot;fill&quot;</span><span class="p">,</span>   <span class="s2">&quot;userPwd&quot;</span><span class="p">)</span>        <span class="c1"># returns None</span>
+</code></pre></div>
+<p>You can have any subset of the four levels — you don't need all four. A common pattern:
+- <code>admin</code> only — the simplest case, single password gives full access
+- <code>admin</code> + <code>fill</code> — owner can do everything, users can fill the template
+- <code>admin</code> + <code>edit</code> + <code>fill</code> — adds an editor role for proofreaders
+- All four — large team with a designer role separate from editors</p>
+<h3 id="permissions-for-password-operations">Permissions for password operations<a class="headerlink" href="#permissions-for-password-operations" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Adding the first password:</strong> anyone (the act of locking the document)</li>
+<li><strong>Adding/replacing additional passwords:</strong> requires <code>admin</code></li>
+<li><strong>Changing a password:</strong> requires the <strong>old password</strong> (not necessarily admin)</li>
+<li><strong>Removing a password:</strong> requires <code>admin</code></li>
+<li><strong>Clearing all protection:</strong> requires <code>admin</code></li>
+</ul>
+<p>The reasoning: knowing the old password proves you were trusted at that level, so you can rotate it (e.g. the editor leaves, the owner gives the editor role to someone else by changing <code>edit</code> password).</p>
+<hr />
+<h2 id="loading-encrypted-documents">Loading encrypted documents<a class="headerlink" href="#loading-encrypted-documents" title="Permanent link">&para;</a></h2>
+<h3 id="with-a-password">With a password<a class="headerlink" href="#with-a-password" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;secret.edof&quot;</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="s2">&quot;editorPwd&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>The library tries the password against every slot. The first match determines the granted permission.</p>
+<p>If no slot matches → raises <code>EdofWrongPassword</code>.</p>
+<p>If the file is encrypted but no password supplied → raises <code>EdofPasswordRequired</code>.</p>
+<h3 id="with-the-recovery-key">With the recovery key<a class="headerlink" href="#with-the-recovery-key" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;secret.edof&quot;</span><span class="p">,</span> <span class="n">recovery_key</span><span class="o">=</span><span class="s2">&quot;7K3F-9XQM-2N8P-VR4A-HT6L-Z5BJ&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>The recovery key always grants ADMIN access. Useful when the admin password is lost.</p>
+<hr />
+<h2 id="permission-checking">Permission checking<a class="headerlink" href="#permission-checking" title="Permanent link">&para;</a></h2>
+<p>After loading, check what's allowed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">doc</span><span class="o">.</span><span class="n">permission_level</span>                <span class="c1"># Permission.EDIT</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">can</span><span class="p">(</span><span class="n">EDIT</span><span class="p">)</span>                       <span class="c1"># True</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">doc</span><span class="o">.</span><span class="n">can</span><span class="p">(</span><span class="n">DESIGN</span><span class="p">)</span>                     <span class="c1"># False</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="c1"># Raises PermissionError if level is insufficient</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">doc</span><span class="o">.</span><span class="n">require</span><span class="p">(</span><span class="n">EDIT</span><span class="p">)</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="n">doc</span><span class="o">.</span><span class="n">require</span><span class="p">(</span><span class="n">DESIGN</span><span class="p">)</span>                 <span class="c1"># raises</span>
+</code></pre></div>
+<p><code>can()</code> is for branching logic; <code>require()</code> is for guarding operations that need a level.</p>
+<h3 id="per-object-permissions">Per-object permissions<a class="headerlink" href="#per-object-permissions" title="Permanent link">&para;</a></h3>
+<p>Each object can override doc-level permissions for its modification:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">heading</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">add_textbox</span><span class="p">(</span><span class="mi">15</span><span class="p">,</span> <span class="mi">15</span><span class="p">,</span> <span class="mi">180</span><span class="p">,</span> <span class="mi">18</span><span class="p">,</span> <span class="s2">&quot;MUST NEVER CHANGE&quot;</span><span class="p">)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">heading</span><span class="o">.</span><span class="n">lock_level</span> <span class="o">=</span> <span class="s2">&quot;design&quot;</span>       <span class="c1"># only design+ can modify</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">heading</span><span class="o">.</span><span class="n">lock_text</span> <span class="o">=</span> <span class="kc">True</span>            <span class="c1"># text NEVER editable, even by admin</span>
+</code></pre></div>
+<p><code>lock_level</code> raises the bar above the document's general permission. A user with <code>edit</code> permission can change other text but not this heading.</p>
+<p><code>lock_text = True</code> is a hard text lock. Even ADMIN cannot change <code>obj.text</code> or <code>obj.runs</code> until they explicitly clear the flag (which requires ADMIN). Useful for "this header must never change accidentally".</p>
+<p>Helper methods on each object:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">obj</span><span class="o">.</span><span class="n">can_modify</span><span class="p">(</span><span class="n">doc</span><span class="p">)</span>         <span class="c1"># respects doc permission AND lock_level</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">obj</span><span class="o">.</span><span class="n">can_modify_text</span><span class="p">(</span><span class="n">doc</span><span class="p">)</span>    <span class="c1"># also respects lock_text</span>
+</code></pre></div>
+<p>The editor uses these to disable UI buttons and show "needs <em>level</em> password" dialogs.</p>
+<hr />
+<h2 id="password-rotation">Password rotation<a class="headerlink" href="#password-rotation" title="Permanent link">&para;</a></h2>
+<p>To rotate a password (someone leaves, password compromised, periodic rotation policy):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;secret.edof&quot;</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="s2">&quot;oldEditor&quot;</span><span class="p">)</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">change_password</span><span class="p">(</span><span class="s2">&quot;edit&quot;</span><span class="p">,</span> <span class="s2">&quot;oldEditor&quot;</span><span class="p">,</span> <span class="s2">&quot;newEditor&quot;</span><span class="p">)</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">doc</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="s2">&quot;secret.edof&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>Note: <code>change_password</code> does <strong>not</strong> re-encrypt the bulk content. It just rewraps the slot key — fast even for huge documents.</p>
+<hr />
+<h2 id="removing-protection">Removing protection<a class="headerlink" href="#removing-protection" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;secret.edof&quot;</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="s2">&quot;adminPwd&quot;</span><span class="p">)</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">remove_password</span><span class="p">(</span><span class="s2">&quot;fill&quot;</span><span class="p">)</span>          <span class="c1"># remove one slot</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="n">doc</span><span class="o">.</span><span class="n">clear_all_protection</span><span class="p">()</span>            <span class="c1"># remove all encryption (becomes plain)</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">doc</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="s2">&quot;plain.edof&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>After <code>clear_all_protection</code>, the document is back to <code>encryption_mode = "none"</code> and saves as a plain ZIP. Of course, anyone who had a copy of the encrypted file can still decrypt their copy with their old password — clearing protection only affects future saves.</p>
+<hr />
+<h2 id="recovery-key">Recovery key<a class="headerlink" href="#recovery-key" title="Permanent link">&para;</a></h2>
+<p>The recovery key is shown <strong>once</strong> when you set the first password. After that:
+- It's stored in <code>doc.recovery_key</code> until you call <code>consume_recovery_key()</code> to clear it
+- It's saved into the document file as a special slot
+- It cannot be retrieved later from the document — there's no API to "show me the recovery key again"</p>
+<p>If you lose all your passwords AND the recovery key, the document is <strong>mathematically unrecoverable</strong>. There is no backdoor.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">recovery_key</span> <span class="o">=</span> <span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="s2">&quot;admin&quot;</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">)</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nb">print</span><span class="p">(</span><span class="n">recovery_key</span><span class="p">)</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="c1"># Save it somewhere safe!</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="c1"># Optional: clear from memory after copying</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="n">doc</span><span class="o">.</span><span class="n">consume_recovery_key</span><span class="p">()</span>
+</code></pre></div>
+<p>The editor automatically shows a recovery key dialog with a "I have saved this key" confirmation gate.</p>
+<h3 id="generating-a-new-recovery-key">Generating a new recovery key<a class="headerlink" href="#generating-a-new-recovery-key" title="Permanent link">&para;</a></h3>
+<p>You cannot generate a new recovery key for an existing protected document — it's tied to the content key. If you want a fresh recovery key:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">doc</span> <span class="o">=</span> <span class="n">edof</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;secret.edof&quot;</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="s2">&quot;admin_pwd&quot;</span><span class="p">)</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">clear_all_protection</span><span class="p">()</span>                 <span class="c1"># back to plain</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="n">new_recovery</span> <span class="o">=</span> <span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="s2">&quot;admin&quot;</span><span class="p">,</span> <span class="s2">&quot;admin_pwd&quot;</span><span class="p">)</span>  <span class="c1"># re-protect, new RK</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">doc</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="s2">&quot;secret.edof&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>This rotates everything — content key, all slots, recovery key.</p>
+<hr />
+<h2 id="cryptographic-details">Cryptographic details<a class="headerlink" href="#cryptographic-details" title="Permanent link">&para;</a></h2>
+<p>For curious readers / security reviewers:</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Specification</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Symmetric cipher</td>
+<td>AES-256-GCM</td>
+</tr>
+<tr>
+<td>Key size</td>
+<td>256 bits</td>
+</tr>
+<tr>
+<td>Nonce size</td>
+<td>96 bits (12 bytes), random per ciphertext</td>
+</tr>
+<tr>
+<td>Auth tag size</td>
+<td>128 bits (16 bytes)</td>
+</tr>
+<tr>
+<td>KDF</td>
+<td>PBKDF2-HMAC-SHA256</td>
+</tr>
+<tr>
+<td>KDF iterations</td>
+<td>600,000</td>
+</tr>
+<tr>
+<td>Salt size</td>
+<td>128 bits (16 bytes), random per slot</td>
+</tr>
+<tr>
+<td>Random source</td>
+<td>Python's <code>secrets.token_bytes()</code> (CSPRNG)</td>
+</tr>
+<tr>
+<td>Recovery key alphabet</td>
+<td>32 chars: <code>ABCDEFGHJKLMNPQRSTUVWXYZ23456789</code> (excludes I, O, 0, 1)</td>
+</tr>
+<tr>
+<td>Recovery key length</td>
+<td>24 alphanumeric (~120 bits entropy)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="slot-structure">Slot structure<a class="headerlink" href="#slot-structure" title="Permanent link">&para;</a></h3>
+<p>Each password slot in the manifest is a JSON object:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="p">{</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">&quot;permission&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;edit&quot;</span><span class="p">,</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">  </span><span class="nt">&quot;kdf&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;pbkdf2-sha256&quot;</span><span class="p">,</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">  </span><span class="nt">&quot;iterations&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">600000</span><span class="p">,</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">  </span><span class="nt">&quot;salt&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;base64, 16 bytes&gt;&quot;</span><span class="p">,</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">  </span><span class="nt">&quot;wrapped_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;base64 — AES-GCM encryption of content key with derived slot key&gt;&quot;</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="p">}</span>
+</code></pre></div>
+<p>When unlocking, edof iterates over slots, derives the slot key from the password using the slot's salt, attempts to decrypt the wrapped content key, and uses the GCM auth tag to verify the password is correct (no false positives).</p>
+<h3 id="content-key-wrapping">Content key wrapping<a class="headerlink" href="#content-key-wrapping" title="Permanent link">&para;</a></h3>
+<p>A single 32-byte content key encrypts the actual document. Each password slot wraps a <strong>copy</strong> of the same content key — so the bulk content is encrypted only once. Changing one password rewraps just that slot, not the entire payload.</p>
+<h3 id="authenticated-encryption">Authenticated encryption<a class="headerlink" href="#authenticated-encryption" title="Permanent link">&para;</a></h3>
+<p>GCM provides authenticated encryption: any tampering with the ciphertext (even a single bit flip) makes decryption fail. So:
+- Modifying the encrypted document outside the library → unrecoverable
+- Truncating the file → fails to decrypt
+- Replacing one slot with another → that slot's password no longer works</p>
+<hr />
+<h2 id="what-encryption-protects-against">What encryption protects against<a class="headerlink" href="#what-encryption-protects-against" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Reading content without a password.</strong> Without a matching password (or the recovery key), the encrypted payload is just random bytes.</li>
+<li><strong>Tampering.</strong> GCM auth tag detects any modification of the ciphertext.</li>
+<li><strong>Brute-forcing weak passwords.</strong> PBKDF2 with 600,000 iterations is intentionally slow (~0.5s per password attempt on modern hardware), which makes offline brute-force expensive for short passwords. For longer passwords (12+ characters with mixed types), brute force is infeasible.</li>
+</ul>
+<h2 id="what-encryption-does-not-protect-against">What encryption does NOT protect against<a class="headerlink" href="#what-encryption-does-not-protect-against" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>A user with the password running their own decryption code.</strong> They have the password — they can do whatever they want with the content.</li>
+<li><strong>Side-channel attacks on the host.</strong> Memory dumps, keyloggers, screen recording while you have the document open — outside the library's threat model.</li>
+<li><strong>Loss of all passwords AND the recovery key.</strong> No backdoor. The document is unrecoverable.</li>
+<li><strong>A malicious build of edof.</strong> Verify the source if security is critical.</li>
+</ul>
+<hr />
+<h2 id="editor-integration">Editor integration<a class="headerlink" href="#editor-integration" title="Permanent link">&para;</a></h2>
+<p>The PyQt6 editor (<code>edof-editor</code>) provides a UI for all encryption operations:</p>
+<ul>
+<li><strong>File → Open</strong>: detects encrypted files, prompts for password / recovery key, three-strikes-and-out</li>
+<li><strong>Document → Unlock for editing… (Ctrl+Shift+L)</strong>: prompts for password, shows what the granted level can / cannot do</li>
+<li><strong>Document → Protection…</strong>: full management dialog — set/change/remove passwords, switch full ↔ partial mode, clear all protection</li>
+<li><strong>Document → Re-lock</strong>: forgets the cached content key (paranoid mode)</li>
+<li><strong>Status bar</strong>: shows current state — 🔓 Plain / 🔒 Locked / 🔓 Unlocked: \&lt;level&gt;</li>
+<li><strong>Permission-aware action gating</strong>: actions you can't take are disabled or show clear "needs <em>level</em> password" dialogs</li>
+<li><strong>Recovery key dialog</strong>: monospace font, "Copy to clipboard" button, "I have saved this key" gate before close</li>
+</ul>
+<p>When opening a legacy EDOF 2 archive that had an XOR password, the editor offers to set up real AES-256 encryption.</p>
+<hr />
+<h2 id="api-summary">API summary<a class="headerlink" href="#api-summary" title="Permanent link">&para;</a></h2>
+<h3 id="on-the-document">On the document<a class="headerlink" href="#on-the-document" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Setup</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">doc</span><span class="o">.</span><span class="n">set_password</span><span class="p">(</span><span class="n">level</span><span class="p">,</span> <span class="n">password</span><span class="p">)</span> <span class="err">→</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>    <span class="c1"># returns recovery key on first call</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="n">doc</span><span class="o">.</span><span class="n">change_password</span><span class="p">(</span><span class="n">level</span><span class="p">,</span> <span class="n">old_pwd</span><span class="p">,</span> <span class="n">new_pwd</span><span class="p">)</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="n">doc</span><span class="o">.</span><span class="n">remove_password</span><span class="p">(</span><span class="n">level</span><span class="p">)</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="n">doc</span><span class="o">.</span><span class="n">clear_all_protection</span><span class="p">()</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="c1"># State</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="n">doc</span><span class="o">.</span><span class="n">encryption_mode</span>                                <span class="c1"># &quot;none&quot; | &quot;partial&quot; | &quot;full&quot;</span>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="n">doc</span><span class="o">.</span><span class="n">is_encrypted</span>                                   <span class="c1"># bool</span>
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="n">doc</span><span class="o">.</span><span class="n">is_locked</span>                                      <span class="c1"># bool — encrypted but not unlocked</span>
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="n">doc</span><span class="o">.</span><span class="n">permission_level</span>                               <span class="c1"># Permission enum</span>
+<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="n">doc</span><span class="o">.</span><span class="n">password_levels</span>                                <span class="c1"># list of level names with passwords set</span>
+<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="n">doc</span><span class="o">.</span><span class="n">recovery_key</span>                                   <span class="c1"># str | None (pending, returned once)</span>
+<a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a><span class="n">doc</span><span class="o">.</span><span class="n">consume_recovery_key</span><span class="p">()</span>                         <span class="c1"># str | None — clear pending RK</span>
+<a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a>
+<a id="__codelineno-18-16" name="__codelineno-18-16" href="#__codelineno-18-16"></a><span class="c1"># Unlock / lock</span>
+<a id="__codelineno-18-17" name="__codelineno-18-17" href="#__codelineno-18-17"></a><span class="n">doc</span><span class="o">.</span><span class="n">unlock</span><span class="p">(</span><span class="n">password</span><span class="o">=...</span><span class="p">,</span> <span class="n">recovery_key</span><span class="o">=...</span><span class="p">)</span>         <span class="c1"># → Permission</span>
+<a id="__codelineno-18-18" name="__codelineno-18-18" href="#__codelineno-18-18"></a><span class="n">doc</span><span class="o">.</span><span class="n">lock</span><span class="p">()</span>                                         <span class="c1"># forget content key</span>
+<a id="__codelineno-18-19" name="__codelineno-18-19" href="#__codelineno-18-19"></a>
+<a id="__codelineno-18-20" name="__codelineno-18-20" href="#__codelineno-18-20"></a><span class="c1"># Permission checks</span>
+<a id="__codelineno-18-21" name="__codelineno-18-21" href="#__codelineno-18-21"></a><span class="n">doc</span><span class="o">.</span><span class="n">can</span><span class="p">(</span><span class="n">level</span><span class="p">)</span> <span class="err">→</span> <span class="nb">bool</span>
+<a id="__codelineno-18-22" name="__codelineno-18-22" href="#__codelineno-18-22"></a><span class="n">doc</span><span class="o">.</span><span class="n">require</span><span class="p">(</span><span class="n">level</span><span class="p">)</span>                                 <span class="c1"># raises if denied</span>
+</code></pre></div>
+<h3 id="on-objects">On objects<a class="headerlink" href="#on-objects" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="n">obj</span><span class="o">.</span><span class="n">lock_level</span> <span class="o">=</span> <span class="s2">&quot;design&quot;</span>      <span class="c1"># str: &quot;&quot; | &quot;fill&quot; | &quot;edit&quot; | &quot;design&quot; | &quot;admin&quot;</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">obj</span><span class="o">.</span><span class="n">lock_text</span> <span class="o">=</span> <span class="kc">True</span>           <span class="c1"># bool</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="n">obj</span><span class="o">.</span><span class="n">can_modify</span><span class="p">(</span><span class="n">doc</span><span class="p">)</span> <span class="err">→</span> <span class="nb">bool</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="n">obj</span><span class="o">.</span><span class="n">can_modify_text</span><span class="p">(</span><span class="n">doc</span><span class="p">)</span> <span class="err">→</span> <span class="nb">bool</span>
+</code></pre></div>
+<h3 id="loading">Loading<a class="headerlink" href="#loading" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="n">edof</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">,</span> <span class="n">recovery_key</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="module-imports">Module imports<a class="headerlink" href="#module-imports" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">edof.crypto</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>    <span class="n">Permission</span><span class="p">,</span> <span class="n">VIEW</span><span class="p">,</span> <span class="n">FILL</span><span class="p">,</span> <span class="n">EDIT</span><span class="p">,</span> <span class="n">DESIGN</span><span class="p">,</span> <span class="n">ADMIN</span><span class="p">,</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>    <span class="n">EdofPasswordRequired</span><span class="p">,</span> <span class="n">EdofWrongPassword</span><span class="p">,</span> <span class="n">EdofCryptoError</span><span class="p">,</span> <span class="n">EdofCryptoUnavailable</span><span class="p">,</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>    <span class="n">HAS_CRYPTO</span><span class="p">,</span>                          <span class="c1"># bool — whether cryptography lib is available</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>    <span class="n">generate_recovery_key</span><span class="p">,</span>                <span class="c1"># generate a key without using it</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>    <span class="n">normalize_recovery_key</span><span class="p">,</span>               <span class="c1"># strip dashes / case</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>    <span class="n">describe_permission</span><span class="p">,</span>                  <span class="c1"># → dict with &quot;label&quot;, &quot;allowed&quot;, &quot;denied&quot;</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="p">)</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      © 2025 DavidSchobl — MIT License
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "navigation.tracking", "content.code.copy", "search.suggest", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
