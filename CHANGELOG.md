@@ -1,3 +1,156 @@
+## [4.3.0.4] - 2026-06-11
+
+Dragging large objects: parts hanging off the page no longer vanish, and the
+first drag frame of a huge image with a pattern halftone is bounded instead
+of stalling the editor.
+
+### Fixed
+- **Overhanging part of a large object vanished during drag.** The drag
+  cache rendered the active object into a PAGE-sized buffer, so anything
+  hanging off the page (e.g. an image enlarged beyond the canvas) was
+  cropped away the moment the drag started and stayed missing for the whole
+  gesture. The active object now renders into an ISOLATED buffer sized to
+  the object itself (rotation-aware bounds plus the same effects margin the
+  effects pipeline uses), independent of the page -- the full object is in
+  the cache and every overhang stays visible while dragging. Verified: an
+  image spanning -20..120 mm on a 100 mm page keeps its exact edges through
+  left/right drags (letterbox fit accounted for); groups shift recursively;
+  the document object is never mutated (renders use shifted shallow copies).
+
+### Changed
+- **Bounded first-frame cost for heavy drag previews.** Two budgets in the
+  interactive (pixelated) drag path: (1) a 600k-pixel cap on the isolated
+  buffer -- huge objects render the preview at a reduced internal dpi; and
+  (2) when that cap kicks in, the halftone CELL SIZE is scaled by the same
+  factor for the preview render only -- the cell loop dominates pattern
+  halftones and its count depends on the physical cell size, not pixels, so
+  the pixel cap alone could not bound it. Measured on a 4000x3000 image
+  scaled past the canvas with a pattern halftone: first drag frame 2.96 s ->
+  1.56 s, subsequent moves ~32 ms (~30 fps), and the cost stays ~1.7 s even
+  at dpi 400 where it previously grew without bound. The release render and
+  the non-interactive active path are exact (24 MP safety cap only); the
+  document's effect values are untouched.
+
+### Validation
+- Suite 179 passed / 3 skipped; the 4.3.0.3 negative-position matrix passes;
+  drag-edge checks pass with letterbox-corrected expectations; preview
+  coarsening leaves the document's ht_dot unchanged. FORMAT_PATCH 19 and GPU
+  paths untouched.
+## [4.3.0.3] - 2026-06-11
+
+Objects can now go off-canvas in EVERY direction (up/left included), and the
+halftone pattern click path no longer uses the native-crash-prone style hook.
+
+### Fixed
+- **Off-canvas up/left: the image snapped back inside.** Nine compositing
+  sites across the renderer clamped paste positions with max(0, ...) because
+  PIL's alpha_composite rejects negative destinations -- so an object dragged
+  over the TOP or LEFT page edge had its bounding box outside but its IMAGE
+  silently shifted back inside the page (right/down were unaffected since
+  positive overflow clips naturally). Every site now routes through the
+  crop-then-composite helper: images (rotated and plain), text boxes, shapes,
+  ellipses, lines, QR codes, sub-documents, the rotated-buffer paths, the
+  normal-blend branch of the blend dispatcher, and the active-object drag
+  cache. Verified with an 8-case matrix (rect / ellipse / image / shape with
+  effects x rotation 0 / 30, moved to negative coordinates): all clip exactly
+  at the page edge with the correct visible area, including the
+  render_page_active drag path.
+- **Halftone pattern click crash (native).** The library submenu attached a
+  Python QProxyStyle subclass to enlarge menu icons -- a known native crash
+  on Windows (the style is invoked during menu paint after the Python wrapper
+  side is torn down), which survived all Python-level guards because it
+  segfaults below them. The proxy style is gone; icons are sized with a
+  plain stylesheet (harmless where unsupported). The remaining pattern
+  handlers (_on_pmode, _refresh_thumbs) are now also guarded, so no
+  exception can escape a Qt slot anywhere in the pattern UI.
+
+### Validation
+- Suite 179 passed / 3 skipped; negative-position matrix passes for all
+  object types and rotations; 120-combo long-shadow smoke passes; halftone
+  dialog stress (real menu exec, library with a valid entry + 3 MB corrupted
+  entry + junk, mode switching, repeated clicks) passes and the library
+  self-heals to valid entries only. FORMAT_PATCH 19 and GPU paths untouched.
+## [4.3.0.2] - 2026-06-11
+
+Off-canvas editing now follows the Photoshop model, and the halftone pattern
+button is crash-proof (with the root cause -- oversized registry values --
+eliminated at the source).
+
+### Changed
+- **Photoshop canvas model for off-canvas objects.** The 4.3.0.1 apron
+  (which painted overhanging object content on the workspace) is reverted:
+  the page clips content at its boundary exactly like a Photoshop canvas.
+  Instead, the SCENE now extends well beyond the page as navigable workspace
+  (max(50% of the page, 200 px) on every side): objects can be dragged
+  completely off-canvas, their selection outline and handles stay visible
+  and grabbable out there, the view scrolls over them, and clicking an
+  off-canvas object selects it. Verified with synthetic mouse-event tests:
+  a drag from x = 40 mm ends at x = 165 mm on a 100 mm page, and a click on
+  a fully off-canvas object selects it.
+
+### Fixed
+- **Halftone pattern button crash (root cause + defense in depth).**
+  Pattern images were stored as FULL-RESOLUTION base64 PNG both in the
+  effect and in the QSettings pattern library -- a photo pattern produced
+  multi-megabyte strings, and the Windows registry corrupts values that
+  large, which is what actually blew up the next click on the button.
+  Fixes: (1) patterns are downscaled to max 512 px on load (halftone cells
+  are mm-sized; this is far beyond what the stamp can use) and saved as
+  optimized PNG; (2) the library reader and writer enforce a 400 KB per-entry
+  cap, so an already-corrupted library SELF-HEALS on first read; (3) the
+  library menu only builds actions for entries whose thumbnail actually
+  decodes; (4) the whole pattern click path (menu, load, set) is wrapped in
+  guarded handlers with logging -- in PyQt6 an exception escaping a slot
+  aborts the application, so nothing is allowed to escape; (5) the menu is
+  released after use instead of accumulating on the dialog. Stress-tested
+  with a 3 MB corrupted registry value: two clicks, no crash, library heals
+  to empty.
+- **Pattern slot label.** The single-image slot is labelled "1" instead of
+  the barely readable "all".
+
+### Validation
+- Suite 179 passed / 3 skipped; synthetic-event drag and off-canvas
+  selection tests pass; halftone dialog stress test passes (real menu exec,
+  corrupted settings). FORMAT_PATCH 19 and GPU paths untouched.
+## [4.3.0.1] - 2026-06-11
+
+Three bug fixes: objects dragged over the page edge stay visible, text
+auto-fill actually fills large boxes, and the halftone pattern button no
+longer crashes after a settings round-trip.
+
+### Fixed
+- **Dragging over the page edge.** Objects moved past the page boundary were
+  clipped at the page pixmap edge, so they looked stuck at the canvas border.
+  The editor canvas now renders an APRON strip around the page (15% of the
+  larger page dimension, 8-30 mm): overhanging objects stay visible on the
+  workspace, held by their full bounding box (rotation-aware). The page area
+  itself is byte-identical to the plain render (in-page z-order, caching and
+  effects untouched; only the apron frame is composited from a separate
+  enlarged render of the overhanging objects); page (0,0) stays at scene
+  (0,0), so hit-testing, snapping and overlays are unaffected.
+- **Text auto-fill stopping short.** Auto-fill respected the silent legacy
+  default cap of max_font_size = 70.555 mm (200 pt), so any box taller than
+  ~95 mm stopped filling ("zastavi se a uz nevyplnuje"). The untouched
+  default is now treated as "no limit" for auto_fill -- the text grows to
+  fill the container -- while an explicitly set cap is still respected
+  strictly. Fixed in both render paths (plain text and styled runs);
+  verified: 120 mm box now fills to 89 mm, 200 mm to 148 mm, an explicit
+  30 mm cap still yields 29.8 mm.
+- **Halftone pattern button crash.** QSettings round-trips a ONE-element
+  string list as a plain string (Windows registry and ini both do this).
+  The pattern library reader then iterated the base64 string character by
+  character and the library menu tried to build tens of thousands of
+  actions from single characters -- hang / crash on the next click. This is
+  why it only happened on a machine with exactly one pattern in the
+  library. The reader re-wraps a bare string into a list and filters
+  fragments; the writer guards the same way.
+
+### Validation
+- Suite 179 passed / 3 skipped; headless editor canvas cycle verified (the
+  apron pixmap lands at the negative scene offset with page (0,0) fixed);
+  apron render verified with overhanging text and shapes on both sides;
+  auto-fill measured before/after; pattern-library reader exercised with a
+  bare-string settings value. GPU paths and FORMAT_PATCH 19 untouched.
 ## [4.3.0] - 2026-06-11
 
 PyPI release. Highlights of the 4.2.11.x series rolled into this version:

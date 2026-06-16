@@ -279,8 +279,12 @@ def find_fitting_size(text: str, max_w_px: int, max_h_px: int,
         container_h_mm = max_h_px * 25.4 / dpi if dpi else 100.0
         container_w_mm = max_w_px * 25.4 / dpi if dpi else 100.0
         container_cap = max(container_h_mm, container_w_mm) * 1.5
-        if style.max_font_size >= 9999:
-            # "∞ no limit" → grow until the container is full
+        if style.max_font_size >= 9999 or abs(style.max_font_size - 70.555) < 1e-6:
+            # "∞ no limit" → grow until the container is full.
+            # v4.3.0.1: the untouched legacy DEFAULT (70.555 mm = 200 pt) is
+            # treated the same way — auto_fill means "fill the box", and the
+            # silent default cap made it stop short in any box taller than
+            # ~95 mm. An explicitly set different cap is still respected.
             hi = min(container_cap, 1000.0)
         else:
             # Explicit cap → respect it (clamp to font-loader hard limit)
@@ -524,7 +528,9 @@ def find_fitting_scale(runs, parent_style, max_w_px: int, max_h_px: int,
         #   2. Explicit user cap                   → respect it
         #   3. Default 70.555 mm                    → respect it (legacy)
         # Hard absolute cap at 1000 mm so font rasterisation always succeeds.
-        if parent_style.max_font_size >= 9999:
+        if (parent_style.max_font_size >= 9999
+                or abs(parent_style.max_font_size - 70.555) < 1e-6):
+            # v4.3.0.1: untouched legacy default = no cap (see find_fitting_size)
             hi_mm = min(container_cap_mm, 1000.0)
         else:
             hi_mm = min(float(parent_style.max_font_size), 1000.0)

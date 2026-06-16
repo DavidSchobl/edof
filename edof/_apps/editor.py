@@ -3,6 +3,7 @@
 EDOF Editor – PyQt6
 Requires: pip install PyQt6 Pillow edof
 """
+import logging
 import sys, os, math, copy, io as _io, json, threading
 
 try:
@@ -744,12 +745,23 @@ def tcur(name, fallback=Qt.CursorShape.ArrowCursor):
 _UICON_CACHE = {}
 
 def _ht_file_to_b64(path):
-    """Load an image file and return it as a base64 PNG string (or None)."""
+    """Load an image file and return it as a base64 PNG string (or None).
+
+    v4.3.0.2: the image is downscaled to max 512 px on the longer side.
+    Halftone cells are millimetre-sized, so 512 px is far beyond what the
+    stamp can ever use -- while a full-resolution photo produced multi-MB
+    base64 strings that went straight into QSettings (the Windows registry
+    chokes on values that large, corrupting the pattern library and crashing
+    the next click on the pattern button)."""
     import base64, io
     from PIL import Image as _Img
     try:
         im = _Img.open(path).convert("RGBA")
-        buf = io.BytesIO(); im.save(buf, 'PNG')
+        if max(im.size) > 512:
+            r = 512.0 / max(im.size)
+            im = im.resize((max(1, int(im.width * r)), max(1, int(im.height * r))),
+                           _Img.LANCZOS)
+        buf = io.BytesIO(); im.save(buf, 'PNG', optimize=True)
         return base64.b64encode(buf.getvalue()).decode()
     except Exception:
         return None
@@ -771,30 +783,19 @@ def _ht_b64_pixmap(b64, size=30):
     return None
 
 
-def _menu_icon_style(menu, px):
-    """Enlarge QMenu action icons. QMenu has no setIconSize in Qt6, so we attach
-    a QProxyStyle overriding PM_SmallIconSize. The no-arg QProxyStyle wraps the
-    application default style WITHOUT taking ownership (passing a concrete style
-    would transfer ownership of the shared app style and crash on teardown). The
-    style is parented to the menu so its lifetime is tied to it; setStyle does
-    not take ownership."""
-    from PyQt6.QtWidgets import QProxyStyle, QStyle
-
-    class _IconStyle(QProxyStyle):
-        def pixelMetric(self, metric, option=None, widget=None):
-            if metric == QStyle.PixelMetric.PM_SmallIconSize:
-                return px
-            return super().pixelMetric(metric, option, widget)
-
-    st = _IconStyle()
-    st.setParent(menu)
-    return st
-
-
 def _ht_lib_get():
     from PyQt6.QtCore import QSettings
     v = QSettings("EDOF", "editor").value("halftone/pattern_library", [])
-    return [x for x in (v or []) if isinstance(x, str) and x]
+    # QSettings round-trips a ONE-element string list as a plain str (Windows
+    # registry / ini both do this); iterating it then yields single characters
+    # and the library menu tries to build tens of thousands of actions from a
+    # base64 string -> hang / crash on the next click. Re-wrap it.
+    if isinstance(v, str):
+        v = [v]
+    # size cap: legacy full-resolution entries (and registry-truncated junk)
+    # are dropped here, so a corrupted library self-heals on first read.
+    return [x for x in (v or [])
+            if isinstance(x, str) and 16 < len(x) <= 400_000]
 
 
 def _ht_lib_add(b64):
@@ -802,7 +803,13 @@ def _ht_lib_add(b64):
     if not b64:
         return
     s = QSettings("EDOF", "editor")
-    lst = [x for x in (s.value("halftone/pattern_library", []) or []) if isinstance(x, str) and x]
+    if not isinstance(b64, str) or len(b64) > 400_000:
+        return
+    _v = s.value("halftone/pattern_library", [])
+    if isinstance(_v, str):
+        _v = [_v]
+    lst = [x for x in (_v or [])
+           if isinstance(x, str) and 16 < len(x) <= 400_000]
     if b64 in lst:
         lst.remove(b64)
     lst.insert(0, b64)
@@ -1392,7 +1399,7 @@ class EdofCanvas(QGraphicsView):
         try:
             cached = self._page_px_cache.get(page_idx)
             if cached is not None:
-                cpx, cscale = cached if isinstance(cached, tuple) else (cached, 1.0)
+                cpx, cscale = (cached[0], cached[1]) if isinstance(cached, tuple) else (cached, 1.0)
                 self._apply_page_pixmap(cpx, cscale)
         except Exception: pass
         self._start_render(); self.objectSelected.emit(None)
@@ -1422,7 +1429,7 @@ class EdofCanvas(QGraphicsView):
         cached = self._page_px_cache.get(idx)
         if cached is not None:
             try:
-                cpx, cscale = cached if isinstance(cached, tuple) else (cached, 1.0)
+                cpx, cscale = (cached[0], cached[1]) if isinstance(cached, tuple) else (cached, 1.0)
                 self._apply_page_pixmap(cpx, cscale)
             except Exception: pass
         self._start_render(); self.objectSelected.emit(None)
@@ -1778,12 +1785,21 @@ class EdofCanvas(QGraphicsView):
         """Place a rendered page pixmap so it occupies the base-DPI scene rect.
         When the page was rendered at a higher DPI (crisp zoom-in), scale < 1
         maps the high-res pixmap back onto the base-DPI scene so overlays and
-        hit-testing stay in base-DPI coordinates."""
+        hit-testing stay in base-DPI coordinates.
+
+        v4.3.0.2: Photoshop canvas model. The page pixmap clips everything at
+        the page boundary (content outside the canvas is NOT rendered), but
+        the SCENE extends well beyond the page as navigable workspace: objects
+        can be dragged completely off-canvas, their selection outline and
+        handles stay visible and grabbable out there, and the view can scroll
+        over them. Page (0,0) stays scene (0,0)."""
         self._page_item.setPixmap(px)
         try: self._page_item.setScale(scale)
         except Exception: pass
         self._page_item.setPos(0, 0)
-        self.scene().setSceneRect(QRectF(0, 0, px.width() * scale, px.height() * scale))
+        pw = px.width() * scale; ph = px.height() * scale
+        m = max(0.5 * max(pw, ph), 200.0)
+        self.scene().setSceneRect(QRectF(-m, -m, pw + 2 * m, ph + 2 * m))
 
     def _on_render_done(self, data: bytes, rid: int):
         info = self._rid_info.pop(rid, None)
@@ -10439,13 +10455,14 @@ class PropPanel(QWidget):
                 return 0 if md == 'shape' else (1 if md == 'single' else len(_chan_names()))
 
             def _refresh_thumbs():
+              try:
                 md = cb_pmode.currentData(); names = _chan_names(); pats = _pats()
                 ns = _nslots()
                 pat_strip.setVisible(md != 'shape')
                 for i, b in enumerate(_thumb_btns):
                     if i < ns:
                         b.setVisible(True)
-                        lab = "all" if md == 'single' else (names[i] if i < len(names) else str(i + 1))
+                        lab = "1" if md == 'single' else (names[i] if i < len(names) else str(i + 1))
                         b.setToolTip(f"{lab} pattern — click to load / library / clear")
                         b64 = pats[i] if i < len(pats) else ""
                         pm = _ht_b64_pixmap(b64, 28) if b64 else None
@@ -10457,8 +10474,11 @@ class PropPanel(QWidget):
                             b.setIcon(QIcon()); b.setText(lab)
                     else:
                         b.setVisible(False)
+              except Exception:
+                logging.getLogger(__name__).exception("halftone pattern thumbs")
 
             def _set_pat(idx, b64):
+              try:
                 md = cb_pmode.currentData()
                 if md == 'single':
                     working[et].ht_patterns = [b64 or ""]
@@ -10471,8 +10491,11 @@ class PropPanel(QWidget):
                 if b64:
                     _ht_lib_add(b64)
                 _refresh_thumbs(); _commit()
+              except Exception:
+                logging.getLogger(__name__).exception("halftone pattern set")
 
             def _on_pmode():
+              try:
                 md = cb_pmode.currentData()
                 cur = _pats()
                 if md == 'shape':
@@ -10490,32 +10513,59 @@ class PropPanel(QWidget):
                         working[et].ht_patterns = cur
                 working[et].ht_pattern_mode = md
                 _refresh_thumbs(); _commit()
+              except Exception:
+                logging.getLogger(__name__).exception("halftone pattern mode")
 
             def _thumb_menu(idx):
-                from PyQt6.QtWidgets import QMenu, QFileDialog
-                from PyQt6.QtGui import QIcon as _QIcon
-                m = QMenu(dlg)
-                def _load():
-                    f, _f = QFileDialog.getOpenFileName(
-                        dlg, "Choose pattern image", "",
-                        "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)")
-                    if f:
-                        b64 = _ht_file_to_b64(f)
-                        if b64:
-                            _set_pat(idx, b64)
-                m.addAction("Load image…", _load)
-                lib = _ht_lib_get()
-                if lib:
-                    sub = m.addMenu("From library"); sub.setStyle(_menu_icon_style(sub, 28))
-                    for b64 in lib:
-                        pm = _ht_b64_pixmap(b64, 28); act = sub.addAction("")
-                        if pm is not None:
+                # v4.3.0.2: fully guarded -- an exception escaping a Qt slot
+                # aborts the whole application in PyQt6, and this path touches
+                # QSettings data that can be corrupted by external factors.
+                try:
+                    from PyQt6.QtWidgets import QMenu, QFileDialog
+                    from PyQt6.QtGui import QIcon as _QIcon
+                    m = QMenu(dlg)
+                    def _load():
+                        try:
+                            f, _f = QFileDialog.getOpenFileName(
+                                dlg, "Choose pattern image", "",
+                                "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)")
+                            if f:
+                                b64 = _ht_file_to_b64(f)
+                                if b64:
+                                    _set_pat(idx, b64)
+                        except Exception:
+                            logging.getLogger(__name__).exception("halftone pattern load")
+                    m.addAction("Load image…", _load)
+                    lib = _ht_lib_get()
+                    if lib:
+                        sub = m.addMenu("From library")
+                        # v4.3.0.3: NO QProxyStyle here. A Python QProxyStyle
+                        # subclass attached to a popup menu is a known native
+                        # crash on Windows (style invoked during paint after
+                        # the wrapper is gone). The stylesheet is harmless
+                        # everywhere and enlarges the icons where supported.
+                        sub.setStyleSheet("QMenu::icon{width:28px;height:28px;}")
+                        added = 0
+                        for b64 in lib:
+                            pm = _ht_b64_pixmap(b64, 28)
+                            if pm is None:
+                                continue          # undecodable entry: skip, never act on it
+                            act = sub.addAction("")
                             act.setIcon(_QIcon(pm))
-                        act.triggered.connect(lambda _=False, bb=b64: _set_pat(idx, bb))
-                cur = _pats()
-                if idx < len(cur) and cur[idx]:
-                    m.addAction("Clear", lambda: _set_pat(idx, ""))
-                m.exec(_thumb_btns[idx].mapToGlobal(_thumb_btns[idx].rect().bottomLeft()))
+                            act.triggered.connect(
+                                lambda _=False, bb=b64: _set_pat(idx, bb))
+                            added += 1
+                            if added >= 24:
+                                break
+                        if added == 0:
+                            sub.menuAction().setVisible(False)
+                    cur = _pats()
+                    if idx < len(cur) and cur[idx]:
+                        m.addAction("Clear", lambda: _set_pat(idx, ""))
+                    m.exec(_thumb_btns[idx].mapToGlobal(_thumb_btns[idx].rect().bottomLeft()))
+                    m.deleteLater()
+                except Exception:
+                    logging.getLogger(__name__).exception("halftone pattern menu")
 
             for i, b in enumerate(_thumb_btns):
                 b.clicked.connect(lambda _=False, ix=i: _thumb_menu(ix))

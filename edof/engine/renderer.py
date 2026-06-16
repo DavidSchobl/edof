@@ -7,7 +7,7 @@ import hashlib as _hashlib
 import collections as _collections
 from PIL import Image, ImageDraw, ImageChops
 from edof.engine.color import convert_image
-from edof.engine.transform import mm_to_px
+from edof.engine.transform import mm_to_px, px_to_mm
 from edof.engine.text_engine import render_text_onto, render_runs_onto, find_fitting_scale
 from edof.format.objects import (EdofObject, TextBox, ImageBox, Shape,
                                   QRCode, Group, Table, SubDocumentBox, SvgBox,
@@ -175,7 +175,11 @@ def _apply_blend(canvas, layer, pos, blend_mode):
     if blend_mode and blend_mode != "normal":
         _composite_with_blend(canvas, layer, pos, blend_mode)
     else:
-        canvas.alpha_composite(layer, pos)
+        # v4.3.0.3: tolerate negative paste positions (object dragged over the
+        # top/left page edge) -- plain alpha_composite would raise, and the
+        # historical max(0, ...) clamp silently shifted the object back inside
+        # the page ("the image stays inside while the bounding box is out").
+        _alpha_composite_clipped(canvas, layer, pos[0], pos[1])
 
 
 # ── Dispatcher ───────────────────────────────────────────────────────────────
@@ -227,6 +231,111 @@ def _obj_sig_no_translation(obj, variables, dpi, size, res_fp):
         return None
 
 
+def _active_obj_margin_mm(obj, dpi):
+    """Effects margin (mm) for the isolated active-object buffer; mirrors the
+    margin heuristic of the effects render path."""
+    m_px = 20.0
+    for e in (getattr(obj, 'effects', None) or []):
+        if not getattr(e, 'enabled', True):
+            continue
+        em = mm_to_px(float(getattr(e, 'size', 0) or 0), dpi) * 3 \
+             + mm_to_px(abs(float(getattr(e, 'distance', 0) or 0)), dpi)
+        if getattr(e, 'type', '') == 'long_shadow':
+            _bmax = float(getattr(e, 'size', 0) or 0.0)
+            for _s in (getattr(e, 'ls_grad_blurs', []) or []):
+                try:
+                    _bmax = max(_bmax, float(_s[1]))
+                except Exception:
+                    pass
+            em = (mm_to_px(abs(float(getattr(e, 'ls_length', 10.0) or 10.0)), dpi)
+                  + mm_to_px(_bmax, dpi) * 1.3 + 10)
+        m_px = max(m_px, em)
+    return px_to_mm(m_px, dpi) if dpi else 5.0
+
+
+def _render_active_isolated(obj, resources, variables, dpi, max_pixels=None,
+                            preview_coarsen=False):
+    """Render the active object ALONE on a buffer sized to the OBJECT (its
+    rotation-aware bounds plus an effects margin), independent of the page.
+
+    v4.3.0.4: the drag cache used to render into a PAGE-sized buffer, so any
+    part of the object hanging off the page (e.g. an image larger than the
+    canvas) was cropped away the moment the drag started and stayed missing
+    for the whole gesture. The isolated buffer keeps the full object.
+
+    Returns (crop, (px, py), eff_dpi) with the position in page pixels at
+    `dpi`; (None, None, dpi) when nothing rendered. When max_pixels is given
+    and the buffer would exceed it, the object is rendered at a reduced
+    internal dpi and upscaled by the caller's positioning math via eff_dpi --
+    a coarser preview instead of a multi-second stall on huge objects.
+
+    preview_coarsen: when the pixel budget kicks in, additionally scale the
+    halftone cell size by the same factor for THIS render only -- the cell
+    loop is the dominant cost of pattern halftones and its count depends on
+    the physical cell size, not on pixels, so without this a huge object
+    with a pattern screen still stalls the first drag frame. The preview
+    shows coarser dots; the release render is exact.
+    """
+    import copy as _c
+    import math as _m
+    t = obj.transform
+    cx, cy = t.x + t.width / 2.0, t.y + t.height / 2.0
+    a = abs(_m.radians(getattr(t, 'rotation', 0.0) or 0.0))
+    bw = abs(t.width * _m.cos(a)) + abs(t.height * _m.sin(a))
+    bh = abs(t.width * _m.sin(a)) + abs(t.height * _m.cos(a))
+    mm_margin = _active_obj_margin_mm(obj, dpi)
+    x0 = cx - bw / 2.0 - mm_margin
+    y0 = cy - bh / 2.0 - mm_margin
+    w_mm = bw + 2.0 * mm_margin
+    h_mm = bh + 2.0 * mm_margin
+
+    eff_dpi = float(dpi)
+    W = max(1, int(mm_to_px(w_mm, eff_dpi)))
+    H = max(1, int(mm_to_px(h_mm, eff_dpi)))
+    if max_pixels and W * H > max_pixels:
+        eff_dpi *= (float(max_pixels) / (W * H)) ** 0.5
+        eff_dpi = max(24.0, eff_dpi)
+        W = max(1, int(mm_to_px(w_mm, eff_dpi)))
+        H = max(1, int(mm_to_px(h_mm, eff_dpi)))
+
+    def _shifted(o, dx, dy):
+        oc = _c.copy(o)
+        oc.transform = _c.copy(o.transform)
+        oc.transform.x += dx
+        oc.transform.y += dy
+        if getattr(o, 'children', None):
+            oc.children = [_shifted(ch, dx, dy) for ch in o.children]
+        return oc
+
+    work = _shifted(obj, -x0, -y0)
+    coarse = float(dpi) / eff_dpi
+    if preview_coarsen and coarse > 1.05 and getattr(work, 'effects', None):
+        effs = []
+        for e in work.effects:
+            if (getattr(e, 'enabled', True)
+                    and getattr(e, 'type', '') == 'halftone'):
+                ec = _c.copy(e)
+                try:
+                    ec.ht_dot = float(getattr(e, 'ht_dot', 1.0) or 1.0) * coarse
+                except Exception:
+                    pass
+                effs.append(ec)
+            else:
+                effs.append(e)
+        work.effects = effs
+
+    iso = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    _render_object(work, iso, resources, variables, eff_dpi)
+    bbox = iso.getbbox()
+    if bbox is None:
+        return None, None, eff_dpi
+    crop = iso.crop(bbox)
+    sc = float(dpi) / eff_dpi
+    px = int(round(mm_to_px(x0, dpi))) + int(round(bbox[0] * sc))
+    py = int(round(mm_to_px(y0, dpi))) + int(round(bbox[1] * sc))
+    return crop, (px, py), eff_dpi
+
+
 def _composite_active_cached(obj, canvas, resources, variables, dpi, size, res_fp,
                              active_scale=1.0):
     """Composite the active object, reusing its raster across pure moves. Only
@@ -256,20 +365,23 @@ def _composite_active_cached(obj, canvas, resources, variables, dpi, size, res_f
                                              base_pos[0] + (tx - ref_tx),
                                              base_pos[1] + (ty - ref_ty))
                 return
-            iso = Image.new("RGBA", size_l, (0, 0, 0, 0))
-            _render_object(obj, iso, resources, variables, dl)
-            bbox = iso.getbbox()
+            # v4.3.0.4: isolated object-sized buffer (page-size clipped away
+            # any part hanging off the page for the whole drag) + a hard
+            # pixel budget so a huge image with expensive effects degrades to
+            # a coarser preview instead of stalling the first drag frame.
+            crop_l, pos_l, eff = _render_active_isolated(
+                obj, resources, variables, dl, max_pixels=600_000,
+                preview_coarsen=True)
             _ACTIVE_OBJ_CACHE.clear()
-            if bbox is None:
+            if crop_l is None:
                 _ACTIVE_OBJ_CACHE[sig] = (None, (0, 0), tx, ty)
                 return
-            crop_l = iso.crop(bbox)
-            fw = max(1, int(round(crop_l.width / s)))
-            fh = max(1, int(round(crop_l.height / s)))
+            fw = max(1, int(round(crop_l.width * (dl / eff) / s)))
+            fh = max(1, int(round(crop_l.height * (dl / eff) / s)))
             crop = crop_l.resize((fw, fh), Image.NEAREST)   # pixelate the preview
-            pos = (int(round(bbox[0] / s)), int(round(bbox[1] / s)))
+            pos = (int(round(pos_l[0] / s)), int(round(pos_l[1] / s)))
             _ACTIVE_OBJ_CACHE[sig] = (crop, pos, tx, ty)
-            canvas.alpha_composite(crop, pos)
+            _alpha_composite_clipped(canvas, crop, pos[0], pos[1])
             return
         # sig unavailable -> fall through to a normal full-dpi render
 
@@ -288,16 +400,17 @@ def _composite_active_cached(obj, canvas, resources, variables, dpi, size, res_f
                                      base_pos[0] + (tx - ref_tx),
                                      base_pos[1] + (ty - ref_ty))
         return
-    iso = Image.new("RGBA", size, (0, 0, 0, 0))
-    _render_object(obj, iso, resources, variables, dpi)
-    bbox = iso.getbbox()
+    # v4.3.0.4: isolated object-sized buffer (see the low-res branch). At full
+    # dpi there is no pixel budget: this branch runs for non-interactive
+    # active renders where quality matters.
+    crop, pos, _eff = _render_active_isolated(obj, resources, variables, dpi,
+                                              max_pixels=24_000_000)
     _ACTIVE_OBJ_CACHE.clear()   # keep only the current active object
-    if bbox is None:
+    if crop is None:
         _ACTIVE_OBJ_CACHE[sig] = (None, (0, 0), tx, ty)
     else:
-        crop = iso.crop(bbox); pos = (bbox[0], bbox[1])
         _ACTIVE_OBJ_CACHE[sig] = (crop, pos, tx, ty)
-        canvas.alpha_composite(crop, pos)
+        _alpha_composite_clipped(canvas, crop, pos[0], pos[1])
 
 
 def clear_object_cache():
@@ -551,11 +664,11 @@ def _render_svgbox(obj, canvas, dpi):
         cy_px = int(mm_to_px(t.y + t.height/2, dpi))
         paste_x = cx_px - pil_img.width // 2
         paste_y = cy_px - pil_img.height // 2
-        canvas.alpha_composite(pil_img, (max(0, paste_x), max(0, paste_y)))
+        _alpha_composite_clipped(canvas, pil_img, paste_x, paste_y)
     else:
-        canvas.alpha_composite(pil_img,
-            (max(0, int(mm_to_px(t.x, dpi))),
-             max(0, int(mm_to_px(t.y, dpi)))))
+        _alpha_composite_clipped(canvas, pil_img,
+                                 int(mm_to_px(t.x, dpi)),
+                                 int(mm_to_px(t.y, dpi)))
 
 
 def _render_subdocument(obj, canvas, resources, variables, dpi):
@@ -640,9 +753,9 @@ def _render_subdocument(obj, canvas, resources, variables, dpi):
         cy = y_px + h_px // 2
         paste_x = cx - rotated.width // 2
         paste_y = cy - rotated.height // 2
-        canvas.alpha_composite(rotated, (max(0, paste_x), max(0, paste_y)))
+        _alpha_composite_clipped(canvas, rotated, paste_x, paste_y)
     else:
-        canvas.alpha_composite(bbox_buf, (max(0, x_px), max(0, y_px)))
+        _alpha_composite_clipped(canvas, bbox_buf, x_px, y_px)
 
 
 def _blur_L(img, radius_px):
@@ -1980,7 +2093,7 @@ def _composite_with_blend(canvas, layer, pos, blend_mode):
     from PIL import Image
     px, py = pos
     if blend_mode == 'normal' or blend_mode is None:
-        canvas.alpha_composite(layer, (max(0, px), max(0, py)))
+        _alpha_composite_clipped(canvas, layer, px, py)
         return
     # Crop region of canvas
     bw, bh = layer.size
@@ -2197,7 +2310,7 @@ def _render_textbox(obj, canvas, resources, variables, dpi):
         px = int(x_px + w_px/2 - tmp.width/2); py = int(y_px + h_px/2 - tmp.height/2)
     else:
         px, py = int(x_px), int(y_px)
-    _apply_blend(canvas, tmp, (max(0, px), max(0, py)), getattr(obj, "blend_mode", "normal"))
+    _apply_blend(canvas, tmp, (px, py), getattr(obj, "blend_mode", "normal"))
 
 
 # ── ImageBox ─────────────────────────────────────────────────────────────────
@@ -2235,7 +2348,7 @@ def _render_imagebox(obj, canvas, resources, variables, dpi):
         r,g,b,a = src.split()
         a = a.point(lambda v: int(v * obj.opacity))
         src = Image.merge("RGBA", (r, g, b, a))
-    _apply_blend(canvas, src, (max(0, x_px), max(0, y_px)), getattr(obj, "blend_mode", "normal"))
+    _apply_blend(canvas, src, (x_px, y_px), getattr(obj, "blend_mode", "normal"))
 
 
 def _apply_fit(src, w, h, mode):
@@ -2412,7 +2525,7 @@ def _render_shape(obj, canvas, dpi):
             cy_px = int(mm_to_px((ymin + ymax) / 2, dpi))
             paste_x = cx_px - rotated.width // 2
             paste_y = cy_px - rotated.height // 2
-            canvas.alpha_composite(rotated, (max(0, paste_x), max(0, paste_y)))
+            _alpha_composite_clipped(canvas, rotated, paste_x, paste_y)
             return
         # No rotation or flip: draw directly (faster)
         cd = ImageDraw.Draw(canvas, "RGBA")
@@ -2482,7 +2595,7 @@ def _render_shape(obj, canvas, dpi):
             cy_px = int(mm_to_px(t.y + t.height/2, dpi))
             paste_x = cx_px - buf.width // 2
             paste_y = cy_px - buf.height // 2
-            canvas.alpha_composite(buf, (max(0, paste_x), max(0, paste_y)))
+            _alpha_composite_clipped(canvas, buf, paste_x, paste_y)
         else:
             _px = int(mm_to_px(t.x, dpi)) - PAD
             _py = int(mm_to_px(t.y, dpi)) - PAD
@@ -2563,7 +2676,7 @@ def _render_shape(obj, canvas, dpi):
         tmp = Image.merge("RGBA", (r2,g2,b2,a2))
     px = int(x0 + w_px/2 - tmp.width/2) if t.rotation % 360 != 0 else int(x0)
     py = int(y0 + h_px/2 - tmp.height/2) if t.rotation % 360 != 0 else int(y0)
-    _apply_blend(canvas, tmp, (max(0,px), max(0,py)), getattr(obj, "blend_mode", "normal"))
+    _apply_blend(canvas, tmp, (px, py), getattr(obj, "blend_mode", "normal"))
 
 
 # ── QR Code ──────────────────────────────────────────────────────────────────
@@ -2601,7 +2714,7 @@ def _render_qrcode(obj, canvas, variables, dpi):
     if t.rotation % 360 != 0:
         qr_img = qr_img.rotate(-t.rotation, expand=True)
         x_px = int(x_px + w_px/2 - qr_img.width/2); y_px = int(y_px + h_px/2 - qr_img.height/2)
-    _apply_blend(canvas, qr_img, (max(0,x_px), max(0,y_px)), getattr(obj, "blend_mode", "normal"))
+    _apply_blend(canvas, qr_img, (x_px, y_px), getattr(obj, "blend_mode", "normal"))
 
 
 # ── Table ────────────────────────────────────────────────────────────────────
@@ -2720,4 +2833,4 @@ def _render_table(obj, canvas, resources, variables, dpi):
         tw_px = mm_to_px(t.width, dpi); th_px = mm_to_px(t.height, dpi)
         cx = mm_to_px(t.x + t.width/2, dpi); cy = mm_to_px(t.y + t.height/2, dpi)
         px = int(cx - rotated.width / 2); py = int(cy - rotated.height / 2)
-        canvas.alpha_composite(rotated, (max(0, px), max(0, py)))
+        _alpha_composite_clipped(canvas, rotated, px, py)

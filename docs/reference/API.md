@@ -1,6 +1,6 @@
 # API reference
 
-_Generated from `edof` 4.3.0 (format 4.2.19)._
+_Generated from `edof` 4.3.0.4 (format 4.2.19)._
 
 
 This page documents the complete public API exported by `import edof`. It is generated directly from the code with `docs/_gen_api.py`, so the signatures and descriptions match the installed version exactly.
@@ -1865,7 +1865,7 @@ and a fallback font is used instead.
 | Name | Value |
 |------|-------|
 
-| `__version__` | `'4.3.0'` |
+| `__version__` | `'4.3.0.4'` |
 
 | `FORMAT_VERSION_STR` | `'4.2.19'` |
 
