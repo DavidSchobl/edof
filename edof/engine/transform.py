@@ -75,6 +75,11 @@ class Transform:
     rotation: float = 0.0
     flip_h:   bool  = False
     flip_v:   bool  = False
+    # v4.3.5.51: horizontal shear (skew) applied in the object's local space
+    # BEFORE rotation: a local point (px, py) maps to (px + shear_x * py, py).
+    # 0 = no skew. Used so a pre-rotated child deforms in the group/selection's
+    # axes (Photoshop-style) when the group is resized non-uniformly.
+    shear_x:  float = 0.0
 
     # ── Computed geometry ──────────────────────────────────────────────────────
 
@@ -217,13 +222,16 @@ class Transform:
     # ── Serialization ──────────────────────────────────────────────────────────
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "x": self.x, "y": self.y,
             "width": self.width, "height": self.height,
             "rotation": self.rotation,
             "flip_h": self.flip_h,
             "flip_v": self.flip_v,
         }
+        if self.shear_x:
+            d["shear_x"] = self.shear_x      # only emit when non-zero
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Transform":
@@ -235,6 +243,7 @@ class Transform:
             rotation = float(d.get("rotation",  0.0)),
             flip_h   = bool( d.get("flip_h",  False)),
             flip_v   = bool( d.get("flip_v",  False)),
+            shear_x  = float(d.get("shear_x",   0.0)),
         )
 
     def copy(self) -> "Transform":

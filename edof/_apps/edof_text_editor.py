@@ -428,7 +428,8 @@ def _normalize_runs(runs):
                        for attr in ('font_family', 'font_size', 'bold', 'italic',
                                     'underline', 'color', 'background',
                                     'strikethrough', 'line_height', 'letter_spacing',
-                                    'alignment'))
+                                    'alignment', 'rid', 'var_name',
+                                    'link', 'anchor', 'anchor_name'))
             if same:
                 # Mutate the COPY in out, never the input.
                 last.text = (last.text or "") + rt
@@ -534,6 +535,9 @@ class EdofTextEditor(QWidget):
         self._host_redo = None      # callable() -> document-level redo
         self._host_save = None      # callable() -> document-level Save (Ctrl+S)
         self._host_save_as = None   # callable() -> document-level Save As (Ctrl+Shift+S)
+        self._make_var_cb = None    # v4.3.6.1: callable() -> make selection a variable
+        self._read_only = False     # v4.3.6.2: batch-preview lock (no template edits)
+        self._sel_var_rids = None   # v4.3.7.0: variable(s) focused from Objects panel
         self._on_body_edit = None   # callable() -> checkpoint before an edit burst
         # Idle-overflow auto-commit timer (doc body only)
         self._idle_overflow_timer = QTimer(self)
@@ -701,7 +705,13 @@ class EdofTextEditor(QWidget):
             self._cursor = max(0, min(total, int(new_cursor)))
         else:
             self._cursor = max(0, min(total, self._cursor))
-        self._anchor = None
+        # v4.3.7.0: preserve the selection anchor (clamped) instead of dropping
+        # it. A balance pass fires on every render while the body overflows
+        # (which happens as soon as a header/footer shrinks the body box), and
+        # it called this -- wiping any selection the user had just made. Keeping
+        # the anchor (clamped to the new length) lets selection survive the pass.
+        if self._anchor is not None:
+            self._anchor = max(0, min(total, self._anchor))
         self._invalidate()
 
     def cancel(self):
@@ -723,6 +733,42 @@ class EdofTextEditor(QWidget):
 
     def _clear_selection(self):
         self._anchor = None
+
+    def _would_empty_variable(self, pos: int):
+        """v4.3.6.20: return the rid if deleting the character at `pos` would
+        empty a variable span (delete its last remaining character), else None.
+        Used to warn before the last char of a variable is removed."""
+        if pos < 0:
+            return None
+        off = 0
+        target_rid = None
+        for r in self._runs:
+            ln = len(r.text or "")
+            if off <= pos < off + ln:
+                target_rid = getattr(r, "rid", None)
+                break
+            off += ln
+        if not target_rid:
+            return None
+        total = sum(len(r.text or "") for r in self._runs
+                    if getattr(r, "rid", None) == target_rid)
+        return target_rid if total == 1 else None
+
+    def _confirm_empty_variable(self) -> bool:
+        """v4.3.6.20: ask before deleting a variable's last character. Returns
+        True to proceed."""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            r = QMessageBox.question(
+                self, "Delete variable",
+                "This is the last character of a variable.\n\n"
+                "Deleting it removes the variable and every column assigned to "
+                "it. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            return r == QMessageBox.StandardButton.Yes
+        except Exception:
+            return True
 
     def _begin_selection_if_needed(self):
         if self._anchor is None:
@@ -888,6 +934,23 @@ class EdofTextEditor(QWidget):
         # paragraph) overrides so the typed run carries it.
         if self._pending_alignment is not None:
             target_fmt['alignment'] = self._pending_alignment
+        # v4.4.0: typing at the END of a variable / anchor / link span must
+        # NOT extend the span. The span is an entity; new text typed after it
+        # is plain (character formatting continues, the identity does not).
+        # Typing INSIDE the span (or between two runs of the same span) still
+        # belongs to it.
+        _n_txt = len(base.text or "")
+        if off >= _n_txt:
+            _nxt = (self._runs[r_idx + 1]
+                    if r_idx + 1 < len(self._runs) else None)
+            for _k in ("rid", "var_name", "anchor", "anchor_name", "link"):
+                _tv = target_fmt.get(_k)
+                if _tv and (_nxt is None or getattr(_nxt, _k, None) != _tv):
+                    target_fmt[_k] = None
+            if self._pending_format:
+                for _k in ("rid", "var_name", "anchor", "anchor_name", "link"):
+                    if target_fmt.get(_k) is None and _k in self._pending_format:
+                        self._pending_format[_k] = None
         if target_fmt == base_fmt:
             # Insert directly into base run
             base.text = (base.text or "")[:off] + text + (base.text or "")[off:]
@@ -928,6 +991,11 @@ class EdofTextEditor(QWidget):
             'line_height':   getattr(run, 'line_height', None),
             'letter_spacing': getattr(run, 'letter_spacing', None),
             'alignment':     getattr(run, 'alignment', None),
+            'rid':           getattr(run, 'rid', None),
+            'var_name':      getattr(run, 'var_name', None),
+            'link':          getattr(run, 'link', None),
+            'anchor':        getattr(run, 'anchor', None),
+            'anchor_name':   getattr(run, 'anchor_name', None),
         }
 
     def _apply_format_to_selection(self, **attrs):
@@ -1000,6 +1068,11 @@ class EdofTextEditor(QWidget):
             line_height=fmt.get('line_height'),
             letter_spacing=fmt.get('letter_spacing'),
             alignment=fmt.get('alignment'),
+            rid=fmt.get('rid'),
+            var_name=fmt.get('var_name'),
+            link=fmt.get('link'),
+            anchor=fmt.get('anchor'),
+            anchor_name=fmt.get('anchor_name'),
         )
 
     def toggle_bold(self):
@@ -1155,6 +1228,147 @@ class EdofTextEditor(QWidget):
         to clear the highlight."""
         self._apply_format_to_selection(background=rgba)
         self._invalidate()
+
+    # ── v4.3.6.0: variable text (inline batch variable) ──────────────────────
+    def make_variable_from_selection(self, var_name, rid=None):
+        """Turn the current selection into a batch-variable run: every selected
+        run gets the same stable rid and the human var_name. Returns the rid (so
+        the caller can add a batch column targeting run.text on this rid), or
+        None if there's no selection. Reuses the format-to-selection machinery,
+        which splits runs at the selection edges, so a partial-run selection
+        becomes its own run."""
+        if not self._has_selection():
+            return None
+        import uuid as _uuid
+        rid = rid or _uuid.uuid4().hex[:12]
+        self._apply_format_to_selection(rid=rid, var_name=var_name)
+        self._invalidate()
+        return rid
+
+    # ── Hyperlinks (v4.4.1) ───────────────────────────────────────────────────
+
+    def set_link_on_selection(self, link):
+        """Make the selection a hyperlink (external URL, or '#<anchor_id>' for
+        an in-document jump). link=None removes the link from the selection.
+
+        v4.4.0 security: the target is validated against the scheme whitelist
+        (http/https/mailto/#anchor, bare domains get https://). An invalid or
+        empty target creates NO link and returns False; javascript:/file:/...
+        never land on a run."""
+        if not self._has_selection():
+            return False
+        if link is not None:
+            from edof.utils.links import validate_link
+            link = validate_link(link)
+            if link is None:
+                return False
+        self._apply_format_to_selection(link=link)
+        self._invalidate()
+        return True
+
+    def selection_link(self):
+        """If the whole selection is ONE link -> its link string, else None
+        (mirrors selection_variable)."""
+        if not self._has_selection():
+            return None
+        a, b = self._sel_range()
+        link = None
+        abs_i = 0
+        for r in self._runs:
+            for _ in (r.text or ""):
+                if a <= abs_i < b:
+                    cl = getattr(r, "link", None)
+                    if cl is None or (link is not None and cl != link):
+                        return None
+                    link = cl
+                abs_i += 1
+        return link
+
+    def make_anchor_from_selection(self, name=None, anchor_id=None):
+        """Mark the selection as an in-document link TARGET. Returns the
+        anchor id (stable, like a rid)."""
+        if not self._has_selection():
+            return None
+        import uuid
+        aid = anchor_id or ("anch_" + uuid.uuid4().hex[:12])
+        self._apply_format_to_selection(anchor=aid, anchor_name=name or None)
+        self._invalidate()
+        return aid
+
+    def selection_anchor(self):
+        """v4.4.0: if the selection overlaps exactly ONE anchor id -> that id,
+        else None."""
+        if not self._has_selection():
+            return None
+        a, b = self._sel_range()
+        aid = None
+        abs_i = 0
+        for r in self._runs:
+            for _ in (r.text or ""):
+                if a <= abs_i < b:
+                    ca = getattr(r, "anchor", None)
+                    if ca:
+                        if aid is not None and ca != aid:
+                            return None
+                        aid = ca
+                abs_i += 1
+        return aid
+
+    def clear_anchor_in_selection(self):
+        """v4.4.0: remove the link-target mark from the selection."""
+        if not self._has_selection():
+            return False
+        self._apply_format_to_selection(anchor=None, anchor_name=None)
+        self._invalidate()
+        return True
+
+    def link_at_point(self, x, y):
+        """The link string under widget coordinates (x, y), or None."""
+        self._ensure_render()
+        if self._layout is None:
+            return None
+        idx = self._layout.hit_test(x, y)
+        text = _runs_text(self._runs)
+        if idx >= len(text):
+            idx = len(text) - 1
+        if idx < 0:
+            return None
+        abs_i = 0
+        for r in self._runs:
+            n = len(r.text or "")
+            if abs_i <= idx < abs_i + n:
+                return getattr(r, "link", None)
+            abs_i += n
+        return None
+
+    def clear_variable_in_selection(self):
+        """Remove the variable binding from the selected runs (turn them back
+        into plain text). The text stays; only rid/var_name are cleared."""
+        if not self._has_selection():
+            return
+        self._apply_format_to_selection(rid=None, var_name=None)
+        self._invalidate()
+
+    def selection_variable(self):
+        """If the whole selection is one variable run, return (rid, var_name);
+        else (None, None). Used to show 'edit/remove variable' vs 'make
+        variable' in the UI."""
+        if not self._has_selection():
+            return (None, None)
+        a, b = self._sel_range()
+        rid = None; vname = None; abs_i = 0
+        for r in self._runs:
+            for _ in (r.text or ""):
+                if a <= abs_i < b:
+                    cr = getattr(r, "rid", None)
+                    if cr is None:
+                        return (None, None)
+                    if rid is None:
+                        rid = cr; vname = getattr(r, "var_name", None)
+                    elif cr != rid:
+                        return (None, None)
+                abs_i += 1
+        return (rid, vname)
 
     def _current_format_attr(self, attr: str):
         """Return the value of attr at the cursor / in the selection
@@ -1348,7 +1562,9 @@ class EdofTextEditor(QWidget):
                     scale=scale, paragraph_alignments=pa,
                     add_trailing_virtual=not getattr(self, "_continues", False))
                 render_layout_onto(nat_draw, layout, self._runs, self.tb.style,
-                                   self.dpi, scale=scale)
+                                   self.dpi, scale=scale,
+                                   force_var_rids=getattr(self, "_sel_var_rids", None),
+                                   hover_link=getattr(self, "_hover_link", None))
                 # Non-uniform resize
                 img = nat_img.resize((w, h), Image.LANCZOS)
                 # Layout for hit-testing must reflect the rendered space.
@@ -1377,7 +1593,9 @@ class EdofTextEditor(QWidget):
                     add_trailing_virtual=not getattr(self, "_continues", False))
                 self._layout = layout
                 render_layout_onto(draw, layout, self._runs, self.tb.style,
-                                   self.dpi, scale=scale)
+                                   self.dpi, scale=scale,
+                                   force_var_rids=getattr(self, "_sel_var_rids", None),
+                                   hover_link=getattr(self, "_hover_link", None))
             # Overflow indicator
             is_overflow = (self._layout is not None
                             and (self._layout.overflow_v or self._layout.overflow_h))
@@ -1519,12 +1737,105 @@ class EdofTextEditor(QWidget):
             traceback.print_exc(file=sys.stderr)
 
     # ── Mouse ────────────────────────────────────────────────────────────────
+    def contextMenuEvent(self, ev):
+        """v4.3.6.1: right-click menu to make / remove a text variable. The
+        actual work (name prompt, batch column) is done by the canvas via
+        _make_var_cb, which owns the document and batch config."""
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        rid, vname = self.selection_variable()
+        if rid is not None:
+            act_var = menu.addAction("Remove variable  '%s'" % (vname or ""))
+        elif self._has_selection():
+            act_var = menu.addAction("Make variable from selection   Ctrl+Shift+V")
+        else:
+            act_var = menu.addAction("Make variable  (select text first)")
+            act_var.setEnabled(False)
+        # v4.4.1: hyperlink entries
+        cv = getattr(self, "_host_canvas", None)
+        cur_link = self.selection_link()
+        act_link = act_link_rm = act_anchor = act_anchor_rm = None
+        if cv is not None and hasattr(cv, "_make_text_link"):
+            menu.addSeparator()
+            if cur_link:
+                act_link = menu.addAction("Edit link…   Ctrl+K")
+                act_link_rm = menu.addAction("Remove link")
+            elif self._has_selection():
+                act_link = menu.addAction("Link…   Ctrl+K")
+            if self._has_selection():
+                if self.selection_anchor():
+                    act_anchor_rm = menu.addAction("Remove link target")
+                else:
+                    act_anchor = menu.addAction("Mark as link target (anchor)…")
+        chosen = menu.exec(ev.globalPos())
+        if chosen is act_var and self._make_var_cb is not None \
+                and (rid is not None or self._has_selection()):
+            try:
+                self._make_var_cb()
+            except Exception:
+                pass
+        elif act_link is not None and chosen is act_link:
+            try: cv._make_text_link()
+            except Exception: pass
+        elif act_link_rm is not None and chosen is act_link_rm:
+            try:
+                self.set_link_on_selection(None)
+                if cv is not None:
+                    cv._after_link_edit()
+            except Exception:
+                pass
+        elif act_anchor is not None and chosen is act_anchor:
+            try:
+                if hasattr(cv, "_make_text_anchor"):
+                    cv._make_text_anchor()
+            except Exception:
+                pass
+        elif act_anchor_rm is not None and chosen is act_anchor_rm:
+            try:
+                self.clear_anchor_in_selection()
+                if cv is not None and hasattr(cv, "_after_link_edit"):
+                    cv._after_link_edit()
+            except Exception:
+                pass
+
+    def _follow_link(self, link):
+        """v4.4.0: open an external link in the browser, or jump to an
+        in-document anchor ('#<anchor_id>') via the host canvas. The target is
+        re-validated before following (a link from an untrusted FILE could
+        carry a scheme the editor never allows on creation)."""
+        from edof.utils.links import validate_link
+        link = validate_link(link)
+        if not link:
+            return
+        if link.startswith("#"):
+            cv = getattr(self, "_host_canvas", None) or self.parent()
+            if cv is not None and hasattr(cv, "follow_anchor"):
+                try: cv.follow_anchor(link[1:])
+                except Exception: pass
+            return
+        url = link
+        if "://" not in url and not url.lower().startswith("mailto:"):
+            url = "https://" + url
+        try:
+            from PyQt6.QtGui import QDesktopServices
+            from PyQt6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl(url))
+        except Exception:
+            pass
+
     def mousePressEvent(self, ev: QMouseEvent):
         if ev.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(ev); return
         self._ensure_render()
         if self._layout is None:
             return
+        # v4.4.1: Ctrl+click follows a hyperlink (Word style); a plain click
+        # keeps editing.
+        if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            _lnk = self.link_at_point(ev.position().x(), ev.position().y())
+            if _lnk:
+                self._follow_link(_lnk)
+                return
         idx = self._layout.hit_test(ev.position().x(), ev.position().y())
         if ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
             self._begin_selection_if_needed()
@@ -1548,6 +1859,24 @@ class EdofTextEditor(QWidget):
 
     def mouseMoveEvent(self, ev: QMouseEvent):
         if not (ev.buttons() & Qt.MouseButton.LeftButton):
+            # v4.4.1: hover a hyperlink: tint it with the hover colour and,
+            # with Ctrl held, show the pointing-hand cursor.
+            _lnk = None
+            try:
+                _lnk = self.link_at_point(ev.position().x(), ev.position().y())
+            except Exception:
+                pass
+            if _lnk != getattr(self, "_hover_link", None):
+                self._hover_link = _lnk
+                self._invalidate()
+            try:
+                if _lnk and (ev.modifiers()
+                             & Qt.KeyboardModifier.ControlModifier):
+                    self.setCursor(Qt.CursorShape.PointingHandCursor)
+                else:
+                    self.setCursor(Qt.CursorShape.IBeamCursor)
+            except Exception:
+                pass
             return
         # v4.1.23.20: require a small movement before a drag-select begins, so
         # a click that wobbles by a pixel or two does not create a selection.
@@ -1816,6 +2145,18 @@ class EdofTextEditor(QWidget):
         return super().event(ev)
 
     def keyPressEvent(self, ev: QKeyEvent):
+        # v4.4.0: key-delivery diagnostics (Help -> Debug log). If typing
+        # "does nothing", this line proves whether the key even reached the
+        # editor widget; absence means a focus/routing problem upstream.
+        try:
+            from edof.engine.debug_log import log as _dlog
+            _dlog("text_editor.key", key=int(ev.key()),
+                  txt=repr(ev.text())[:8],
+                  ro=bool(getattr(self, '_read_only', False)),
+                  hf=str(getattr(getattr(self, '_host_canvas', None),
+                                 '_inline_hf_role', None)))
+        except Exception:
+            pass
         # v4.2.11.37: an exception escaping a key handler kills the whole app
         # in PyQt6 (qFatal). Catch, log, and keep the editor alive instead.
         try:
@@ -1851,6 +2192,40 @@ class EdofTextEditor(QWidget):
                    text_len=len("".join(r.text or "" for r in self._runs)),
                    tail=("".join(r.text or "" for r in self._runs))[-25:])
         except Exception: pass
+
+        # v4.3.6.2: read-only (batch preview lock). Allow navigation, selection
+        # and copy/select-all; block every mutation (typing, delete, Enter, Tab,
+        # formatting shortcuts, paste, make-variable) so the template can't be
+        # edited under a preview. The user records or leaves preview to edit.
+        if getattr(self, '_read_only', False):
+            _nav = (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up,
+                    Qt.Key.Key_Down, Qt.Key.Key_Home, Qt.Key.Key_End,
+                    Qt.Key.Key_PageUp, Qt.Key.Key_PageDown)
+            _allow = (key in _nav) or key == Qt.Key.Key_Escape \
+                or (ctrl and key in (Qt.Key.Key_C, Qt.Key.Key_A,
+                                     Qt.Key.Key_Insert))
+            if not _allow:
+                # v4.4.0: the lock exists because a batch row is PREVIEWED.
+                # Typing is an explicit editing intent: drop the preview and
+                # let the keystroke through. Silently eating keys made the
+                # editor look broken ("can't type into the header").
+                _cv = getattr(self, "_host_canvas", None)
+                if (_cv is not None
+                        and getattr(_cv, "_batch_preview_row", None) is not None
+                        and not getattr(_cv, "_batch_is_recording", False)):
+                    try:
+                        _cv.clear_batch_preview()
+                    except Exception:
+                        pass
+                    self._read_only = False
+                    try:
+                        _tot = sum(len(r.text or "") for r in (self._runs or []))
+                        self._cursor = max(0, min(self._cursor, _tot))
+                    except Exception:
+                        pass
+                    # fall through: process this key normally
+                else:
+                    ev.accept(); return
 
         # Navigation
         if key == Qt.Key.Key_Escape:
@@ -1908,6 +2283,22 @@ class EdofTextEditor(QWidget):
                 self._host_save_as(); ev.accept(); return
             if not shift and self._host_save is not None:
                 self._host_save(); ev.accept(); return
+
+        # v4.3.6.1: Ctrl+Shift+B -> make the selection a batch variable. (V is
+        # taken by paste-plain; B = batch variable.) Routed to the canvas, which
+        # owns the doc + batch config, via _make_var_cb.
+        if ctrl and shift and key == Qt.Key.Key_B and self._make_var_cb is not None:
+            try: self._make_var_cb()
+            except Exception: pass
+            ev.accept(); return
+
+        # v4.4.1: Ctrl+K = insert/edit hyperlink (Word style)
+        if ctrl and not shift and key == Qt.Key.Key_K:
+            cv = getattr(self, "_host_canvas", None)
+            if cv is not None and hasattr(cv, "_make_text_link"):
+                try: cv._make_text_link()
+                except Exception: pass
+            ev.accept(); return
 
         # v4.1.23.37: configurable shortcuts (formatting / clipboard /
         # alignment). Resolved via the user-editable map; unmapped combos
@@ -2027,9 +2418,19 @@ class EdofTextEditor(QWidget):
                 start = self._word_left(self._cursor)
                 self._delete_range(start, self._cursor)
                 self._cursor = start
+                # v4.3.6.20: a click leaves anchor == cursor (collapsed); moving
+                # the cursor without clearing the anchor would leave a phantom
+                # selection that the next edit deletes. Clear it.
+                self._clear_selection()
             elif self._cursor > 0:
+                # v4.3.6.20: warn before deleting a variable's last character --
+                # it removes the variable and all its columns.
+                if (self._would_empty_variable(self._cursor - 1)
+                        and not self._confirm_empty_variable()):
+                    return
                 self._delete_range(self._cursor - 1, self._cursor)
                 self._cursor -= 1
+                self._clear_selection()   # v4.3.6.20: no phantom selection
             self._invalidate(); return
         if key == Qt.Key.Key_Delete:
             # v4.1.23.20: Delete at the very end of a doc body (no selection)
@@ -2049,8 +2450,15 @@ class EdofTextEditor(QWidget):
                 # v4.1.16.5: Ctrl+Delete deletes next word
                 end = self._word_right(self._cursor)
                 self._delete_range(self._cursor, end)
+                self._clear_selection()   # v4.3.6.20: no phantom selection
             else:
+                # v4.3.6.20: same warning for forward-delete of a variable's
+                # last character.
+                if (self._would_empty_variable(self._cursor)
+                        and not self._confirm_empty_variable()):
+                    return
                 self._delete_range(self._cursor, self._cursor + 1)
+                self._clear_selection()   # v4.3.6.20: no phantom selection
             self._invalidate(); return
 
         # Clipboard / undo / format / alignment shortcuts are handled by the

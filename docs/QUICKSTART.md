@@ -202,7 +202,7 @@ You now know enough to build real documents. Some directions to explore:
 
 - The complete object reference in [reference/02-objects.md](reference/02-objects.md)
 - All variable types and template features in [reference/04-variables.md](reference/04-variables.md)
-- Cookbook recipes in [cookbook/](cookbook/) for full working examples
+- Cookbook recipes in [the cookbook](cookbook/invoice.md) for full working examples
 - Helper methods like `page.add_card()`, `page.add_metric()` in [reference/10-helpers.md](reference/10-helpers.md) — they save a lot of typing for common layouts
 - Layer effects (shadows, halftone, long shadow) in [reference/12-effects.md](reference/12-effects.md)
-- Runnable scripts in [`examples/`](../examples/README.md)
+- Runnable scripts in [`examples/`](https://github.com/DavidSchobl/edof/tree/main/examples)

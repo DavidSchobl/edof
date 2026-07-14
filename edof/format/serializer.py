@@ -465,12 +465,19 @@ def _load_partial(zf, names, protection_block, password, recovery_key,
 
     doc = Document.from_dict(full_dict, all_resources)
 
-    # Restore variables values from secrets
+    # Restore variables values from secrets. v4.4.0: a decrypted value that
+    # fails re-validation is DATA the user stored; do not drop it silently,
+    # record the loss in doc._error_state so the app can surface it.
     for name, value in secrets_payload.get("variables", {}).items():
         try:
             doc.variables.set(name, value)
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                doc._push_error(
+                    "Encrypted variable %r could not be restored "
+                    "after decryption: %s" % (name, e))
+            except Exception:
+                pass
 
     # Restore protection
     from edof.crypto.document_protection import DocumentProtection

@@ -227,9 +227,9 @@ doc.export_pdf("out.pdf", vector=False) # raster — typically 80-200 KB per pag
 **Larger than expected** — usually photographic images. Check your resources:
 ```python
 total = 0
-for rid, info in doc.resources.list().items():
-    print(f"  {rid}: {info['filename']} {info['size']:,} bytes")
-    total += info['size']
+for entry in doc.resources.all_entries():
+    print(f"  {entry.resource_id}: {entry.filename} {len(entry.data):,} bytes")
+    total += len(entry.data)
 print(f"Total resources: {total:,} bytes")
 ```
 
@@ -240,7 +240,7 @@ If image sizes are large, downscale them before adding (Pillow can do this in 5 
 Check:
 
 ```python
-print(doc.variables.values())   # what's currently set?
+print(doc.variables.all_values())   # what's currently set?
 print(doc.variables.names())     # what's defined?
 ```
 
@@ -253,8 +253,8 @@ If you typed `{recipient}` but defined `recipient_name`, the names don't match �
 A font was requested but not found. Check:
 
 ```python
-from edof.engine.text_engine import discovered_fonts
-print(discovered_fonts())
+from edof.engine.text_engine import list_system_fonts
+print(list_system_fonts())
 ```
 
 Either install the font or pick a different one.
@@ -295,7 +295,7 @@ Mitigation:
 ```python
 # Periodically restart the worker process
 if i % 1000 == 0:
-    # ... persist state, restart from clean slate
+    pass  # ... persist state, restart from a clean slate
 ```
 
 In practice, memory stays stable for batches of thousands of documents.

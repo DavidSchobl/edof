@@ -214,6 +214,44 @@ class StrokeStyle:
         return obj
 
 
+@dataclass
+class BorderStyle:
+    """v4.3.6.25: a border around an ENTIRE TextBox / Table (as documented in
+    reference/03-styles.md). Unlike StrokeStyle it carries an on/off flag and a
+    corner radius, and is what `obj.border = BorderStyle(...)` expects. The
+    renderer reads .color/.width and honours .enabled and .radius; a plain
+    StrokeStyle still works there too (enabled defaults True, radius 0)."""
+    enabled: bool = True
+    color:   Color = (200, 200, 200, 255)
+    width:   float = 0.2            # mm
+    style:   str   = "solid"        # solid | dashed
+    radius:  float = 0.0            # mm, rounded corners
+
+    def to_dict(self) -> dict:
+        return {
+            "kind":    "border",
+            "enabled": self.enabled,
+            "color":   _rgba_to_hex(self.color),
+            "width":   self.width,
+            "style":   self.style,
+            "radius":  self.radius,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "BorderStyle":
+        obj = cls()
+        c = d.get("color")
+        if isinstance(c, str):
+            obj.color = _hex_to_rgba(c)
+        elif c is not None:
+            obj.color = tuple(c)
+        obj.enabled = bool(d.get("enabled", True))
+        obj.width   = float(d.get("width", 0.2))
+        obj.style   = d.get("style", "solid")
+        obj.radius  = float(d.get("radius", 0.0))
+        return obj
+
+
 
 # ── Gradient (v4.0) ───────────────────────────────────────────────────────────
 
@@ -250,6 +288,39 @@ class Gradient:
 
 # ── TextRun (v4.0 rich text) ──────────────────────────────────────────────────
 
+# ── Link style (v4.4.1) ───────────────────────────────────────────────────────
+# Document-level style for hyperlink runs. Kept as a module-level ACTIVE style
+# (same pattern as show_variables in text_engine): the renderer, editor and
+# viewer call set_active_link_style(doc.link_style) when a document is loaded
+# or its link style edited, and TextRun.resolve reads it for link runs that
+# don't override colour/underline themselves.
+DEFAULT_LINK_STYLE = {
+    "color":       (17, 85, 204, 255),    # blue
+    "underline":   True,
+    "hover_color": (11, 57, 158, 255),    # darker blue on hover
+}
+
+_ACTIVE_LINK_STYLE = dict(DEFAULT_LINK_STYLE)
+
+
+def set_active_link_style(d) -> None:
+    """Install a document's link style (None resets to the default)."""
+    global _ACTIVE_LINK_STYLE
+    base = dict(DEFAULT_LINK_STYLE)
+    if d:
+        base.update({k: v for k, v in d.items() if v is not None})
+    for key in ("color", "hover_color"):
+        v = base.get(key)
+        if isinstance(v, (list, tuple)):
+            v = tuple(int(x) for x in v)
+            base[key] = v if len(v) == 4 else (v + (255,))[:4]
+    _ACTIVE_LINK_STYLE = base
+
+
+def active_link_style() -> dict:
+    return _ACTIVE_LINK_STYLE
+
+
 @dataclass
 class TextRun:
     """A styled segment of text within a TextBox.runs list. v4.0 feature.
@@ -282,6 +353,23 @@ class TextRun:
     # value (the editor's set_alignment sets all runs in the current
     # paragraph together). None = inherit from parent TextStyle.alignment.
     alignment:      Optional[str]       = None    # 'left'|'center'|'right'|'justify'
+    # v4.3.6.0: variable-text binding. A run can be turned into a batch variable:
+    # `rid` is a stable id (so the batch column keeps pointing at this span even
+    # as surrounding text is edited and runs split/merge), and `var_name` is the
+    # human name shown in the batch. Both None on an ordinary run. The batch sets
+    # this run's `text` (and may set its style fields too) per row; the renderer
+    # needs no change because the value is baked into the run before rendering.
+    rid:            Optional[str]       = None
+    var_name:       Optional[str]       = None
+    # v4.4.1: hyperlink. A run can be a LINK: `link` holds either an external
+    # target (http/https/mailto/... URL) or an in-document target written as
+    # "#<anchor_id>". A run can also be an anchor TARGET: `anchor` is a stable
+    # id (like rid, survives editing around it) and `anchor_name` its human
+    # name for pickers. Links render with the document link style (default
+    # blue underlined) unless the run overrides color/underline explicitly.
+    link:           Optional[str]       = None
+    anchor:         Optional[str]       = None
+    anchor_name:    Optional[str]       = None
 
     # v4.1.17: pt accessor (legacy / typography integration)
     @property
@@ -305,14 +393,26 @@ class TextRun:
     def resolve(self, parent: "TextStyle", scale: float = 1.0) -> dict:
         """Return effective style dict for rendering this run.
         scale multiplies font_size for auto-shrink/fill."""
+        # v4.4.1: a LINK run defaults to the document link style (colour +
+        # underline) unless the run sets its own explicit values, which is how
+        # a single link gets re-styled by normal formatting.
+        _color = self.color if self.color is not None else parent.color
+        _under = self.underline if self.underline is not None else parent.underline
+        if self.link:
+            ls = active_link_style()
+            if self.color is None:
+                _color = ls.get("color", DEFAULT_LINK_STYLE["color"])
+            if self.underline is None:
+                _under = bool(ls.get("underline",
+                                     DEFAULT_LINK_STYLE["underline"]))
         return {
             "font_family":   self.font_family    or parent.font_family,
             "font_size":     (self.font_size if self.font_size is not None else parent.font_size) * scale,
             "bold":          self.bold           if self.bold          is not None else parent.bold,
             "italic":        self.italic         if self.italic        is not None else parent.italic,
-            "underline":     self.underline      if self.underline     is not None else parent.underline,
+            "underline":     _under,
             "strikethrough": self.strikethrough  if self.strikethrough is not None else parent.strikethrough,
-            "color":         self.color          if self.color         is not None else parent.color,
+            "color":         _color,
             "background":    self.background,    # None means transparent
             "line_height":   self.line_height    if self.line_height    is not None else getattr(parent, 'line_height', 1.2),
             "letter_spacing": (self.letter_spacing if self.letter_spacing is not None else getattr(parent, 'letter_spacing', 0.0)) * scale,
@@ -331,6 +431,11 @@ class TextRun:
         if self.line_height   is not None: d["line_height"]   = self.line_height
         if self.letter_spacing is not None: d["letter_spacing"] = self.letter_spacing
         if self.alignment     is not None: d["alignment"]     = self.alignment
+        if self.rid           is not None: d["rid"]           = self.rid
+        if self.var_name      is not None: d["var_name"]      = self.var_name
+        if self.link          is not None: d["link"]          = self.link
+        if self.anchor        is not None: d["anchor"]        = self.anchor
+        if self.anchor_name   is not None: d["anchor_name"]   = self.anchor_name
         return d
 
     @classmethod
@@ -338,7 +443,8 @@ class TextRun:
         r = cls(text=d.get("text", ""))
         for k in ("font_family", "font_size", "bold", "italic",
                   "underline", "strikethrough", "line_height", "letter_spacing",
-                  "alignment"):
+                  "alignment", "rid", "var_name",
+                  "link", "anchor", "anchor_name"):
             if k in d: setattr(r, k, d[k])
         for k in ("color", "background"):
             if k in d:
@@ -416,6 +522,11 @@ class LayerEffect:
     """
     type: str = "drop_shadow"
     enabled: bool = True
+    # v4.3.5.21: a stable per-effect id, so a batch variable can stay bound to
+    # THIS effect even if the effects are reordered on the layer (positional
+    # ordinals would otherwise re-point to a different instance). Lazily filled
+    # in __post_init__ so existing call sites need no change.
+    eid: str = ""
     color: Color = (0, 0, 0, 200)
     color2: Color = (255, 255, 255, 200)   # for bevel highlight, gradient end
     blend_mode: str = "normal"
@@ -492,6 +603,7 @@ class LayerEffect:
     ht_random_rotate: bool = False          # randomly rotate each dot/pattern
     ht_pattern_mode: str = "shape"          # shape | single | per_channel (UI hint)
     ht_patterns: List[str] = field(default_factory=list)  # base64 PNG: 0/1/3/4 imgs
+    ht_pattern_paths: List[str] = field(default_factory=list)  # source file paths (batch sets these; PNG loaded into ht_patterns)
     ht_keep_background: bool = False         # (legacy) keep layer content under dots
     ht_background: str = "transparent"       # transparent | native | layer
     ht_clip: str = "whole"                   # whole | hard | soft (edge clipping)
@@ -514,9 +626,16 @@ class LayerEffect:
     texture_fit:     str             = "tile"    # tile | fit | fill | stretch
     texture_anchor:  str             = "top-left"  # top-left | center
 
+    def __post_init__(self):
+        # ensure a stable id exists (v4.3.5.21)
+        if not getattr(self, "eid", ""):
+            import uuid
+            self.eid = uuid.uuid4().hex[:12]
+
     def to_dict(self) -> dict:
         return {
             "type": self.type,
+            "eid": self.eid,
             "enabled": self.enabled,
             "color": _rgba_to_hex(self.color),
             "color2": _rgba_to_hex(self.color2),
@@ -572,6 +691,7 @@ class LayerEffect:
             "ht_random_rotate": self.ht_random_rotate,
             "ht_pattern_mode": self.ht_pattern_mode,
             "ht_patterns": self.ht_patterns,
+            "ht_pattern_paths": self.ht_pattern_paths,
             "ht_keep_background": self.ht_keep_background,
             "ht_background": self.ht_background,
             "ht_clip": self.ht_clip,

@@ -11,9 +11,97 @@
 📚 **Documentation**: <https://davidschobl.github.io/edof/> &nbsp;|&nbsp;
 💖 **Support development**: <https://ko-fi.com/davidschobl> &nbsp;|&nbsp; <https://github.com/sponsors/DavidSchobl>
 
-A Python library and visual editor for programmatic document creation, template filling, and high-quality export. Documents are described in code or in a small ZIP-based file format, then rendered to PNG, JPEG, TIFF, BMP, PDF, RTF, or SVG. A PyQt6 desktop editor is included for visual editing with Photoshop-style layer effects, table cell editor, multi-blend compositing, and a path tool.
+**edof makes documents from data.** Design a template once (in code or in
+the included visual editor), plug in your data, and get hundreds of
+print-ready PDFs, PNGs or editable documents in one shot: invoices, card
+decks, certificates, catalogs, posters.
 
-The library prioritizes a few specific things: vector PDF output without large native dependencies, rich-text and table rendering that survives high-DPI export, a template-filling workflow with typed variables, an optional encryption layer for documents that need it, and a rich visual editor that maps 1:1 to the API.
+## What is edof?
+
+edof is two things in one package:
+
+1. **A Python library** with a clean document model (pages, text boxes,
+   images, shapes, tables, QR codes, all positioned in millimetres) that
+   exports to vector PDF, PNG/JPEG/TIFF, SVG, RTF and DOCX.
+2. **A WYSIWYG desktop editor** (PyQt6) that maps 1:1 to the API, with
+   Photoshop-style layer effects: drop shadows, glows, gradient overlays,
+   halftone patterns, long shadows with gradient stops.
+
+Everything the editor can do, your script can do, and the other way around.
+Think of it as a merge of a word processor and a layer-effects compositor
+that you can drive from Python.
+
+## Who is it for?
+
+* You generate **documents from data**: invoices, statements, certificates,
+  badges, labels, menus, reports.
+* You design **card games or board game assets** and need every card
+  rendered from a spreadsheet.
+* You make **posters or social graphics** that need effects Photoshop makes
+  painful (long shadow with a gradient map? one checkbox here).
+* You maintain **templates that non-programmers fill in**: the editor plus
+  typed variables plus permission levels handle that.
+
+## Why not just Word, a PDF editor, or Photoshop?
+
+**Word / Google Docs + export to PDF** works until you need precise layout,
+per-object effects, or more than trivial mail merge. Word's merge fills text
+fields on one page layout. edof's 3D Batch fills ANY property of ANY object
+(text, images, colors, even a shadow's blur) across MULTIPLE different page
+templates at once, and exports each row as its own file or one big
+multipage document.
+
+**PDF editors** edit one document at a time. They do not generate five
+hundred personalized ones from a CSV.
+
+**Photoshop** has the effects but no document model: no flowing text, no
+tables, no data merge, no vector PDF text. edof has the effects AND the
+document model, and every effect parameter can be a batch variable.
+
+## The headline feature: 3D Batches
+
+One file holds multiple page templates that share variables. One batch row
+fills them all in a single shot, and any parameter can be a column: text
+spans, image sources, colors, effect settings.
+
+```python
+import edof
+from edof.batch.model import build_ref, BatchRow
+from edof.batch.generate import export_batch
+
+doc = edof.load("card_deck.edof")          # front + back page templates
+cfg = doc.batch
+
+# one column drives the card name on BOTH templates (linked variables),
+# another swaps the artwork per card
+rows = cfg.rows                            # or build them from CSV / code
+
+ok, files, errors = export_batch(
+    doc, cfg, rows, "out",
+    pattern="[ROW_NUMBER:03]_[{Card Name}]",
+    fmt="pdf", scope="all",
+    output="per_row")                      # or "single": one multipage PDF
+```
+
+For a card deck that means: front and back designs live in one file, every
+card is one row, and one Generate click renders the whole deck with
+per-card names, art, stats and even per-card color accents. In the editor
+this is the 3D Batch table: rows in a spreadsheet, live preview of any row
+on the canvas, progress bar with cancel.
+
+## What's new in 4.4.0
+
+* **3D Batch export engine**: per-row files or one multipage PDF/EDOF,
+  filename tag templates ([ROW_NAME], [{Column}], [PAGE]), external-sources
+  ZIP bundles, image recompression, progress + cancel.
+* **Hyperlinks**: external and in-document links with a document-wide
+  style, Ctrl+click to follow, exported as clickable PDF annotations and
+  SVG anchors.
+* **Header/footer containers**: any object repeats on every page, editable
+  on any page, batchable.
+* **Small files**: save or export with images re-encoded as JPEG at chosen
+  quality (transparency survives), lossless PNG otherwise.
+* **WYSIWYG stability**: layout is identical at every zoom and export DPI.
 
 ## How does it compare?
 
@@ -49,7 +137,7 @@ Legend: ✅ first-class · ⚠️ partial / via extensions · ❌ not supported 
 ## Install
 
 ```bash
-pip install edof                # core only — Pillow + edof
+pip install edof                # core — Pillow + numpy + edof
 pip install edof[crypto]        # + AES-256 document encryption
 pip install edof[pdf]           # + PDF import (pymupdf), table detection (pdfplumber),
                                 #   raster PDF fallback (reportlab)
@@ -607,7 +695,7 @@ This is intentionally narrow rather than promotional. Different libraries are go
 | **Tables with per-cell styling** | Yes | Yes | Yes | Yes | n/a |
 | **PDF import / re-edit** | Best-effort via pymupdf | No | No | n/a | n/a |
 | **AES document encryption** | Optional, with permission levels | No | No | DOCX has its own (different model) | n/a |
-| **External dependencies (core)** | Pillow only | Several native libs | Cairo, Pango, large stack | lxml | None |
+| **External dependencies (core)** | Pillow + numpy | Several native libs | Cairo, Pango, large stack | lxml | None |
 
 A non-exhaustive note on what other libraries do better: reportlab has the most mature PDF generation engine and the broadest feature coverage for printed output; WeasyPrint is the right answer if your content lives in HTML/CSS already; python-docx is the standard for Word interoperability; Pillow remains the right tool for image manipulation. edof is the right answer when you want documents with a consistent visual layout, type-checked variable filling, an editor your users can use, and an output format that survives high-DPI export — without requiring users to write CSS or learn ReportLab's flowables API.
 
@@ -639,12 +727,12 @@ Each version's venv is independent. Removing a version is `rmdir /s /q <folder>`
 ## Compatibility
 
 - Python 3.9+
-- All exports work with Pillow alone; everything else is optional
+- All exports work with the core install (Pillow + numpy); everything else is optional
 - Cross-platform (tested on Windows, Linux, macOS)
 
 ## Status and roadmap
 
-Stable: document model, renderer, all export paths, variable system, editor, encryption, EDOF 2 / 3 / 4 round-trips, PDF import.
+Stable: document model, renderer, all export paths, variable system, 3D Batch (columns, rows, run variables, linked variables, batch export engine), hyperlinks, header/footer containers, image recompression, editor, encryption, EDOF 2 / 3 / 4 round-trips, PDF import.
 
 Known limitations:
 - Vector PDF writer uses Standard 14 fonts only; arbitrary TTF embedding for vector mode is on the roadmap. For now, custom fonts work via the raster fallback (`vector=False`) or via Pillow during bitmap export.

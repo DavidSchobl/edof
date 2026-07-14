@@ -282,9 +282,14 @@ vec2 srcuv(vec2 sh, float sc) {
 void main() {
     vec3 rgb = vec3(0.0);
     float aA = 0.0;
-    vec4 s0 = samp(srcuv(shift0, scale0)); rgb += tint0 * s0.r; aA = max(aA, s0.a);
-    vec4 s1 = samp(srcuv(shift1, scale1)); rgb += tint1 * s1.g; aA = max(aA, s1.a);
-    vec4 s2 = samp(srcuv(shift2, scale2)); rgb += tint2 * s2.b; aA = max(aA, s2.a);
+    // v4.3.5.2: use max(channel, alpha) as the per-channel source intensity so
+    // a black / fully-saturated object (near-zero R/G/B) still carries its tint
+    // and the offset layers split into colour fringes, instead of summing to a
+    // flat black blob. Photographic content keeps its real channel detail
+    // because the channel value dominates wherever it exceeds the silhouette.
+    vec4 s0 = samp(srcuv(shift0, scale0)); rgb += tint0 * max(s0.r, s0.a); aA = max(aA, s0.a);
+    vec4 s1 = samp(srcuv(shift1, scale1)); rgb += tint1 * max(s1.g, s1.a); aA = max(aA, s1.a);
+    vec4 s2 = samp(srcuv(shift2, scale2)); rgb += tint2 * max(s2.b, s2.a); aA = max(aA, s2.a);
     frag = vec4(min(rgb, vec3(1.0)), aA);
 }
 """

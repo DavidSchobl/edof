@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "edof"
-version         = "4.3.0.4"
+version         = "4.4.0"
 description     = "Easy Document Format – programmatic document creation, editing and export with vector PDF, rich text, tables and PDF import"
 readme          = "README.md"
 license         = { file = "LICENSE" }
@@ -27,6 +27,11 @@ classifiers     = [
 
 dependencies = [
     "Pillow>=9.1",
+    # v4.4.0: numpy became a core dependency. The render engine uses it for
+    # gradients, 16-bit export and the layer effects (bevel, halftone, long
+    # shadow, chromatic aberration, ...). It was a silent requirement before:
+    # a clean "pip install edof" crashed on the first gradient render.
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]

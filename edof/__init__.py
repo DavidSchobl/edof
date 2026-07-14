@@ -42,7 +42,7 @@ from edof.format.objects   import (                               # noqa: F401
     SHAPE_RECT, SHAPE_ELLIPSE, SHAPE_LINE, SHAPE_POLYGON, SHAPE_ARROW, SHAPE_PATH,
     make_table,
 )
-from edof.format.styles    import TextStyle, StrokeStyle, FillStyle, ShadowStyle, TextRun, Gradient, LayerEffect, as_color  # noqa: F401
+from edof.format.styles    import TextStyle, StrokeStyle, BorderStyle, FillStyle, ShadowStyle, TextRun, Gradient, LayerEffect, as_color  # noqa: F401
 from edof.format.variables import VariableStore, VariableDef      # noqa: F401
 from edof.format.variables import (                               # noqa: F401
     VAR_TEXT, VAR_IMAGE, VAR_NUMBER, VAR_DATE, VAR_BOOL, VAR_QR, VAR_URL,
@@ -77,6 +77,9 @@ def load(path: str, password: str = None,
 
 def new(width: float = 210.0, height: float = 297.0, **kwargs) -> Document:
     """Create a new blank Document.
+
+    The document starts EMPTY (0 pages) by design; call ``doc.add_page(...)``
+    to add the first page before placing content or rendering.
 
     Args:
         width, height: page size in millimetres (default A4 portrait).
@@ -188,7 +191,7 @@ __all__ = [
     "SHAPE_RECT", "SHAPE_ELLIPSE", "SHAPE_LINE", "SHAPE_POLYGON",
     "SHAPE_ARROW", "SHAPE_PATH",
     # Styles
-    "TextStyle", "StrokeStyle", "FillStyle", "ShadowStyle", "TextRun", "Gradient",
+    "TextStyle", "StrokeStyle", "BorderStyle", "FillStyle", "ShadowStyle", "TextRun", "Gradient",
     "LayerEffect", "as_color",
     # Variables
     "VariableStore", "VariableDef",

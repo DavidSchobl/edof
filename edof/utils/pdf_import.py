@@ -559,6 +559,13 @@ def _detect_tables(pdf_page, page_h_mm):
                         c.style.bold = True
                         c.bg_color = (245, 245, 250, 255)
                 out.append(t)
-    except Exception:
-        pass
+    except Exception as e:
+        # v4.4.0: don't swallow a table-detection crash silently; the caller
+        # still gets the text import, but the loss is at least visible.
+        try:
+            import logging
+            logging.getLogger("edof.pdf_import").warning(
+                "table detection failed: %s", e)
+        except Exception:
+            pass
     return out

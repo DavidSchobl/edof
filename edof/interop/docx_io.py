@@ -486,11 +486,24 @@ def _read_paragraphs(d):
         for r in p.runs:
             txt = r.text or ""
             tr = TextRun(text=txt)
-            try: tr.bold = True if r.bold else None
+            # v4.4.0: KEEP the tri-state. python-docx gives True (explicitly
+            # on), False (explicitly OFF, e.g. a non-bold run inside a bold
+            # style) or None (inherit). Collapsing False to None used to
+            # re-embolden runs that Word had explicitly un-bolded.
+            try: tr.bold = r.bold if r.bold is not None else None
             except Exception: pass
-            try: tr.italic = True if r.italic else None
+            try: tr.italic = r.italic if r.italic is not None else None
             except Exception: pass
-            try: tr.underline = True if r.underline else None
+            try:
+                _u = r.underline
+                # python-docx underline can be an enum (WD_UNDERLINE); any
+                # non-empty enum value counts as underlined.
+                if _u is None:
+                    tr.underline = None
+                elif isinstance(_u, bool):
+                    tr.underline = _u
+                else:
+                    tr.underline = bool(_u)
             except Exception: pass
             try:
                 if r.font.strike:

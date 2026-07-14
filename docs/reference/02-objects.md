@@ -385,9 +385,10 @@ t = make_table(
     [["Name", "Score"],
      ["Alice", 98],
      ["Bob", 87]],
-    header=True,         # first row is styled as header
-    alternating=True,    # zebra-stripe data rows
-    style="default",     # presets: "default", "modern", "minimal"
+    header=True,                        # first row styled as header
+    alternating=True,                   # zebra-stripe data rows
+    header_bg=(83, 74, 183, 255),       # header fill
+    alt_bg=(245, 245, 252, 255),        # zebra fill
 )
 ```
 

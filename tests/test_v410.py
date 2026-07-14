@@ -256,7 +256,10 @@ def test_pdf_no_duplicate_text_layer():
         doc.export_pdf(path)
         size = os.path.getsize(path)
         # File should be reasonable. Bug previously made this ~50KB+ for 25 boxes.
-        assert size < 10_000, f"PDF size {size} suggests duplication bug"
+        # v4.4.0: threshold nudged for the reference-DPI layout (slightly
+        # different wraps make the stream ~1% bigger); the duplication bug
+        # this guards against produced N(N+1)/2 growth, far beyond this.
+        assert size < 14_000, f"PDF size {size} suggests duplication bug"
 
         # Decompress all flate streams and count Tj ops
         with open(path, 'rb') as f:

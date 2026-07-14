@@ -135,7 +135,7 @@ for obj in page.objects:
             obj.text = obj.text.replace("March 15, 2024", "{date}")
 
 # Define the variables
-doc.define_variable("customer_name", required=True, label="Customer name")
+doc.define_variable("customer_name", required=True, description="Customer name")
 doc.define_variable("amount", type="number", default=0)
 doc.define_variable("date", type="date", required=True)
 

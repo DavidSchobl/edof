@@ -73,7 +73,10 @@ def print_document(
         for idx in page_indices:
             page = doc.pages[idx]
             try:
-                img  = render_page(page, doc.resources, doc.variables, dpi=dpi)
+                from edof.engine.text_engine import suppress_view_marks
+                with suppress_view_marks():
+                    img = render_page(page, doc.resources, doc.variables,
+                                      dpi=dpi)
                 path = os.path.join(tmpdir, f"edof_print_{idx:04d}.png")
                 img.save(path, format="PNG", dpi=(dpi, dpi))
                 tmp_files.append(path)

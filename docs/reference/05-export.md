@@ -176,8 +176,8 @@ Render to bytes without writing to disk. Useful for sending to a network, embedd
 ```python
 from edof import export_to_bytes
 
-png_bytes = export_to_bytes(doc, format="png", page=0, dpi=300)
-pdf_bytes = export_to_bytes(doc, format="pdf")     # whole document
+png_bytes = export_to_bytes(doc, page_index=0, format="PNG", dpi=300)
+jpg_bytes = export_to_bytes(doc, format="JPEG", jpeg_quality=85)
 
 # Send to API
 import requests
@@ -198,7 +198,7 @@ Render one page to a Pillow `Image`. Useful for further processing (cropping, fi
 from edof import render_page
 from PIL import Image
 
-img = render_page(doc, page_index=0, dpi=300)
+img = render_page(doc.pages[0], doc.resources, doc.variables, dpi=300)
 img.thumbnail((200, 200))             # resize
 img.save("thumbnail.png")
 ```
@@ -276,3 +276,99 @@ for record in customer_data:
     doc.fill_variables(record)
     doc.export_pdf(f"out/customer_{record['id']}.pdf")
 ```
+
+---
+
+## Batch export (v4.4.0)
+
+`edof.batch.generate.export_batch()` renders every batch row to files; the
+editor's **Generate…** dialog is a front-end for it.
+
+```python
+from edof.batch.generate import export_batch
+
+ok, written, errors = export_batch(
+    doc, doc.batch, doc.batch.rows, out_dir,
+    pattern="[ROW_NUMBER:03]_[ROW_NAME]",
+    fmt="pdf",             # png | jpg | svg | pdf | edof
+    scope="all",           # "page" (page_idx) or "all"
+    page_idx=0,
+    sources="integrate",   # edof only: "integrate" | "external"
+    output="per_row",      # pdf/edof: "per_row" | "single"
+    progress=None,         # progress(done, total) -> False cancels
+    dpi=300)
+```
+
+| fmt | scope="page" | scope="all" |
+|---|---|---|
+| png / jpg / svg | one file per row | one file per row **per page** (`[PAGE]` token, auto-appended as `_p[PAGE]` when missing) |
+| pdf | single-page PDF | multipage PDF |
+| edof | single-page document | whole document |
+
+**Output shape (pdf / edof).** `output="per_row"` writes one file per row
+with tag-based names. `output="single"` writes **one multipage file**: every
+row's page(s) appended in row order, the pattern used once as a plain
+filename. The single `.edof` is *baked*: fixed pages with the values filled
+in, no document body and no batch config, so it reopens exactly as
+generated. `progress(done, total)` is called between rows; returning `False`
+cancels (files already written stay, an error entry says `Cancelled`).
+
+**Source modes (edof):**
+
+* `"integrate"` — one self-contained `.edof`: file-path images are
+  materialised into the resource store (apply does that automatically) and
+  the used fonts are embedded.
+* `"external"` — the row's document is written next to a `sources/` folder
+  holding the referenced files, objects point at the *relative* path, and
+  the pair ships as `<name>.zip` — an **editable bundle**. `Document.load`
+  resolves relative resource paths against the `.edof` location, so the
+  unpacked bundle renders from any working directory.
+
+**Filename tags** (case-insensitive, collisions de-duplicated):
+`[ROW_NUMBER]`, `[ROW_NUMBER:04]`, `[ROW_NAME]`, `[PAGE]`, `[PAGE:02]`,
+`[{Header}]`, `[{Header:upper}]`, `[{Header:lower}]`.
+
+## Image compression (v4.4.0)
+
+Photo-heavy documents (large PNG sources) can be shrunk by re-encoding the
+embedded images, either into the saved `.edof` or into an exported PDF.
+
+```python
+n, before, after = doc.recompress_images("jpeg", 75)  # or ("png", 100)
+doc.save("small.edof")
+
+doc.export_pdf("small.pdf", image_format="jpeg", image_quality=60)
+```
+
+`recompress_images` re-encodes every image resource: `"png"` is lossless,
+`"jpeg"` is lossy at the given quality (1-100). Images with real
+transparency always stay lossless PNG (JPEG has no alpha), a resource is
+only replaced when the re-encoded bytes are smaller, and non-image
+resources (fonts) are untouched. Returns `(n_changed, bytes_before,
+bytes_after)`.
+
+In PDF export, `image_format="jpeg"` embeds images as DCT (JPEG) streams at
+`image_quality`; an image's alpha channel survives as a lossless `/SMask`
+over the JPEG base. Editor UI: the **Export PDF** dialog and the batch
+**Generate** dialog have an *Images* choice (Lossless, JPEG 90/75/60/40 %),
+and **File → Save optimized copy…** saves a re-encoded copy of the open
+document (the original stays untouched) and reports the MB saved.
+
+`export_batch(..., image_format="jpeg", image_quality=75)` applies the same
+re-encoding to the pdf and edof outputs, per row and single-file alike.
+
+## Font embedding (v4.4.0)
+
+```python
+doc.save("file.edof", embed_fonts=True)   # or: n = doc.embed_used_fonts()
+```
+
+Embeds the font files for every family+weight combination the document's
+text actually uses (pages, runs, tables, header/footer templates and
+containers). Idempotent — already-embedded families are skipped. Embedded
+fonts resolve **weight-aware** by the real family name from each font
+file's name table (`"Nunito Sans"` matches `NunitoSans-Bold.ttf` for bold
+runs), in every text path including rich-text runs.
+
+> Editor view aids (the variable rainbow, focus highlights, link-target
+> marks) are **never** included in any export.

@@ -50,6 +50,13 @@ def render_page(page, resources, variables,
     False when rendering pages that will be composited into a larger
     canvas (embedded sub-document, export with real alpha).
     """
+    # v4.4.0: install embedded fonts so EVERY text path (rich runs included)
+    # resolves them weight-aware for this document
+    try:
+        from edof.engine.text_engine import register_resource_fonts
+        register_resource_fonts(resources)
+    except Exception:
+        pass
     dpi_r = dpi or page.dpi
     cs_r  = color_space or page.color_space
     bd_r  = bit_depth or page.bit_depth
@@ -165,6 +172,12 @@ def render_page_active(page, resources, variables, active_id,
 
 
 def render_document(doc, dpi=None, color_space=None, bit_depth=None):
+    # v4.4.1: install the document's link style so link runs resolve with it
+    try:
+        from edof.format.styles import set_active_link_style
+        set_active_link_style(getattr(doc, "link_style", None))
+    except Exception:
+        pass
     return [render_page(p, doc.resources, doc.variables, dpi, color_space, bit_depth)
             for p in doc.pages]
 
@@ -185,7 +198,32 @@ def _apply_blend(canvas, layer, pos, blend_mode):
 # ── Dispatcher ───────────────────────────────────────────────────────────────
 
 _OBJ_CACHE = _collections.OrderedDict()
-_OBJ_CACHE_CAP = 512
+_OBJ_CACHE_CAP = 768
+
+# v4.4.0 perf: decoded image sources. _render_imagebox used to run the full
+# PIL open+convert("RGBA") on the resource BYTES every render -- with a photo
+# -heavy page (the cookbook) the JPEG decodes alone cost ~0.5 s per render.
+# Keyed by (resource_id, byte length); bounded LRU.
+_IMG_SRC_CACHE = _collections.OrderedDict()
+_IMG_SRC_CACHE_CAP = 48
+
+
+def _decode_image_source(key, data_or_path, is_path=False):
+    ent = _IMG_SRC_CACHE.get(key)
+    if ent is not None:
+        _IMG_SRC_CACHE.move_to_end(key)
+        return ent
+    try:
+        if is_path:
+            img = Image.open(data_or_path).convert("RGBA")
+        else:
+            img = Image.open(io.BytesIO(data_or_path)).convert("RGBA")
+    except Exception:
+        return None
+    _IMG_SRC_CACHE[key] = img
+    while len(_IMG_SRC_CACHE) > _IMG_SRC_CACHE_CAP:
+        _IMG_SRC_CACHE.popitem(last=False)
+    return img
 
 # v4.2.10.9: dirty-region cache for editing a single object. Holds the static
 # background split around the active object: (below_img, above_img). Only one
@@ -199,6 +237,33 @@ _ACTIVE_BG_CACHE = _collections.OrderedDict()
 # offset instead of re-rendering the object (and its expensive effects). Keeps
 # only the current active object.
 _ACTIVE_OBJ_CACHE = _collections.OrderedDict()
+
+
+def _shear_and_rotate(buf, rotation, shear_x, resample=None):
+    """v4.3.5.51: apply a horizontal shear (skew) in the object's local space,
+    then rotate, returning the new buffer. Shear maps a local point (x, y) to
+    (x + shear_x * y, y); the buffer is widened so the skew never clips. When
+    shear_x == 0 this is just a rotate (the common case)."""
+    from PIL import Image
+    if resample is None:
+        resample = Image.BICUBIC
+    if shear_x:
+        w, h = buf.size
+        ext = int(abs(shear_x) * h) + 2          # extra width for the skew
+        new_w = w + ext
+        # PIL AFFINE maps OUTPUT (x',y') -> INPUT: x_in = x' - shear_x*y' + c.
+        # Forward, a point (xi,yi) goes to xi + shear_x*yi. For shear_x < 0 the
+        # shape leans left, so shift everything right by |shear_x|*h to keep it in
+        # [0,new_w]; that forward shift D = |shear_x|*h means the AFFINE constant
+        # is c = -D = shear_x*h (NEGATIVE). v4.3.5.64: this was +abs(shear_x)*h
+        # before, the wrong sign, which collapsed a strongly negative shear into a
+        # triangle (e.g. enlarging a rotated object along its axis).
+        c = shear_x * h if shear_x < 0 else 0.0
+        coeffs = (1, -shear_x, c, 0, 1, 0)
+        buf = buf.transform((new_w, h), Image.AFFINE, coeffs, resample=resample)
+    if rotation % 360 != 0:
+        buf = buf.rotate(-rotation, expand=True, resample=resample)
+    return buf
 
 
 def _alpha_composite_clipped(canvas, crop, px, py):
@@ -491,11 +556,17 @@ def _render_object_cached(obj, canvas, resources, variables, dpi, res_fp):
         _OBJ_CACHE.popitem(last=False)
 
 
+_EFFECTS_DISABLED_WARNED = set()   # v4.3.6.25: object ids already warned about
+
+
 def _render_object(obj, canvas, resources, variables, dpi):
     # v4.1.0: Render layer effects efficiently using bbox-based buffers.
     effects_below = []
     effects_above = []
-    if hasattr(obj, 'effects') and obj.effects:
+    # v4.3.5.12: the master 'All effects' switch -- when off, no effect renders,
+    # even though the effects remain on the object (so they can be batched).
+    if (hasattr(obj, 'effects') and obj.effects
+            and getattr(obj, 'effects_enabled', True)):
         for e in obj.effects:
             if not e.enabled: continue
             if e.type in ('drop_shadow', 'outer_glow', 'long_shadow') or \
@@ -504,6 +575,23 @@ def _render_object(obj, canvas, resources, variables, dpi):
                 effects_below.append(e)
             else:
                 effects_above.append(e)
+    elif (hasattr(obj, 'effects') and obj.effects
+          and not getattr(obj, 'effects_enabled', True)):
+        # v4.3.6.25: the object HAS effects but the master switch is off, so
+        # none of them render. This is a silent no-op that catches API users
+        # out (the switch defaults to False on a brand-new object). Warn once
+        # per object so it is discoverable without spamming on every render.
+        _oid = id(obj)
+        if _oid not in _EFFECTS_DISABLED_WARNED:
+            if len(_EFFECTS_DISABLED_WARNED) > 4096:
+                _EFFECTS_DISABLED_WARNED.clear()
+            _EFFECTS_DISABLED_WARNED.add(_oid)
+            import warnings as _w
+            _w.warn(
+                "Object has %d effect(s) but effects_enabled=False, so none "
+                "will render. Set obj.effects_enabled = True to show them."
+                % len(obj.effects),
+                RuntimeWarning, stacklevel=2)
 
     if not effects_below and not effects_above:
         # Fast path: no effects
@@ -519,11 +607,23 @@ def _render_object(obj, canvas, resources, variables, dpi):
     # (the "blending doesn't work for shapes/curves that have effects" bug).
     _obj_blend = getattr(obj, 'blend_mode', 'normal') or 'normal'
     _saved_blend = getattr(obj, 'blend_mode', 'normal')
+    # v4.3.6.27: object opacity must scale the WHOLE rendered object (body +
+    # effects) linearly. If it were baked into the dispatch buffer, the effects
+    # (halftone especially) would sample the reduced alpha -- halftone uses alpha
+    # for dot SIZE, so opacity fell off ~cubically (0.5 opacity -> ~0.1 coverage)
+    # instead of linearly. So: render body + effects at FULL opacity into a temp
+    # layer, then scale that layer's alpha by opacity and composite it. Only kicks
+    # in when opacity < 1 (the common opacity == 1 path is untouched).
+    _obj_opacity = float(getattr(obj, 'opacity', 1.0) or 1.0)
+    _use_layer = _obj_opacity < 1.0
     try:
         obj.blend_mode = 'normal'
+        if _use_layer:
+            obj.opacity = 1.0
         _render_object_dispatch(obj, temp, resources, variables, dpi)
     finally:
         obj.blend_mode = _saved_blend
+        obj.opacity = _obj_opacity
 
     # Compute the actual object bbox from alpha (where the object pixels are)
     bbox = temp.getbbox()
@@ -573,8 +673,13 @@ def _render_object(obj, canvas, resources, variables, dpi):
 
     # Apply effects-below (drop shadow, outer glow, stroke, etc) — at full
     # alpha (independent of fill_opacity, like Photoshop)
+    # v4.3.6.27: when opacity<1 we render body+effects into a separate layer and
+    # scale it at the end; otherwise we draw straight onto the canvas as before.
+    render_target = (Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+                     if _use_layer else canvas)
+
     for e in effects_below:
-        _apply_layer_effect_below(canvas, obj_buf, e, dpi, paste_pos)
+        _apply_layer_effect_below(render_target, obj_buf, e, dpi, paste_pos)
 
     # v4.2.7.20: a halftone screen in "just patterns" mode (ht_keep_background
     # False) replaces the layer content — skip compositing the body so only the
@@ -601,14 +706,58 @@ def _render_object(obj, canvas, resources, variables, dpi):
     else:
         body = temp
     if not _skip_body:
-        _composite_with_blend(canvas, body, (0, 0), _obj_blend)
+        _composite_with_blend(render_target, body, (0, 0),
+                              'normal' if _use_layer else _obj_blend)
 
     # Apply effects-above (inner shadow, inner glow, color overlay, gradient)
     for e in effects_above:
-        _apply_layer_effect_above(canvas, obj_buf, e, dpi, paste_pos)
+        _apply_layer_effect_above(render_target, obj_buf, e, dpi, paste_pos)
+
+    # v4.3.6.27: scale the whole object layer by opacity and composite it onto
+    # the real canvas with the object's blend mode.
+    if _use_layer:
+        r, g, b, a = render_target.split()
+        a = a.point(lambda v, o=_obj_opacity: int(v * o))
+        layer = Image.merge("RGBA", (r, g, b, a))
+        _composite_with_blend(canvas, layer, (0, 0), _obj_blend)
 
 
 def _render_object_dispatch(obj, canvas, resources, variables, dpi):
+    # v4.3.5.51: if the object carries a shear, render it upright (no rotation,
+    # no shear) into a local buffer, then apply shear + rotation to the whole
+    # buffer and paste it centered on the object. This gives every object type a
+    # consistent skew without touching each renderer. QR codes never get shear
+    # (kept square by the resize logic), so they never hit this path.
+    shx = getattr(getattr(obj, "transform", None), "shear_x", 0.0) or 0.0
+    if shx and not isinstance(obj, QRCode):
+        from PIL import Image
+        t = obj.transform
+        rot0, fx0, fy0 = t.rotation, t.flip_h, t.flip_v
+        # full-canvas temp, object drawn upright at its normal position
+        temp = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        t.rotation, t.flip_h, t.flip_v, t.shear_x = 0.0, False, False, 0.0
+        try:
+            _render_object_dispatch_raw(obj, temp, resources, variables, dpi)
+        finally:
+            t.rotation, t.flip_h, t.flip_v, t.shear_x = rot0, fx0, fy0, shx
+        bbox = temp.getbbox()
+        if bbox is None:
+            return
+        crop = temp.crop(bbox)
+        # re-apply flips first (local space), then shear + rotation
+        if fx0: crop = crop.transpose(Image.FLIP_LEFT_RIGHT)
+        if fy0: crop = crop.transpose(Image.FLIP_TOP_BOTTOM)
+        out = _shear_and_rotate(crop, rot0, shx)
+        cx_px = int(mm_to_px(t.x + t.width / 2.0, dpi))
+        cy_px = int(mm_to_px(t.y + t.height / 2.0, dpi))
+        _alpha_composite_clipped(canvas, out,
+                                 cx_px - out.width // 2,
+                                 cy_px - out.height // 2)
+        return
+    _render_object_dispatch_raw(obj, canvas, resources, variables, dpi)
+
+
+def _render_object_dispatch_raw(obj, canvas, resources, variables, dpi):
     if   isinstance(obj, TextBox):  _render_textbox(obj, canvas, resources, variables, dpi)
     elif isinstance(obj, ImageBox): _render_imagebox(obj, canvas, resources, variables, dpi)
     elif isinstance(obj, SvgBox):   _render_svgbox(obj, canvas, dpi)
@@ -618,9 +767,86 @@ def _render_object_dispatch(obj, canvas, resources, variables, dpi):
     elif isinstance(obj, SubDocumentBox):
         _render_subdocument(obj, canvas, resources, variables, dpi)
     elif isinstance(obj, Group):
-        for child in obj.flatten():
-            if is_visible(child, variables):
-                _render_object_dispatch(child, canvas, resources, variables, dpi)
+        _render_group(obj, canvas, resources, variables, dpi)
+
+
+def _render_group(obj, canvas, resources, variables, dpi):
+    """v4.3.5.49: render a group. With no rotation, draw the children straight
+    onto the canvas (fast, unchanged). With rotation, render the children into a
+    buffer sized to their bounding box, rotate the whole buffer about the group
+    center, and paste it back -- so the group rotates as a single unit (its box
+    is rotated, like every other object) and resizing happens in the group's
+    local, un-rotated space. This buffer path is also the basis for effects on a
+    group as a whole."""
+    from PIL import Image
+    rot = getattr(obj.transform, "rotation", 0) or 0
+    kids = [c for c in obj.flatten() if is_visible(c, variables)]
+    if rot % 360 == 0 or not kids:
+        for child in kids:
+            # v4.3.5.50: via _render_object so a child's OWN effects render too
+            _render_object(child, canvas, resources, variables, dpi)
+        return
+    # bounding box of the children in their (un-rotated) world coords.
+    # v4.3.5.68: shear each corner about the child center before its rotation,
+    # matching the renderer and compute_bounds (4.3.5.66). Without this the buffer
+    # was sized from un-sheared corners, so a sheared child (e.g. from a rotated
+    # group resize) overflowed the buffer and got clipped (a cut-off corner).
+    import math as _m
+    xs, ys = [], []
+    for c in kids:
+        t = c.transform
+        ccx, ccy = t.x + t.width / 2.0, t.y + t.height / 2.0
+        crot = _m.radians(getattr(t, "rotation", 0) or 0)
+        cshx = getattr(t, "shear_x", 0.0) or 0.0
+        cos_c, sin_c = _m.cos(crot), _m.sin(crot)
+        for (px, py) in [(t.x, t.y), (t.x + t.width, t.y),
+                         (t.x + t.width, t.y + t.height), (t.x, t.y + t.height)]:
+            dx, dy = px - ccx, py - ccy
+            dx = dx + cshx * dy
+            xs.append(ccx + dx * cos_c - dy * sin_c)
+            ys.append(ccy + dx * sin_c + dy * cos_c)
+    minx, miny, maxx, maxy = min(xs), min(ys), max(xs), max(ys)
+    pad = 2
+    bw = max(1, int(mm_to_px(maxx - minx, dpi)) + pad * 2)
+    bh = max(1, int(mm_to_px(maxy - miny, dpi)) + pad * 2)
+    buf = Image.new("RGBA", (bw, bh), (0, 0, 0, 0))
+    # render children into the buffer, shifted so the bbox origin maps to (pad)
+    import copy as _cp
+    for c in kids:
+        cc = _cp.copy(c)
+        cc.transform = _cp.copy(c.transform)
+        cc.transform.x = c.transform.x - minx + px_to_mm(pad, dpi)
+        cc.transform.y = c.transform.y - miny + px_to_mm(pad, dpi)
+        _render_object(cc, buf, resources, variables, dpi)   # v4.3.5.50: own fx
+    # rotate the children buffer and paste so the pivot lands on pivot_world.
+    # v4.3.5.65: rotate about the GROUP BOX center (obj.transform) so the other
+    # children don't dance when one is edited, but do it with a TIGHT expand=True
+    # rotation (no giant square intermediate). 4.3.5.64 embedded buf in a 2*rad
+    # square so a center-rotation would pivot about the box center; that wasted
+    # memory on long groups and added square padding. Instead: rotate buf about
+    # its own center (expand), then compute where the pivot landed and paste so
+    # it sits on pivot_world. An explicit rotation_pivot overrides the box center.
+    import math as _m2
+    piv = getattr(obj, "rotation_pivot", None)
+    if piv is not None:
+        pivot_wx, pivot_wy = float(piv[0]), float(piv[1])
+    else:
+        pivot_wx = obj.transform.x + obj.transform.width / 2.0
+        pivot_wy = obj.transform.y + obj.transform.height / 2.0
+    # pivot inside the children buffer (px): children drawn from (minx,miny)+pad
+    pivot_bx = mm_to_px(pivot_wx - minx, dpi) + pad
+    pivot_by = mm_to_px(pivot_wy - miny, dpi) + pad
+    rotated = buf.rotate(-rot, expand=True, resample=Image.BICUBIC)
+    # the pivot's offset from buf center rotates by +rot (calibrated for rotate(-rot))
+    ox = pivot_bx - buf.width / 2.0
+    oy = pivot_by - buf.height / 2.0
+    rr = _m2.radians(rot)
+    cos_r = _m2.cos(rr); sin_r = _m2.sin(rr)
+    pivot_rx = rotated.width / 2.0 + (ox * cos_r - oy * sin_r)
+    pivot_ry = rotated.height / 2.0 + (ox * sin_r + oy * cos_r)
+    paste_x = int(round(mm_to_px(pivot_wx, dpi) - pivot_rx))
+    paste_y = int(round(mm_to_px(pivot_wy, dpi) - pivot_ry))
+    _alpha_composite_clipped(canvas, rotated, paste_x, paste_y)
 
 
 def _render_svgbox(obj, canvas, dpi):
@@ -776,6 +1002,26 @@ def _blur_L(img, radius_px):
                 _gpu.blur_gpu_count += 1
                 return res
             _gpu.blur_cpu_count += 1
+    except Exception:
+        pass
+    # v4.4.0 (WYSIWYG perf): a Gaussian is essentially scale-invariant, so a
+    # LARGE-radius blur can run on a downscaled matte and be upscaled back:
+    # blur cost ~ O(pixels x radius), so /s on both axes plus radius/s gives
+    # ~s^3 less work with visually identical soft shadows/glows (these mattes
+    # are smooth by definition). Small radii keep the exact path. This is the
+    # main CPU cost of effect-heavy pages (several drop shadows per card at
+    # 150-300 render DPI), measured parity: mean |diff| < 1/255 per channel.
+    try:
+        if radius_px > 6.0:
+            w, h = img.size
+            s_f = max(1, min(4, int(radius_px / 4.0)))
+            if s_f > 1 and min(w, h) // s_f >= 4:
+                from PIL import Image as _Img
+                small = img.resize((max(1, w // s_f), max(1, h // s_f)),
+                                   _Img.BILINEAR)
+                small = small.filter(
+                    ImageFilter.GaussianBlur(radius_px / float(s_f)))
+                return small.resize((w, h), _Img.BILINEAR)
     except Exception:
         pass
     return img.filter(ImageFilter.GaussianBlur(radius_px))
@@ -1400,12 +1646,21 @@ def _apply_layer_effect_below(canvas, obj_buf, effect, dpi, paste_pos):
                 a1 = (color2[3] if len(color2) > 3 else 255) / 255.0
                 astops = [[0.0, a0], [1.0, a1]]
 
-        ls_layer = _long_shadow_matte(alpha, dxu, dyu, length_px,
+        # v4.3.6.24: _long_shadow_matte crops its output to the INPUT alpha's
+        # bbox, so a shadow throwing PAST the object was clipped to the object's
+        # own box -- nothing extending beyond it was ever visible. Pad the alpha
+        # by the throw length (+ blur) on every side and composite at the shifted
+        # origin, giving the shadow room to extend beyond the object.
+        ls_pad = int(length_px) + int(math.ceil(size_px)) + 4
+        alpha_ls = Image.new("L", (bw + 2 * ls_pad, bh + 2 * ls_pad), 0)
+        alpha_ls.paste(alpha, (ls_pad, ls_pad))
+        ls_layer = _long_shadow_matte(alpha_ls, dxu, dyu, length_px,
                                       cstops, astops, bstops)
         if op_alpha != 255:
             a = ls_layer.getchannel("A").point(lambda v, oa=op_alpha: int(v * oa / 255))
             ls_layer.putalpha(a)
-        _composite_with_blend(canvas, ls_layer, (px, py), effect.blend_mode)
+        _composite_with_blend(canvas, ls_layer, (px - ls_pad, py - ls_pad),
+                              effect.blend_mode)
 
     elif effect.type == 'bevel' and effect.bevel_kind == 'outer':
         _render_bevel_shaded(canvas, alpha, effect, dpi, px, py, bw, bh, outer=True)
@@ -1622,6 +1877,24 @@ def _render_halftone_mosaic(obj_buf, alpha, effect, dpi, bw, bh):
         chans = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
         vmaps = [Rc / 255.0, Gc / 255.0, Bc / 255.0]
         kinds = ['add', 'add', 'add']
+    elif mode == 'mono':
+        # v4.3.6.24: single-ink halftone. "mono" used to fall through to the
+        # CMYK branch, so a teal fill came out as cyan/magenta/yellow/black dots.
+        # Instead paint ONE ink -- the layer's own average colour, so a teal fill
+        # gives teal dots -- with dot size tracking coverage (alpha * darkness),
+        # on a transparent background (only the dots show).
+        _m2 = a_arr > 0.01
+        if _m2.any():
+            ink = (float(Rc[_m2].mean()), float(Gc[_m2].mean()), float(Bc[_m2].mean()))
+        else:
+            ink = (0.0, 0.0, 0.0)
+        # dot coverage tracks darkness (so a visible raster shows even on a
+        # solid fill), with a small floor so light fills still register; the
+        # alpha channel tapers the dots where the layer fades out.
+        _dark = np.clip(0.12 + 0.88 * dark_amt, 0.0, 1.0)
+        chans = [tuple(ink)]
+        vmaps = [np.clip(_dark * a_arr, 0.0, 1.0)]
+        kinds = ['over']
     else:
         chans = [(0, 255, 255), (255, 0, 255), (255, 255, 0), (0, 0, 0)]
         rn = Rc / 255.0; gn = Gc / 255.0; bn = Bc / 255.0
@@ -1646,6 +1919,10 @@ def _render_halftone_mosaic(obj_buf, alpha, effect, dpi, bw, bh):
     K = 20
     Rrot = 8 if randrot else 1
     maxd = max(2, int(round(cell * oscale * sizef)))
+    if mode == 'mono':
+        # a full mono dot should be about one cell, so the dot raster stays
+        # visible instead of merging into a near-solid fill at default scale.
+        maxd = max(2, int(round(cell)))
 
     pat_arrs = [_ht_pattern_stencil(b) for b in (getattr(effect, 'ht_patterns', []) or [])]
 
@@ -1668,7 +1945,7 @@ def _render_halftone_mosaic(obj_buf, alpha, effect, dpi, bw, bh):
             bucket_cache[key] = _ht_make_buckets(s, maxd, K, Rrot, is_shape)
         chan_buckets.append(bucket_cache[key])
 
-    if mode == 'rgb':
+    if mode == 'rgb' or mode == 'mono':
         out = np.zeros((bh, bw, 3), np.float32)
     else:
         out = np.full((bh, bw, 3), 255.0, np.float32)
@@ -1766,7 +2043,13 @@ def _render_halftone_mosaic(obj_buf, alpha, effect, dpi, bw, bh):
     bg = (getattr(effect, 'ht_background', '') or '').lower()
     if not bg:
         bg = 'layer' if getattr(effect, 'ht_keep_background', False) else 'native'
-    base = a_arr.copy() if bg == 'native' else cover
+    # v4.3.6.24: mono paints ink dots on a zero (transparent) base, so its alpha
+    # MUST be the dot coverage -- a 'native' full-silhouette alpha would fill the
+    # whole box with the black base between dots.
+    if mode == 'mono':
+        base = cover
+    else:
+        base = a_arr.copy() if bg == 'native' else cover
     if clip == 'hard':
         base = base * (a_arr > 0.5)
     elif clip == 'soft':
@@ -1989,8 +2272,24 @@ def _apply_layer_effect_above(canvas, obj_buf, effect, dpi, paste_pos):
             return
         acc_rgb = Image.new("RGB", (bw, bh), (0, 0, 0))
         acc_a = Image.new("L", (bw, bh), 0)
+        # v4.3.5.2: the per-channel source must include the object's silhouette,
+        # not just the channel's own brightness. A black (or fully saturated
+        # single-colour) object has near-zero R/G/B channels, so colorizing the
+        # channel alone produced black on every layer -> the channels never
+        # separated and the result was a flat black blob. Mixing each channel
+        # with the alpha silhouette means a solid object always carries its
+        # tint and the three offset layers actually split into colour fringes,
+        # while still respecting real channel detail in photographic content.
+        import numpy as _np
+        a_np = _np.asarray(a, dtype=_np.float32) / 255.0
         for ch, col, off, ang, dist in specs:
-            tint = ImageOps.colorize(ch, (0, 0, 0), (int(col[0]), int(col[1]), int(col[2])))
+            ch_np = _np.asarray(ch, dtype=_np.float32) / 255.0
+            # source intensity: the brighter of the channel and the silhouette,
+            # so flat-dark areas inside the object still get coloured
+            src = _np.maximum(ch_np, a_np)
+            src_img = Image.fromarray((src * 255.0).astype('uint8'), "L")
+            tint = ImageOps.colorize(src_img, (0, 0, 0),
+                                     (int(col[0]), int(col[1]), int(col[2])))
             layer = tint.convert("RGBA"); layer.putalpha(a)
             placed = Image.new("RGBA", (bw, bh), (0, 0, 0, 0))
             if mode == 'radial':
@@ -2166,39 +2465,61 @@ def _apply_blend_mode_internal(base, top, mode):
 # ── Gradient ─────────────────────────────────────────────────────────────────
 
 def _render_gradient(w, h, gradient):
-    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    if not gradient or not gradient.stops: return img
-    pixels = img.load()
+    # v4.3.6.25: vectorised gradient fill. The old code ran a per-pixel Python
+    # loop calling color_at() for every pixel -- ~2.2M calls for an A4 @150dpi,
+    # so a full-page gradient took ~7.6s (35x a solid fill) and scaled ~O(dpi^2).
+    # Now: build a 2048-entry colour LUT once (np.interp over the stops), compute
+    # the per-pixel parameter t with numpy broadcasting, and map t -> LUT with a
+    # single fancy-index. ~100x faster, output identical to <=1/255 per channel.
+    import numpy as np
+    if not gradient or not gradient.stops:
+        return Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    if w < 1 or h < 1:
+        return Image.new("RGBA", (max(1, w), max(1, h)), (0, 0, 0, 0))
+
     stops = sorted(gradient.stops, key=lambda s: s[0])
+    ts = np.clip(np.array([s[0] for s in stops], dtype=np.float64), 0.0, 1.0)
 
-    def color_at(t):
-        t = max(0.0, min(1.0, t))
-        for i in range(len(stops) - 1):
-            if stops[i][0] <= t <= stops[i+1][0]:
-                t0, c0 = stops[i]; t1, c1 = stops[i+1]
-                if t1 == t0: return tuple(int(v) for v in c1)
-                f = (t - t0) / (t1 - t0)
-                return tuple(int(c0[k] + (c1[k] - c0[k]) * f) for k in range(4))
-        return tuple(int(v) for v in stops[-1][1])
+    def _rgba4(c):
+        c = tuple(c)
+        return c if len(c) == 4 else (c[0], c[1], c[2], 255)
+    cols = np.array([_rgba4(s[1]) for s in stops], dtype=np.float64)   # (N, 4)
+    # np.interp requires strictly increasing sample positions; nudge duplicates
+    # (a "hard stop" where two stops share an offset) so it produces a sharp edge
+    # rather than undefined behaviour.
+    for i in range(1, len(ts)):
+        if ts[i] <= ts[i - 1]:
+            ts[i] = ts[i - 1] + 1e-6
 
+    LUT_N = 2048
+    lut_t = np.linspace(0.0, 1.0, LUT_N)
+    lut = np.empty((LUT_N, 4), dtype=np.uint8)
+    for k in range(4):
+        lut[:, k] = np.clip(np.interp(lut_t, ts, cols[:, k]), 0, 255).astype(np.uint8)
+
+    xx = np.arange(w, dtype=np.float32)
+    yy = np.arange(h, dtype=np.float32)
     if gradient.type == "linear":
         ang = math.radians(gradient.angle)
         dx, dy = math.cos(ang), math.sin(ang)
-        corners = [(0,0),(w,0),(0,h),(w,h)]
-        projs = [px*dx + py*dy for px,py in corners]
+        corners = [(0, 0), (w, 0), (0, h), (w, h)]
+        projs = [px * dx + py * dy for px, py in corners]
         pmin, pmax = min(projs), max(projs)
         prange = pmax - pmin if pmax != pmin else 1.0
-        for y in range(h):
-            for x in range(w):
-                pixels[x, y] = color_at((x*dx + y*dy - pmin) / prange)
+        t = (xx[None, :] * np.float32(dx) + yy[:, None] * np.float32(dy)
+             - np.float32(pmin)) / np.float32(prange)
     else:
-        cx, cy = gradient.center[0]*w, gradient.center[1]*h
+        cx, cy = gradient.center[0] * w, gradient.center[1] * h
         max_r = gradient.radius * max(w, h)
-        for y in range(h):
-            for x in range(w):
-                t = math.hypot(x-cx, y-cy) / max_r if max_r > 0 else 0
-                pixels[x, y] = color_at(t)
-    return img
+        if max_r > 0:
+            t = np.hypot(xx[None, :] - np.float32(cx),
+                         yy[:, None] - np.float32(cy)) / np.float32(max_r)
+        else:
+            t = np.zeros((h, w), dtype=np.float32)
+
+    idx = np.clip(t * np.float32(LUT_N - 1), 0, LUT_N - 1).astype(np.int32)
+    out = lut[idx]                                    # (h, w, 4), fancy index
+    return Image.fromarray(out, "RGBA")
 
 
 # ── TextBox ──────────────────────────────────────────────────────────────────
@@ -2209,12 +2530,21 @@ def _render_textbox(obj, canvas, resources, variables, dpi):
     w_px = mm_to_px(t.width, dpi); h_px = mm_to_px(t.height, dpi)
     if w_px < 1 or h_px < 1: return
 
+    # v4.4.0 (BUG #11b): embedded fonts resolve through the weight-aware
+    # registry (real family from the font's name table), not by a filename
+    # substring -- "Nunito Sans" now matches "NunitoSans-Regular.ttf" and
+    # bold/italic pick the right file.
     font_data = None
     if resources:
-        for entry in resources.all_entries():
-            if (entry.mime_type in ("font/ttf","font/otf","application/x-font-ttf","application/x-font-opentype")
-                    and obj.style.font_family.lower() in entry.filename.lower()):
-                font_data = entry.data; break
+        try:
+            from edof.engine.text_engine import (register_resource_fonts,
+                                                 embedded_font_bytes)
+            register_resource_fonts(resources)
+            font_data = embedded_font_bytes(obj.style.font_family,
+                                            bool(obj.style.bold),
+                                            bool(obj.style.italic))
+        except Exception:
+            font_data = None
 
     tmp = Image.new("RGBA", (max(1, int(w_px)), max(1, int(h_px))), (0, 0, 0, 0))
     td  = ImageDraw.Draw(tmp, "RGBA")
@@ -2227,10 +2557,37 @@ def _render_textbox(obj, canvas, resources, variables, dpi):
         fd = _rgba(obj.fill.color)
         td.rectangle([0, 0, w_px, h_px], fill=(*fd[:3], int(obj.fill.opacity * fd[3])))
 
-    if obj.border:
+    if obj.border and getattr(obj.border, 'enabled', True):
         bw = max(1, int(mm_to_px(obj.border.width, dpi)))
-        td.rectangle([0, 0, int(w_px) - 1, int(h_px) - 1],
-                     outline=_rgba(obj.border.color)[:4], width=bw)
+        bcol = _rgba(obj.border.color)[:4]
+        brad = float(getattr(obj.border, 'radius', 0.0) or 0.0)
+        bstyle = (getattr(obj.border, 'style', '') or '').lower()
+        bdash = getattr(obj.border, 'dash', None)
+        x1b = int(w_px) - 1; y1b = int(h_px) - 1
+        if brad > 0:
+            rpx = max(0, int(mm_to_px(brad, dpi)))
+            td.rounded_rectangle([0, 0, x1b, y1b], radius=rpx,
+                                 outline=bcol, width=bw)
+        elif bstyle in ('dashed', 'dash', 'dot', 'dotted') or bdash:
+            # dashed rectangle: stroke each edge with a dash pattern
+            dl = max(2, bw * 3)
+            def _dash_line(x0, y0, x1, y1):
+                import math as _mm
+                ln = _mm.hypot(x1 - x0, y1 - y0)
+                if ln <= 0: return
+                ux = (x1 - x0) / ln; uy = (y1 - y0) / ln
+                d = 0.0
+                while d < ln:
+                    seg = min(dl, ln - d)
+                    if int((d / dl)) % 2 == 0:
+                        td.line([x0 + ux * d, y0 + uy * d,
+                                 x0 + ux * (d + seg), y0 + uy * (d + seg)],
+                                fill=bcol, width=bw)
+                    d += dl
+            _dash_line(0, 0, x1b, 0); _dash_line(x1b, 0, x1b, y1b)
+            _dash_line(x1b, y1b, 0, y1b); _dash_line(0, y1b, 0, 0)
+        else:
+            td.rectangle([0, 0, x1b, y1b], outline=bcol, width=bw)
 
     # Text — synthesize a single run from plain text if obj.runs is empty,
     # so the unified runs+deformation path handles everything.
@@ -2330,10 +2687,22 @@ def _render_imagebox(obj, canvas, resources, variables, dpi):
                         src = Image.open(io.BytesIO(resp.read())).convert("RGBA")
                 except Exception: pass
     if src is None:
-        if not obj.resource_id or obj.resource_id not in resources: return
-        entry = resources.get(obj.resource_id)
-        try: src = Image.open(io.BytesIO(entry.data)).convert("RGBA")
-        except Exception: return
+        rid = obj.resource_id
+        if rid and rid in resources:
+            entry = resources.get(rid)
+            src = _decode_image_source((rid, len(entry.data)), entry.data)
+            if src is None: return
+        elif rid and isinstance(rid, str) and os.path.isfile(rid):
+            # v4.3.6.27: resource_id may be a FILE PATH, not a resource key --
+            # this is how a batch fills an image column (the CSV cell is a path).
+            try:
+                _mt = os.path.getmtime(rid)
+            except Exception:
+                _mt = 0
+            src = _decode_image_source((rid, _mt), rid, is_path=True)
+            if src is None: return
+        else:
+            return
 
     t = obj.transform
     x_px = int(mm_to_px(t.x, dpi)); y_px = int(mm_to_px(t.y, dpi))
@@ -2497,10 +2866,15 @@ def _render_shape(obj, canvas, dpi):
     if st == SHAPE_LINE and obj.points and len(obj.points) >= 2:
         sc = _rgba(obj.stroke.color, (0,0,0,255))
         sw = max(1, int(mm_to_px(obj.stroke.width, dpi)))
-        p1, p2 = obj.points[0], obj.points[1]
-        # v4.1.9/4.1.10: route through tmp buffer when rotation or flip is set
+        # v4.3.5.48: a line's points are now LOCAL (relative to transform.x/y),
+        # exactly like a path's path_data, so the renderer adds the transform.
+        # This makes move / resize / rotate / group / batch all work through the
+        # transform, like every other object. (Migration on load converts old
+        # absolute-point lines to local.)
+        p1 = (obj.points[0][0] + t.x, obj.points[0][1] + t.y)
+        p2 = (obj.points[1][0] + t.x, obj.points[1][1] + t.y)
+        # route through tmp buffer when rotation or flip is set
         if t.rotation % 360 != 0 or t.flip_h or t.flip_v:
-            # Compute the bbox containing both endpoints in mm
             xmin = min(p1[0], p2[0]); ymin = min(p1[1], p2[1])
             xmax = max(p1[0], p2[0]); ymax = max(p1[1], p2[1])
             bw_mm = max(0.1, xmax - xmin)
@@ -2514,7 +2888,6 @@ def _render_shape(obj, canvas, dpi):
             lp2 = (int(mm_to_px(p2[0]-xmin, dpi)) + sw,
                    int(mm_to_px(p2[1]-ymin, dpi)) + sw)
             bd.line([lp1, lp2], fill=sc[:4], width=sw)
-            # v4.1.10: flip before rotation
             if t.flip_h: buf = buf.transpose(Image.FLIP_LEFT_RIGHT)
             if t.flip_v: buf = buf.transpose(Image.FLIP_TOP_BOTTOM)
             if t.rotation % 360 != 0:
@@ -2608,11 +2981,21 @@ def _render_shape(obj, canvas, dpi):
             canvas.alpha_composite(buf, (max(0, _px), max(0, _py)))
         return
 
-    tmp = Image.new("RGBA", (max(1, int(w_px)), max(1, int(h_px))), (0,0,0,0))
+    # v4.3.5.8: pad the shape buffer by half the stroke width on every side so
+    # the outer half of the stroke isn't clipped at the right/bottom edge (this
+    # affected ellipse most visibly, but rect/line/polygon strokes too). All
+    # drawing is offset by PADs; the final paste is shifted back by the same.
+    sw  = max(1, int(mm_to_px(obj.stroke.width, dpi)))
+    import math as _math
+    SPAD = int(_math.ceil(sw / 2.0)) + 1
+    tmp = Image.new("RGBA", (max(1, int(w_px)) + 2 * SPAD,
+                             max(1, int(h_px)) + 2 * SPAD), (0, 0, 0, 0))
     td  = ImageDraw.Draw(tmp, "RGBA")
     fc  = _rgba(obj.fill.color)
     sc  = _rgba(obj.stroke.color, (0,0,0,255))
-    sw  = max(1, int(mm_to_px(obj.stroke.width, dpi)))
+    # local coords: shape spans [SPAD, SPAD+w_px] x [SPAD, SPAD+h_px]
+    _ox = SPAD; _oy = SPAD
+    _x1 = SPAD + w_px; _y1 = SPAD + h_px
 
     if obj.fill.gradient:
         gimg = _render_gradient(int(w_px), int(h_px), obj.fill.gradient)
@@ -2630,39 +3013,49 @@ def _render_shape(obj, canvas, dpi):
             md.ellipse([0,0,w_px,h_px], fill=255)
         else:
             md.rectangle([0,0,w_px,h_px], fill=255)
-        gimg.putalpha(mask)
-        tmp.alpha_composite(gimg)
+        # v4.3.6.28: keep the gradient's own alpha (per stop alpha), the shape
+        # mask only clips it. putalpha(mask) used to overwrite stop alpha, so
+        # a 255 -> 0 alpha ramp rendered fully opaque. Also apply fill_opacity
+        # here, matching the SHAPE_PATH branch.
+        fop = float(getattr(obj.fill, 'opacity', 1.0))
+        if fop < 1.0:
+            mask = mask.point(lambda v, _f=fop: int(v * _f))
+        gimg.putalpha(ImageChops.multiply(gimg.split()[3], mask))
+        tmp.alpha_composite(gimg, (_ox, _oy))
         if st == SHAPE_RECT:
             radii, eq = _effective_corner_radii(obj, w_px, h_px, dpi)
             if eq:
                 r = int(radii[0])
-                if r > 0: td.rounded_rectangle([0,0,w_px,h_px], radius=r, outline=sc[:4], width=sw)
-                else:     td.rectangle([0,0,w_px,h_px], outline=sc[:4], width=sw)
+                if r > 0: td.rounded_rectangle([_ox,_oy,_x1,_y1], radius=r, outline=sc[:4], width=sw)
+                else:     td.rectangle([_ox,_oy,_x1,_y1], outline=sc[:4], width=sw)
             else:
-                p = _rounded_corner_points(w_px, h_px, radii, inset=sw/2.0)
+                p = [(px + _ox, py + _oy)
+                     for px, py in _rounded_corner_points(w_px, h_px, radii, inset=sw/2.0)]
                 td.line(p + [p[0]], fill=sc[:4], width=sw, joint='curve')
         elif st == SHAPE_ELLIPSE:
-            td.ellipse([0,0,w_px,h_px], outline=sc[:4], width=sw)
+            td.ellipse([_ox,_oy,_x1,_y1], outline=sc[:4], width=sw)
     else:
         if st == SHAPE_RECT:
             radii, eq = _effective_corner_radii(obj, w_px, h_px, dpi)
             if eq:
                 r = int(radii[0])
-                if r > 0: td.rounded_rectangle([0,0,w_px,h_px], radius=r, fill=fc[:4] if fc else None, outline=sc[:4], width=sw)
-                else:     td.rectangle([0,0,w_px,h_px], fill=fc[:4] if fc else None, outline=sc[:4], width=sw)
+                if r > 0: td.rounded_rectangle([_ox,_oy,_x1,_y1], radius=r, fill=fc[:4] if fc else None, outline=sc[:4], width=sw)
+                else:     td.rectangle([_ox,_oy,_x1,_y1], fill=fc[:4] if fc else None, outline=sc[:4], width=sw)
             else:
-                pf = _rounded_corner_points(w_px, h_px, radii)
+                pf = [(px + _ox, py + _oy)
+                      for px, py in _rounded_corner_points(w_px, h_px, radii)]
                 if fc: td.polygon(pf, fill=fc[:4])
                 if sc and sw > 0:
-                    ps = _rounded_corner_points(w_px, h_px, radii, inset=sw/2.0)
+                    ps = [(px + _ox, py + _oy)
+                          for px, py in _rounded_corner_points(w_px, h_px, radii, inset=sw/2.0)]
                     td.line(ps + [ps[0]], fill=sc[:4], width=sw, joint='curve')
         elif st == SHAPE_ELLIPSE:
-            td.ellipse([0,0,w_px,h_px], fill=fc[:4] if fc else None, outline=sc[:4], width=sw)
+            td.ellipse([_ox,_oy,_x1,_y1], fill=fc[:4] if fc else None, outline=sc[:4], width=sw)
         elif st == SHAPE_LINE:
-            td.line([0,0,w_px,h_px], fill=sc[:4] if sc else (0,0,0,255), width=sw)
+            td.line([_ox,_oy,_x1,_y1], fill=sc[:4] if sc else (0,0,0,255), width=sw)
         elif st in (SHAPE_POLYGON, SHAPE_ARROW):
             if obj.points:
-                pts = [(mm_to_px(px,dpi), mm_to_px(py,dpi)) for px,py in obj.points]
+                pts = [(mm_to_px(px,dpi) + _ox, mm_to_px(py,dpi) + _oy) for px,py in obj.points]
                 td.polygon(pts, fill=fc[:4] if fc else None, outline=sc[:4])
 
     # v4.1.10: apply flip before rotation (consistent with text/image handling)
@@ -2674,8 +3067,8 @@ def _render_shape(obj, canvas, dpi):
         r2,g2,b2,a2 = tmp.split()
         a2 = a2.point(lambda v: int(v * obj.opacity))
         tmp = Image.merge("RGBA", (r2,g2,b2,a2))
-    px = int(x0 + w_px/2 - tmp.width/2) if t.rotation % 360 != 0 else int(x0)
-    py = int(y0 + h_px/2 - tmp.height/2) if t.rotation % 360 != 0 else int(y0)
+    px = int(x0 + w_px/2 - tmp.width/2) if t.rotation % 360 != 0 else int(x0 - SPAD)
+    py = int(y0 + h_px/2 - tmp.height/2) if t.rotation % 360 != 0 else int(y0 - SPAD)
     _apply_blend(canvas, tmp, (px, py), getattr(obj, "blend_mode", "normal"))
 
 
@@ -2697,24 +3090,38 @@ def _render_qrcode(obj, canvas, variables, dpi):
     qr.add_data(data); qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
 
+    # v4.4.0 perf: recolour via a 1-bit mask + two flat fills instead of the
+    # old per-pixel Python loop (O(w*h) tuple churn on every uncoloured QR).
     fg = tuple(int(v) for v in obj.fg_color); bg = tuple(int(v) for v in obj.bg_color)
-    fg_r,fg_g,fg_b = fg[:3]; fg_a = fg[3] if len(fg)==4 else 255
-    bg_r,bg_g,bg_b = bg[:3]; bg_a = bg[3] if len(bg)==4 else 255
-    pixels = qr_img.load()
-    for x in range(qr_img.width):
-        for y in range(qr_img.height):
-            r,g,b,_ = pixels[x,y]
-            pixels[x,y] = (fg_r,fg_g,fg_b,fg_a) if r < 128 else (bg_r,bg_g,bg_b,bg_a)
+    fg_rgba = (fg + (255,))[:4]
+    bg_rgba = (bg + (255,))[:4]
+    mask = qr_img.convert("L").point(lambda v: 255 if v < 128 else 0, mode="1")
+    out = Image.new("RGBA", qr_img.size, bg_rgba)
+    out.paste(fg_rgba, (0, 0), mask)
+    qr_img = out
 
     t = obj.transform
     x_px = int(mm_to_px(t.x, dpi)); y_px = int(mm_to_px(t.y, dpi))
     w_px = int(mm_to_px(t.width, dpi)); h_px = int(mm_to_px(t.height, dpi))
-    size = min(w_px, h_px)
+    # v4.3.5.34: QR codes are square by nature, but honour the smaller side and
+    # CENTER the code in the transform box so a non-square box doesn't silently
+    # ignore one dimension's change. (A QR can't be stretched and still scan.)
+    size = max(1, min(w_px, h_px))
     qr_img = qr_img.resize((size, size), Image.NEAREST)
+    # v4.3.5.34: apply the object's opacity (it was ignored entirely before, so
+    # a batched opacity did nothing on a QR code).
+    op = float(getattr(obj, "opacity", 1.0))
+    if op < 1.0:
+        a = qr_img.split()[3].point(lambda v, _o=op: int(v * _o))
+        qr_img.putalpha(a)
+    # center within the transform box
+    off_x = x_px + (w_px - size) // 2
+    off_y = y_px + (h_px - size) // 2
     if t.rotation % 360 != 0:
         qr_img = qr_img.rotate(-t.rotation, expand=True)
-        x_px = int(x_px + w_px/2 - qr_img.width/2); y_px = int(y_px + h_px/2 - qr_img.height/2)
-    _apply_blend(canvas, qr_img, (x_px, y_px), getattr(obj, "blend_mode", "normal"))
+        off_x = int(x_px + w_px/2 - qr_img.width/2)
+        off_y = int(y_px + h_px/2 - qr_img.height/2)
+    _apply_blend(canvas, qr_img, (off_x, off_y), getattr(obj, "blend_mode", "normal"))
 
 
 # ── Table ────────────────────────────────────────────────────────────────────
@@ -2765,6 +3172,18 @@ def _render_table(obj, canvas, resources, variables, dpi):
 
     cd = ImageDraw.Draw(target_canvas, "RGBA")
 
+    # v4.4.0 perf: precompute the {variable} replacement pairs ONCE per table
+    # instead of per cell (the old code walked every variable for every cell,
+    # O(cells x variables) with a str.replace each).
+    _var_repl = None
+    if variables is not None:
+        try:
+            _var_repl = [("{" + n + "}", str(variables.get(n)))
+                         for n in variables.names()
+                         if variables.get(n) is not None]
+        except Exception:
+            _var_repl = None
+
     # Backgrounds
     for ri in range(n_rows):
         for ci in range(n_cols):
@@ -2792,11 +3211,10 @@ def _render_table(obj, canvas, resources, variables, dpi):
             else:
                 # Resolve {variable} placeholders in cell text
                 cell_text = cell.text
-                if variables and "{" in cell_text:
-                    for name in variables.names():
-                        v = variables.get(name)
-                        if v is not None:
-                            cell_text = cell_text.replace("{" + name + "}", str(v))
+                if _var_repl and "{" in cell_text:
+                    for k, v in _var_repl:
+                        if k in cell_text:
+                            cell_text = cell_text.replace(k, v)
                 render_text_onto(content_draw, cell_text, cell.style,
                                   pad, pad, cw - 2*pad, ch - 2*pad, dpi)
             target_canvas.alpha_composite(content_img, (int(cx), int(cy)))

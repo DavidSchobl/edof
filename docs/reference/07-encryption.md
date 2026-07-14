@@ -37,6 +37,16 @@ doc.can(ADMIN)                         # False
 
 There are five hierarchical permission levels. Higher levels imply all lower levels.
 
+> **Security model, read this before relying on levels.** Every password slot
+> wraps the SAME content key. Anyone who can unlock the document with ANY
+> valid password (even the lowest, fill/view) technically obtains the full
+> content key and could decrypt the whole payload with their own tooling.
+> Permission levels are enforced by the EDOF library and applications
+> (honor system), they are NOT cryptographic isolation between levels. Use
+> them to keep honest users in the right lane, not to hide content from
+> someone who holds any valid password. If two audiences must not see each
+> other's content, use two separately encrypted documents.
+
 | Level | Constant | Allows |
 |---|---|---|
 | `view`   | `VIEW`   | Render, print, export. No modifications. |
@@ -167,6 +177,9 @@ If the file is encrypted but no password supplied → raises `EdofPasswordRequir
 ```python
 doc = edof.load("secret.edof", recovery_key="7K3F-9XQM-2N8P-VR4A-HT6L-Z5BJ")
 ```
+
+The key is accepted in any form: with or without the dashes, upper or lower
+case (it is normalized before the slot is tried).
 
 The recovery key always grants ADMIN access. Useful when the admin password is lost.
 
@@ -356,7 +369,7 @@ When opening a legacy EDOF 2 archive that had an XOR password, the editor offers
 
 ### On the document
 
-```python
+```text
 # Setup
 doc.set_password(level, password) → str | None    # returns recovery key on first call
 doc.change_password(level, old_pwd, new_pwd)
@@ -383,7 +396,7 @@ doc.require(level)                                 # raises if denied
 
 ### On objects
 
-```python
+```text
 obj.lock_level = "design"      # str: "" | "fill" | "edit" | "design" | "admin"
 obj.lock_text = True           # bool
 

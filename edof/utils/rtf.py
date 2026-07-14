@@ -56,25 +56,67 @@ def _parse_rtf_color_table(text: str) -> List[Tuple[int, int, int]]:
 
 
 def _decode_rtf_unicode(s: str) -> str:
-    """Decode \\uNNNN? sequences and \\'XX hex sequences."""
-    # \uNNNN? form — RTF unicode (signed 16-bit)
-    def _u(m):
-        n = int(m.group(1))
-        if n < 0:
-            n += 65536
-        try:
-            return chr(n)
-        except ValueError:
-            return ""
-    s = re.sub(r"\\u(-?\d+)\??", _u, s)
-    # \'XX hex (cp1252 by default)
-    def _h(m):
-        try:
-            return bytes([int(m.group(1), 16)]).decode("cp1252", errors="replace")
-        except Exception:
-            return ""
-    s = re.sub(r"\\'([0-9a-fA-F]{2})", _h, s)
-    return s
+    """Decode \\uNNNN sequences and \\'XX hex sequences.
+
+    v4.4.0: honours the \\ucN skip count (RTF default 1). After \\uNNNN a
+    reader must skip N fallback "characters" meant for non-unicode readers;
+    a fallback can be a literal char, '?', or a \\'XX hex escape. The old
+    regex only ate an optional '?', so Word's cp1252 fallback bytes leaked
+    into the text as duplicate garbage. The skip count is scoped to groups
+    (saved on '{', restored on '}') like real RTF state."""
+    out = []
+    i = 0
+    n = len(s)
+    uc = 1
+    uc_stack = []
+    while i < n:
+        ch = s[i]
+        if ch == '{':
+            uc_stack.append(uc)
+            out.append(ch); i += 1; continue
+        if ch == '}':
+            uc = uc_stack.pop() if uc_stack else uc
+            out.append(ch); i += 1; continue
+        if ch == '\\':
+            m = re.match(r"\\uc(\d+) ?", s[i:])
+            if m:
+                try: uc = int(m.group(1))
+                except ValueError: pass
+                i += len(m.group(0)); continue
+            m = re.match(r"\\u(-?\d+) ?", s[i:])
+            if m:
+                num = int(m.group(1))
+                if num < 0:
+                    num += 65536
+                try:
+                    out.append(chr(num))
+                except ValueError:
+                    pass
+                i += len(m.group(0))
+                skip = uc
+                while skip > 0 and i < n:
+                    m2 = re.match(r"\\'[0-9a-fA-F]{2}", s[i:])
+                    if m2:
+                        i += len(m2.group(0))
+                    elif s[i] in '{}':
+                        break            # structural, never swallow
+                    elif s[i] == '\\':
+                        break            # another control word, stop skipping
+                    else:
+                        i += 1
+                    skip -= 1
+                continue
+            m = re.match(r"\\'([0-9a-fA-F]{2})", s[i:])
+            if m:
+                try:
+                    out.append(bytes([int(m.group(1), 16)])
+                               .decode("cp1252", errors="replace"))
+                except Exception:
+                    pass
+                i += len(m.group(0)); continue
+            out.append(ch); i += 1; continue
+        out.append(ch); i += 1
+    return "".join(out)
 
 
 def _strip_rtf_groups(text: str, group_names) -> str:
@@ -177,15 +219,22 @@ def import_rtf(path: str):
             if n == "par":
                 end_para()
             elif n == "page":
-                # Flush current paragraph and mark page break
-                end_para()
-                page_break_indices.append(len(paragraphs) - 1)
+                # Flush current paragraph and mark the break. v4.4.0: only
+                # close the paragraph when it has content; \par immediately
+                # followed by \page used to create a phantom empty paragraph
+                # (a stray blank line at the top of the new page).
+                if cur_run_text or paragraphs[-1]:
+                    end_para()
+                if (len(paragraphs) - 1) not in page_break_indices:
+                    page_break_indices.append(len(paragraphs) - 1)
             elif n == "b":
                 state["bold"] = (param != "0")
             elif n == "i":
                 state["italic"] = (param != "0")
             elif n == "ul":
-                state["underline"] = True
+                # v4.4.0: \ul0 means underline OFF (Word emits it); only a
+                # bare \ul or a non-zero param turns it on.
+                state["underline"] = (param != "0")
             elif n == "ulnone":
                 state["underline"] = False
             elif n == "fs":
@@ -350,7 +399,8 @@ def export_rtf(doc, path: str) -> None:
         ct += f"\\red{r}\\green{g}\\blue{b};"
     ct += "}"
     parts.append(ct)
-    parts.append(r"{\*\generator edof " + "4.0.3}")
+    from edof.version import __version__ as _edof_ver
+    parts.append(r"{\*\generator edof " + _edof_ver + "}")
     parts.append(r"\viewkind4\uc1\pard\f0")
 
     first_page = True

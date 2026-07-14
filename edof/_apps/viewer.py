@@ -136,11 +136,100 @@ class EdofViewer(QMainWindow):
         self._view.setBackgroundBrush(Qt.GlobalColor.darkGray)
         self._view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setCentralWidget(self._view)
+        # v4.4.1: clicking a hyperlink in the page follows it (external opens
+        # the browser, in-document jumps to the target's page). Detected on
+        # mouse release with negligible movement, so panning still works.
+        self._view.viewport().installEventFilter(self)
+        self._press_scene_pos = None
 
         self._status = QStatusBar()
         self._status_lbl = QLabel("No document loaded")
         self._status.addWidget(self._status_lbl)
         self.setStatusBar(self._status)
+
+    def eventFilter(self, obj, ev):
+        try:
+            from PyQt6.QtCore import QEvent
+            if obj is self._view.viewport():
+                if ev.type() == QEvent.Type.MouseButtonPress:
+                    self._press_scene_pos = ev.position()
+                elif ev.type() == QEvent.Type.MouseButtonRelease:
+                    pp = self._press_scene_pos
+                    self._press_scene_pos = None
+                    if pp is not None:
+                        dx = ev.position().x() - pp.x()
+                        dy = ev.position().y() - pp.y()
+                        if (dx * dx + dy * dy) < 16.0:
+                            if self._handle_link_click(ev.position()):
+                                return True
+        except Exception:
+            pass
+        return super().eventFilter(obj, ev)
+
+    def _link_at_view_pos(self, pos):
+        """v4.4.1: the link string under a viewport position, or None. Maps
+        the click through the view transform to page mm, then hit-tests the
+        text layout of every object with runs (topmost first; rotated boxes
+        are skipped, links there are an editor feature)."""
+        if not self._doc or not self._doc.pages or self._pixmap_item is None:
+            return None
+        dpi = float(getattr(self, "_last_render_dpi", 96) or 96)
+        sp = self._view.mapToScene(int(pos.x()), int(pos.y()))
+        px, py = sp.x(), sp.y()
+        page = self._doc.pages[self._page_idx]
+        from edof.engine.text_layout import layout_textbox
+        from edof.engine.transform import mm_to_px
+        for o in reversed(list(getattr(page, "objects", None) or [])):
+            runs = getattr(o, "runs", None)
+            if not runs or not any(getattr(r, "link", None) for r in runs):
+                continue
+            t = o.transform
+            if getattr(t, "rotation", 0) % 360 != 0:
+                continue
+            x0 = mm_to_px(t.x, dpi); y0 = mm_to_px(t.y, dpi)
+            x1 = mm_to_px(t.x + t.width, dpi); y1 = mm_to_px(t.y + t.height, dpi)
+            if not (x0 <= px <= x1 and y0 <= py <= y1):
+                continue
+            try:
+                lay = layout_textbox(o, dpi)
+            except Exception:
+                continue
+            for line in lay.lines:
+                for c in line.chars:
+                    if getattr(c, "is_newline", False):
+                        continue
+                    if (c.x <= px <= c.x + c.w
+                            and c.line_top <= py <= c.line_top + c.line_h):
+                        ri = getattr(c, "run_idx", None)
+                        if ri is not None and 0 <= ri < len(runs):
+                            return getattr(runs[ri], "link", None)
+        return None
+
+    def _handle_link_click(self, pos):
+        link = self._link_at_view_pos(pos)
+        # v4.4.0 security: validate before following; a link stored in an
+        # untrusted file must not smuggle javascript:/file:/... schemes.
+        from edof.utils.links import validate_link
+        link = validate_link(link)
+        if not link:
+            return False
+        if link.startswith("#"):
+            aid = link[1:]
+            for pi, pg in enumerate(self._doc.pages):
+                for o in (getattr(pg, "objects", None) or []):
+                    for r in (getattr(o, "runs", None) or []):
+                        if getattr(r, "anchor", None) == aid:
+                            self._goto_page(pi)
+                            return True
+            return True     # dead anchor: swallow the click anyway
+        url = link       # already validated + https-normalized above
+        try:
+            from PyQt6.QtGui import QDesktopServices
+            from PyQt6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl(url))
+        except Exception:
+            pass
+        return True
 
     def _build_menus(self):
         mb = self.menuBar()
@@ -291,6 +380,17 @@ class EdofViewer(QMainWindow):
         self._doc = doc
         self._filepath = filepath
         self._page_idx = 0
+        # v4.4.1: install the document's link style for link-run resolution
+        try:
+            from edof.format.styles import set_active_link_style
+            set_active_link_style(getattr(doc, "link_style", None))
+        except Exception:
+            pass
+        try:
+            from edof.engine.text_engine import register_resource_fonts
+            register_resource_fonts(getattr(doc, "resources", None))
+        except Exception:
+            pass
         self.setWindowTitle(f"{os.path.basename(filepath)} — EDOF Viewer {edof.__version__}")
 
         self._page_spin.blockSignals(True)
@@ -415,6 +515,7 @@ class EdofViewer(QMainWindow):
             QMessageBox.critical(self, "Render error", str(e))
             return
 
+        self._last_render_dpi = target_dpi     # v4.4.1: for link hit-testing
         pixmap = _pil_to_qpixmap(img)
         self._scene.clear()
         self._pixmap_item = self._scene.addPixmap(pixmap)

@@ -6,7 +6,7 @@ The `.edof` file is a ZIP archive. This document describes its internal structur
 - Understand the encryption layout
 - Debug corruption issues
 
-> Format version covered: **4.2.0**
+> Format version covered: **4.3.0** (all 4.3.0 additions are optional keys; 4.2.x readers that ignore unknown keys load these files, minus the new features)
 
 ---
 
@@ -497,3 +497,38 @@ unzip -p template.edof resources/img_a8d2c1 > extracted.png
 ```
 
 For encrypted documents, only the manifest is readable this way.
+
+---
+
+## Format 4.3.0 additions (edof 4.4.0)
+
+All additive and optional; absent keys mean "feature not used".
+
+**TextRun** — batch/link identity of a span:
+
+| Key | Meaning |
+|---|---|
+| `rid` | stable run id of a batch text variable span |
+| `var_name` | display name of the variable |
+| `link` | external URL or `#<anchor_id>` |
+| `anchor` | link-target id |
+| `anchor_name` | link-target display name |
+
+**Document** — `link_style`: `{color, underline, hover_color}` for
+document-wide link appearance (`null` = built-in blue underlined).
+
+**Document body** (document mode) — `header_objects` / `footer_objects`:
+lists of serialized objects repeated on every page as same-id clones
+(templates are the single source of truth; clones are never stored).
+Header/footer band boxes carry canonical ids `hf_header` / `hf_footer`;
+older per-page ids are migrated at load.
+
+**Batch column** — `extra_run_ids`: additional variable rids linked to the
+column, so one value drives several distinct variables that keep separate
+identities.
+
+**Resources** — fonts embedded by `Document.save(embed_fonts=True)` /
+`embed_used_fonts()` live in `resources/` like any other resource and are
+resolved weight-aware by the family+subfamily name from the font file.
+Resource references may also be relative file paths, resolved against the
+`.edof` file's folder (used by the batch "external sources" bundles).

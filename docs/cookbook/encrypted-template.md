@@ -83,10 +83,10 @@ foot.style.italic = True
 foot.style.alignment = "center"
 
 # Variables — these are what fillers will set
-doc.define_variable("invoice_number", required=True, label="Invoice number")
+doc.define_variable("invoice_number", required=True, description="Invoice number")
 doc.define_variable("date", type="date", required=True)
-doc.define_variable("client_name", required=True, label="Client name")
-doc.define_variable("client_address", default="", label="Client address")
+doc.define_variable("client_name", required=True, description="Client name")
+doc.define_variable("client_address", default="", description="Client address")
 doc.define_variable("item1_desc", default="-")
 doc.define_variable("item1_qty", default="")
 doc.define_variable("item1_price", default="")

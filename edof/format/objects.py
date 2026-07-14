@@ -23,7 +23,7 @@ from typing import Any, List, Optional, Dict
 
 from edof.engine.transform import Transform
 from edof.format.styles import (
-    TextStyle, StrokeStyle, FillStyle, ShadowStyle,
+    TextStyle, StrokeStyle, BorderStyle, FillStyle, ShadowStyle,
 )
 
 
@@ -53,6 +53,14 @@ class EdofObject:
     fill_opacity: float          = 1.0
     # v4.1.0: Photoshop-style layer effects (list of LayerEffect)
     effects:   List["LayerEffect"] = field(default_factory=list)
+    # v4.3.5.12: master "All effects" switch. When False, NO layer effect on
+    # this object renders, regardless of each effect's own 'enabled' flag -- but
+    # the effects stay on the object (so they aren't lost and can be batched).
+    # Exposed as the batchable attribute effects.all_enabled.
+    # v4.3.5.15: defaults to False (effects off) -- adding an effect via the UI
+    # turns it on. An object with no effects has nothing to show, so off is the
+    # natural default; the user can switch it off explicitly to hide effects.
+    effects_enabled: bool        = False
     # v4.0: conditional visibility — Python-style boolean expression
     # evaluated against doc.variables. Empty = always visible (uses .visible flag).
     visible_if: str              = ""
@@ -122,6 +130,7 @@ class EdofObject:
             "lock_text":  self.lock_text,     # v4.0.1
             "lock_position": self.lock_position,   # v4.1.0
             "effects":   [e.to_dict() for e in self.effects],   # v4.1.0
+            "effects_enabled": self.effects_enabled,   # v4.3.5.12
         }
 
     def to_dict(self) -> dict:
@@ -175,6 +184,14 @@ class EdofObject:
         # v4.1.0: layer effects
         from edof.format.styles import LayerEffect
         obj.effects = [LayerEffect.from_dict(e) for e in d.get("effects", [])]
+        # v4.3.5.15: effects_enabled defaults to False for new objects, but an
+        # older file (saved before this key existed) that HAS effects expected
+        # them to render -- so when the key is absent and effects are present,
+        # fall back to True for backwards compatibility.
+        if "effects_enabled" in d:
+            obj.effects_enabled = bool(d.get("effects_enabled"))
+        else:
+            obj.effects_enabled = bool(obj.effects)   # legacy: on iff it has effects
         return obj
 
     def copy(self) -> "EdofObject":
@@ -307,7 +324,7 @@ class TextBox(EdofObject):
         base.padding_top   = d.get("padding_top")
         base.padding_bot   = d.get("padding_bot")
         bd = d.get("border")
-        base.border        = StrokeStyle.from_dict(bd) if bd else None
+        base.border        = (BorderStyle.from_dict(bd) if isinstance(bd, dict) and bd.get("kind") == "border" else StrokeStyle.from_dict(bd)) if bd else None
         base.fill          = FillStyle.from_dict(d.get("fill", {"color": None}))
         # v4.1.21: per-paragraph alignment overrides — normalise keys to str
         pa = d.get("paragraph_alignments") or {}
@@ -344,7 +361,7 @@ class ImageBox(EdofObject):
         base.resource_id   = d.get("resource_id")
         base.fit_mode      = d.get("fit_mode", "stretch")
         bd = d.get("border")
-        base.border        = StrokeStyle.from_dict(bd) if bd else None
+        base.border        = (BorderStyle.from_dict(bd) if isinstance(bd, dict) and bd.get("kind") == "border" else StrokeStyle.from_dict(bd)) if bd else None
         base.corner_radius = float(d.get("corner_radius", 0.0))
         object.__setattr__(base, "OBJECT_TYPE", "imagebox")
         return base
@@ -382,7 +399,7 @@ class SvgBox(EdofObject):
         base.svg_xml       = d.get("svg_xml", "")
         base.fit_mode      = d.get("fit_mode", "contain")
         bd = d.get("border")
-        base.border        = StrokeStyle.from_dict(bd) if bd else None
+        base.border        = (BorderStyle.from_dict(bd) if isinstance(bd, dict) and bd.get("kind") == "border" else StrokeStyle.from_dict(bd)) if bd else None
         base.corner_radius = float(d.get("corner_radius", 0.0))
         object.__setattr__(base, "OBJECT_TYPE", "svgbox")
         return base
@@ -432,6 +449,9 @@ class Shape(EdofObject):
             "points":        self.points,
             "path_data":     self.path_data,
             "path_point_types": self.path_point_types,
+            # v4.3.5.48: marks that line points are stored LOCAL (relative to
+            # transform), so load doesn't migrate them again.
+            "_local_points": True,
         })
         return d
 
@@ -447,17 +467,76 @@ class Shape(EdofObject):
         base.path_data     = list(d.get("path_data", []))
         base.path_point_types = list(d.get("path_point_types", []))
         object.__setattr__(base, "OBJECT_TYPE", "shape")
+        # v4.3.5.48: lines now store LOCAL points (relative to transform.x/y),
+        # like paths, so move/resize/rotate/group/batch work through the
+        # transform. Files saved before this stored ABSOLUTE points (no
+        # "_local_points" flag) -> subtract the transform origin once so they
+        # render in the same spot and become local going forward.
+        if base.shape_type == SHAPE_LINE and len(base.points) >= 2 \
+                and not d.get("_local_points", False):
+            tx, ty = base.transform.x, base.transform.y
+            base.points = [[p[0] - tx, p[1] - ty] for p in base.points]
         return base
+
+    def normalize_line(self):
+        """v4.3.5.48: keep a line's invariant — points are LOCAL (relative to
+        transform.x/y) and the transform IS their bounding box. Call after the
+        endpoints change (create / endpoint drag) so the box and points stay in
+        sync, exactly like a path. World position is preserved."""
+        if self.shape_type != SHAPE_LINE or len(self.points) < 2:
+            return
+        # current world coords of the endpoints
+        wx = [p[0] + self.transform.x for p in self.points]
+        wy = [p[1] + self.transform.y for p in self.points]
+        minx, miny = min(wx), min(wy)
+        maxx, maxy = max(wx), max(wy)
+        self.transform.x = minx
+        self.transform.y = miny
+        self.transform.width = max(0.1, maxx - minx)
+        self.transform.height = max(0.1, maxy - miny)
+        # re-express points local to the new origin
+        self.points = [[wxi - minx, wyi - miny] for wxi, wyi in zip(wx, wy)]
 
     @classmethod
     def from_svg_path(cls, d_attr: str) -> "Shape":
         """v4.0: Create a Shape with shape_type='path' from an SVG path 'd' string.
 
         Supports M, L, H, V, C, Q, Z (absolute and relative).
-        Coordinates are in mm, relative to the shape's transform origin.
+
+        v4.3.6.25: the transform is now derived from the path's own bounding box
+        and the path is re-origined to a local (0,0), so an absolutely-positioned
+        path (e.g. a heart drawn around 100,100) renders where its coordinates
+        say instead of being clipped to the default 50x30 box. The visual result
+        is identical whether you feed absolute or local coordinates.
         """
         sh = cls(shape_type=SHAPE_PATH)
-        sh.path_data = _parse_svg_path(d_attr)
+        pd = _parse_svg_path(d_attr)
+        xs, ys = [], []
+        for cmd in pd:
+            if not cmd:
+                continue
+            coords = cmd[1:]                     # (x,y) pairs for M/L/C/Q; none for Z
+            for k in range(0, len(coords) - 1, 2):
+                xs.append(float(coords[k])); ys.append(float(coords[k + 1]))
+        if xs and ys:
+            minx, miny = min(xs), min(ys)
+            maxx, maxy = max(xs), max(ys)
+            sh.transform.x = float(minx)
+            sh.transform.y = float(miny)
+            sh.transform.width = max(0.001, float(maxx - minx))
+            sh.transform.height = max(0.001, float(maxy - miny))
+            if abs(minx) > 1e-9 or abs(miny) > 1e-9:
+                shifted = []
+                for cmd in pd:
+                    if not cmd:
+                        shifted.append(cmd); continue
+                    op = cmd[0]; coords = list(cmd[1:])
+                    for k in range(0, len(coords) - 1, 2):
+                        coords[k] = coords[k] - minx
+                        coords[k + 1] = coords[k + 1] - miny
+                    shifted.append([op] + coords)
+                pd = shifted
+        sh.path_data = pd
         return sh
 
     def to_svg_path_d(self) -> str:
@@ -598,6 +677,14 @@ class Group(EdofObject):
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "OBJECT_TYPE", "group")
+        # v4.3.5.64: optional fixed rotation pivot in mm (world coords). The
+        # renderer rotates the whole group about this point. When None the pivot
+        # falls back to the center of the children's bbox -- but that center
+        # moves whenever a child is edited, which makes the OTHER children appear
+        # to "dance". Pinning the pivot when the group is rotated keeps the other
+        # children visually still during per-child edits. Stored only when set.
+        if not hasattr(self, "rotation_pivot"):
+            object.__setattr__(self, "rotation_pivot", None)
 
     def add(self, obj: EdofObject) -> EdofObject:
         self.children.append(obj)
@@ -617,9 +704,50 @@ class Group(EdofObject):
                 out.append(child)
         return out
 
+    def compute_bounds(self):
+        """v4.3.5.42: axis-aligned (x,y,w,h) bounding box in mm of all children,
+        accounting for child rotation AND shear. Also stored on self.transform so
+        the group has a meaningful box for selection/handles. v4.3.5.66: shear was
+        ignored, so the box didn't fit sheared children (e.g. rotated rects that
+        gained shear from a non-uniform group resize); each corner is now sheared
+        about the child center before rotation, matching the renderer."""
+        import math as _m
+        xs, ys = [], []
+        for o in self.flatten():
+            t = getattr(o, "transform", None)
+            if t is None:
+                continue
+            cx, cy = t.x + t.width / 2.0, t.y + t.height / 2.0
+            rot = _m.radians(getattr(t, "rotation", 0) or 0)
+            shx = getattr(t, "shear_x", 0.0) or 0.0
+            cos_r, sin_r = _m.cos(rot), _m.sin(rot)
+            for (px, py) in [(t.x, t.y), (t.x + t.width, t.y),
+                             (t.x + t.width, t.y + t.height), (t.x, t.y + t.height)]:
+                dx, dy = px - cx, py - cy
+                # shear about the center (x += shear_x*y), then rotation -- the
+                # same order the renderer applies, so the box matches the pixels.
+                dx = dx + shx * dy
+                rx = cx + dx * cos_r - dy * sin_r
+                ry = cy + dx * sin_r + dy * cos_r
+                xs.append(rx); ys.append(ry)
+        if not xs:
+            return (self.transform.x, self.transform.y,
+                    self.transform.width, self.transform.height)
+        x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+        self.transform.x = x0; self.transform.y = y0
+        self.transform.width = max(0.1, x1 - x0)
+        self.transform.height = max(0.1, y1 - y0)
+        # v4.3.5.49: the group's box is the bbox of its children in their LOCAL
+        # (un-rotated) space; the group's own transform.rotation is kept (the
+        # renderer rotates the whole group). Don't reset it.
+        return (x0, y0, x1 - x0, y1 - y0)
+
     def to_dict(self) -> dict:
         d = self._base_dict()
         d["children"] = [c.to_dict() for c in self.children]
+        piv = getattr(self, "rotation_pivot", None)
+        if piv is not None:
+            d["rotation_pivot"] = [float(piv[0]), float(piv[1])]
         return d
 
     @classmethod
@@ -627,6 +755,11 @@ class Group(EdofObject):
         base: Group = EdofObject._from_dict.__func__(cls, d)
         base.children = [EdofObject.from_dict(c) for c in d.get("children", [])]
         object.__setattr__(base, "OBJECT_TYPE", "group")
+        piv = d.get("rotation_pivot", None)
+        if piv is not None and len(piv) == 2:
+            object.__setattr__(base, "rotation_pivot", (float(piv[0]), float(piv[1])))
+        else:
+            object.__setattr__(base, "rotation_pivot", None)
         return base
 
 

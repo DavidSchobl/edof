@@ -444,6 +444,44 @@ Delete to reset all preferences.
 
 ---
 
+## Working in document mode (v4.4.0)
+
+**Header / footer.** A single click on the band opens it for editing (white
+editing background); click the body to switch back. The Objects panel can
+move any object into the header/footer container (right-click → *Move to
+header/footer*), shown with a `▤` badge; edits to any page's clone write
+back to the shared template. See the Header & Footer reference.
+
+**Variables.** Variable spans show as rainbow chips under their text box in
+the Objects panel. The checkbox on each row builds a multi-selection for
+shared attribute edits and linking; a plain click just focuses the span.
+*View → Show Variables* toggles the rainbow underlay (view-only, never
+exported).
+
+**Hyperlinks.** 🔗 (Ctrl+K) creates or edits a link on the selection, ⚓
+toggles a link target. **Ctrl+click** follows a link; *View → Show Link
+Targets* (default off) marks targets with a red-blue gradient underlay.
+*Document → Link style…* edits the document-wide link appearance.
+
+**Undo.** Ctrl+Z moves the caret to the site of the change being undone, so
+consecutive undos walk you through the edit history visually.
+
+**Batch generation.** *File → Generate batch…* opens the Generate dialog
+without the batch table. For pdf/edof choose *File per row* (tag-based
+names) or *Single multipage file* (all rows in one file). A progress dialog
+with **Cancel** runs the generation; the UI stays responsive.
+
+**Small files.** *File → Save optimized copy…* re-encodes the embedded
+images (JPEG quality steps or lossless PNG) into a copy and reports the MB
+saved; the open document is untouched. The Export PDF and Generate dialogs
+have the same *Images* choice.
+
+**Export.** *Export PNG…* offers **All pages** (writes `name_p001.png`,
+…) in both basic and document mode. View aids (rainbow, focus, link-target
+marks) are never part of any export.
+
+---
+
 ## Troubleshooting
 
 **Editor doesn't start, no error:** Check the console output — sometimes PyQt6 errors go to stderr without appearing in a dialog. Run `edof-editor` from a terminal to see them.

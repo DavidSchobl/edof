@@ -187,10 +187,21 @@ PBG="#1e1e2e"; PBG2="#252535"; PBG3="#2a2a3e"
 FG="#e0e0f0"; FGD="#7070a0"
 HSIZE=6; ROT_DIST=28; MIN_MM=2.0; RDPI=96
 
+
+# v4.4.0: shared image-compression choices (label, (format, quality)).
+# format None = keep images lossless/untouched.
+_IMAGE_COMPRESS_CHOICES = [
+    ("Lossless (keep as is)",        (None, 100)),
+    ("JPEG high (90 %)",             ("jpeg", 90)),
+    ("JPEG good (75 %)",             ("jpeg", 75)),
+    ("JPEG medium (60 %)",           ("jpeg", 60)),
+    ("JPEG low (40 %)",              ("jpeg", 40)),
+]
+
 QSS=f"""
 QMainWindow,QWidget{{background:{PBG};color:{FG};font:10pt 'Segoe UI'}}
 QMenuBar{{background:#131320;color:{FG};font:10pt 'Segoe UI'}} QMenuBar::item:selected{{background:{ACC}}}
-QMenu{{background:{PBG2};color:{FG};border:1px solid #444;font:10pt 'Segoe UI'}} QMenu::item:selected{{background:{ACC}}}
+QMenu{{background:{PBG2};color:{FG};border:1px solid #444;font:10pt 'Segoe UI';padding:4px 0}} QMenu::item{{padding:5px 28px 5px 22px;min-width:160px}} QMenu::item:selected{{background:{ACC}}} QMenu::separator{{height:1px;background:#444;margin:4px 8px}}
 QToolBar{{background:#131320;border:none;padding:2px}}
 QToolButton{{background:{PBG2};color:{FG};border:none;padding:4px 10px;border-radius:3px;
   font-family:'Segoe UI','Segoe UI Symbol','Arial Unicode MS','DejaVu Sans';font-size:10pt}}
@@ -868,6 +879,38 @@ def _mods_str(m):
         return '?'
 
 
+def _shear_decompose(sx, sy, theta_deg, w0, h0, shx0=0.0):
+    """v4.3.5.51: given a non-uniform scale (sx, sy) applied in the GROUP /
+    selection axes to a child rotated by theta_deg (with baseline box w0 x h0),
+    return the child's new (rotation_deg, width, height, shear_x) so it deforms
+    in the group's axes -- Photoshop-style skew. Derivation: the child's box maps
+    to group space by M = diag(sx, sy) . R(theta); RQ-decompose M = R(phi) . U
+    with U upper-triangular [[a, b],[0, c]] -> rotation=phi, width=w0*a,
+    height=h0*c, shear_x=b/c. The renderer applies shear (x += shear_x*y) then
+    the rotation, reproducing M exactly.
+
+    v4.3.5.67: shx0 is the child's EXISTING shear. The child's own map is
+    R(theta) . Shear(shx0), so a second non-uniform resize composes correctly:
+    M = diag(sx, sy) . R(theta) . Shear(shx0). Without this, dragging a group
+    side back and forth re-derived shear from rotation alone and discarded the
+    child's prior shear, collapsing it (e.g. shear jumping to -1.06)."""
+    th = math.radians(theta_deg)
+    c_t = math.cos(th); s_t = math.sin(th)
+    # M_child = R(theta) . [[1, shx0],[0,1]]
+    mc00 = c_t;            mc01 = c_t * shx0 - s_t
+    mc10 = s_t;            mc11 = s_t * shx0 + c_t
+    # M = diag(sx, sy) . M_child
+    m00 = sx * mc00; m01 = sx * mc01
+    m10 = sy * mc10; m11 = sy * mc11
+    phi = math.atan2(m10, m00)
+    cp = math.cos(phi); sp = math.sin(phi)
+    a = cp * m00 + sp * m10
+    b = cp * m01 + sp * m11
+    c = -sp * m01 + cp * m11
+    shear_x = (b / c) if abs(c) > 1e-9 else 0.0
+    return math.degrees(phi), max(0.5, w0 * abs(a)), max(0.5, h0 * abs(c)), shear_x
+
+
 class SelectionOverlay(QGraphicsItem):
     _ANCHOR={'TL':(1,1),'TC':(.5,1),'TR':(0,1),'ML':(1,.5),'MR':(0,.5),
              'BL':(1,0),'BC':(.5,0),'BR':(0,0)}
@@ -900,9 +943,23 @@ class SelectionOverlay(QGraphicsItem):
             pass
         return 1.0
 
-    def update_for(self, obj, dpi):
+    def update_for(self, obj, dpi, parent_groups=None):
         self._handles.clear(); self._is_line=False
         if obj is None: self.prepareGeometryChange(); return
+        # v4.3.5.62: when `obj` is a child of one or more (possibly rotated)
+        # groups, the renderer draws it rotated about each group's center. The
+        # overlay must do the same, so build a function that maps a point from the
+        # child's local space up through each group's rotation about that group's
+        # center. Outermost group is applied last.
+        _pgroups = list(parent_groups or [])
+        def _to_world(mx, my):
+            for grp in reversed(_pgroups):
+                gt = grp.transform
+                grot = getattr(gt, "rotation", 0) or 0
+                if grot % 360 != 0:
+                    gcx = gt.x + gt.width / 2.0; gcy = gt.y + gt.height / 2.0
+                    mx, my = rotate_point(mx, my, gcx, gcy, grot)
+            return mx, my
 
         # v4.1.20.9: document-body textbox is a fixed page-spanning region —
         # not a user-shaped object. Hide all resize / rotate handles for it
@@ -919,16 +976,28 @@ class SelectionOverlay(QGraphicsItem):
 
         from edof.format.objects import Shape, SHAPE_LINE
         if isinstance(obj,Shape) and obj.shape_type==SHAPE_LINE and obj.points and len(obj.points)>=2:
+            # v4.3.5.48: line points are LOCAL now; add the transform origin to
+            # place the endpoint handles in world coords for display.
             self._is_line=True
             p1,p2=obj.points[0],obj.points[1]
-            self._lp1=QPointF(mm_to_px(p1[0],dpi),mm_to_px(p1[1],dpi))
-            self._lp2=QPointF(mm_to_px(p2[0],dpi),mm_to_px(p2[1],dpi))
-            self._handles={'P1':self._lp1,'P2':self._lp2}
-            self.prepareGeometryChange(); return
+            ox,oy=obj.transform.x,obj.transform.y
+            w1=_to_world(p1[0]+ox,p1[1]+oy); w2=_to_world(p2[0]+ox,p2[1]+oy)
+            self._lp1=QPointF(mm_to_px(w1[0],dpi),mm_to_px(w1[1],dpi))
+            self._lp2=QPointF(mm_to_px(w2[0],dpi),mm_to_px(w2[1],dpi))
+        else:
+            self._is_line=False
 
         t=obj.transform; cx=t.x+t.width/2; cy=t.y+t.height/2
+        _shx=getattr(t,"shear_x",0.0) or 0.0
         def rs(mx,my):
+            # v4.3.5.51: apply shear in local space (about the box center) before
+            # rotation, so the selection box matches a skewed object.
+            if _shx:
+                lx=mx-cx; ly=my-cy
+                mx=cx + lx + _shx*ly
             rx,ry=rotate_point(mx,my,cx,cy,t.rotation)
+            # v4.3.5.62: then carry it up through any parent groups' rotation.
+            rx,ry=_to_world(rx,ry)
             return QPointF(mm_to_px(rx,dpi),mm_to_px(ry,dpi))
         if is_doc_body:
             # Only outline polygon, no handles
@@ -950,11 +1019,24 @@ class SelectionOverlay(QGraphicsItem):
                                       tc.y()-rdist*math.cos(rad))
         self._tc_pt=tc
         self._poly=QPolygonF([rs(*pts['TL']),rs(*pts['TR']),rs(*pts['BR']),rs(*pts['BL'])])
+        # v4.3.5.47: keep the endpoint handles too, so both the box handles and
+        # P1/P2 are hit-testable for a line.
+        if self._is_line:
+            self._handles['P1']=self._lp1
+            self._handles['P2']=self._lp2
         self.prepareGeometryChange()
 
     def hit_handle(self, sp):
         HIT=(HSIZE+6)/self._view_zoom()
+        # v4.3.5.47: for a line, test the P1/P2 endpoint handles first so a click
+        # right on an endpoint edits the endpoint instead of resizing the box.
+        for k in ('P1','P2'):
+            pt=self._handles.get(k)
+            if pt is not None and abs(sp.x()-pt.x())<=HIT and abs(sp.y()-pt.y())<=HIT:
+                return k
         for k,pt in self._handles.items():
+            if k in ('P1','P2'):
+                continue
             if abs(sp.x()-pt.x())<=HIT and abs(sp.y()-pt.y())<=HIT: return k
         return None
 
@@ -976,10 +1058,29 @@ class SelectionOverlay(QGraphicsItem):
             if dash is not None: pen.setDashPattern(dash)
             return pen
         if self._is_line:
-            p.setPen(_pen(ACC, 2, Qt.PenStyle.DashLine)); p.drawLine(self._lp1,self._lp2)
+            # v4.3.5.47: draw the transform box + its resize/rotate handles
+            # (so the line can be scaled/rotated), then the dashed line and the
+            # P1/P2 endpoint dots on top for precise endpoint editing.
+            p.setPen(_pen(ACC, 1.5, Qt.PenStyle.DashLine, [5, 3]))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            if self._poly is not None:
+                p.drawPolygon(self._poly)
+            rot=self._handles.get('ROT')
+            if rot is not None:
+                p.setPen(_pen(ACC, 1, Qt.PenStyle.DotLine)); p.drawLine(self._tc_pt,rot)
+            for k,pt in self._handles.items():
+                if k in ('P1','P2'):
+                    continue
+                r=QRectF(pt.x()-hs,pt.y()-hs,hs*2,hs*2)
+                if k=='ROT':
+                    p.setPen(_pen("white", 2)); p.setBrush(QBrush(QColor(ACC2))); p.drawEllipse(r)
+                else:
+                    p.setPen(_pen(ACC, 2)); p.setBrush(QBrush(QColor("white"))); p.drawRect(r)
+            # the line itself + endpoint dots
+            p.setPen(_pen(ACC, 2, Qt.PenStyle.SolidLine)); p.drawLine(self._lp1,self._lp2)
             for pt in (self._lp1,self._lp2):
                 r=QRectF(pt.x()-hs,pt.y()-hs,hs*2,hs*2)
-                p.setPen(_pen(ACC, 2)); p.setBrush(QBrush(QColor("white"))); p.drawEllipse(r)
+                p.setPen(_pen(ACC, 2)); p.setBrush(QBrush(QColor(ACC2))); p.drawEllipse(r)
             return
         # v4.1.20.9: document-body outline mode — dashed bbox only, no handles
         if '_body_outline' in self._handles:
@@ -1247,6 +1348,7 @@ class EdofCanvas(QGraphicsView):
     # this signal the page list lagged behind the actual canvas state.
     pageChanged=pyqtSignal(int)
     zoomChanged=pyqtSignal(float)   # emitted whenever the view zoom changes
+    documentChanged=pyqtSignal()    # v4.3.6.17: emitted when a new doc is bound
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1262,6 +1364,16 @@ class EdofCanvas(QGraphicsView):
         except Exception:
             screen_dpi = float(RDPI)
         self._doc=None; self._page_idx=0; self._dpi=screen_dpi; self._zoom=1.0
+        # v4.3.5.9: non-destructive batch preview. When set to a BatchRow, the
+        # canvas renders a deep copy of the document with that row applied,
+        # without touching the live document (so selection/editing still act on
+        # the base). None = show the base document normally.
+        self._batch_preview_row = None
+        # v4.3.5.10: canvas edit mode -- "classic" (edits the base document) or
+        # "batch" (edits feed a batch record). This is INDEPENDENT of which
+        # right-hand tab is shown (the tab is what you look at; the mode is what
+        # you edit). In batch mode the canvas paints a "BATCH EDIT" banner.
+        self._edit_mode = "classic"
         # Remember screen DPI separately so doc.preferred_dpi can override
         self._screen_dpi = screen_dpi
         self._sel_id=None
@@ -1298,6 +1410,11 @@ class EdofCanvas(QGraphicsView):
         self._preview_item=None; self._ghost_items=[]
         # Inline editor (v4.1.15.7: QGraphicsProxyWidget in scene)
         self._inline_widget=None; self._inline_id=None; self._inline_obj=None
+        self._inline_live_runs=None   # v4.3.6.5: live runs saved during preview
+        self._selected_var_rids=set() # v4.3.7.0: text variable(s) focused from panel
+        self._active_var_focus=None   # v4.3.6.12: (obj_id, rid) currently focused
+        self._selected_var_vids=[]    # v4.4.0: full multi-selection of vrun ids
+        self._in_var_focus=False      # v4.3.6.12: re-entry guard for focus
         self._inline_border_frame=None
         self._inline_proxy=None
 
@@ -1324,7 +1441,15 @@ class EdofCanvas(QGraphicsView):
         self._render_id=0; self._render_pending=False
         self._rtimer=QTimer(); self._rtimer.setSingleShot(True)
         self._rtimer.timeout.connect(self._start_render)
-        _render_signals.done.connect(self._on_render_done)
+        # v4.3.6.28: the module-level signals object can be torn down by Qt
+        # when a previous QApplication went away (headless test runs). Recreate
+        # it instead of crashing every canvas constructed afterwards.
+        global _render_signals
+        try:
+            _render_signals.done.connect(self._on_render_done)
+        except RuntimeError:
+            _render_signals = _RenderSignals()
+            _render_signals.done.connect(self._on_render_done)
         # v4.1.23.21: page pixmap cache for flicker-free, fast page switching.
         # On a page change we show the cached pixmap immediately (no blank /
         # stale frame) and refresh it in the background; neighbouring pages
@@ -1350,6 +1475,19 @@ class EdofCanvas(QGraphicsView):
                    page=page_idx,
                    pages_total=len(doc.pages) if doc else 0)
         except Exception: pass
+        # v4.4.1: install the document's link style for link-run resolution
+        try:
+            from edof.format.styles import set_active_link_style
+            set_active_link_style(getattr(doc, "link_style", None))
+        except Exception:
+            pass
+        # v4.4.0: install the document's embedded fonts (weight-aware) for
+        # the inline editor's layout paths too
+        try:
+            from edof.engine.text_engine import register_resource_fonts
+            register_resource_fonts(getattr(doc, "resources", None))
+        except Exception:
+            pass
         # v4.1.23.21: a different document invalidates the whole pixmap cache.
         if doc is not getattr(self, '_doc', None):
             # v4.2.11.49: the ribbon is present from startup for EVERY
@@ -1404,6 +1542,8 @@ class EdofCanvas(QGraphicsView):
         except Exception: pass
         self._start_render(); self.objectSelected.emit(None)
         try: self.pageChanged.emit(page_idx)
+        except Exception: pass
+        try: self.documentChanged.emit()   # v4.3.6.17: rebind batch panels
         except Exception: pass
 
     def set_page(self,idx,move_cursor=True):
@@ -1468,6 +1608,130 @@ class EdofCanvas(QGraphicsView):
         if prev_idx != idx:
             try: self.pageChanged.emit(idx)
             except Exception: pass
+
+    def set_batch_preview_row(self, row, page_idx=None):
+        """Project a BatchRow onto the canvas non-destructively (deep copy of
+        the doc with the row applied is rendered; the live doc is untouched).
+        Pass row=None to return to the base document. Optionally switch to the
+        row's target page first."""
+        try:
+            from edof.engine.debug_log import log as _dlog
+            _dlog("canvas.set_batch_preview_row",
+                  row=("None" if row is None else "BatchRow"),
+                  page_idx=page_idx,
+                  n_values=(0 if row is None else len(getattr(row, "values", {}) or {})),
+                  cur_page=self._page_idx)
+        except Exception: pass
+        self._batch_preview_row = row
+        self._apply_template_lock()
+        if row is not None and page_idx is not None and self._doc is not None:
+            if 0 <= page_idx < len(self._doc.pages) and page_idx != self._page_idx:
+                # view the target page without moving the caret
+                self.set_page(page_idx, move_cursor=False)
+                return
+        self._invalidate_page_cache(self._page_idx)
+        self._start_render()
+
+    def _batch_template_locked(self):
+        """v4.3.6.2: True while a batch row is being PREVIEWED on the canvas and
+        we are NOT recording. In that state the template must be read-only -- an
+        edit would silently change the base under the preview (looks like nothing
+        happened until you leave preview). Editing is allowed in normal mode
+        (no preview) and while recording (edits are captured into the row)."""
+        return (getattr(self, "_batch_preview_row", None) is not None
+                and not getattr(self, "_batch_is_recording", False))
+
+    def _apply_template_lock(self):
+        """Reflect the template-lock state on the active inline text editor."""
+        ed = getattr(self, "_inline_widget", None)
+        if ed is not None:
+            try:
+                ed._read_only = self._batch_template_locked()
+                ed._invalidate()
+            except Exception:
+                pass
+        self._apply_preview_to_inline()
+
+    def _apply_preview_to_inline(self):
+        """v4.3.6.5: in document mode the body is shown by the inline editor,
+        which holds its OWN copy of the runs -- so a batch preview rendered on
+        the canvas underneath is hidden (the editor keeps showing the live, un
+        -substituted text). Mirror the preview into the editor: while previewing
+        a row (and not recording), apply the row to a deep copy and load THIS
+        object's substituted runs; otherwise restore the live runs."""
+        ed = getattr(self, "_inline_widget", None)
+        obj = getattr(self, "_inline_obj", None)
+        if ed is None or obj is None or self._doc is None:
+            return
+        from edof._apps.edof_text_editor import _clone_runs
+        row = getattr(self, "_batch_preview_row", None)
+        recording = getattr(self, "_batch_is_recording", False)
+        oid = getattr(obj, "id", None)
+        try:
+            if row is not None and not recording:
+                import copy as _cp
+                from edof.batch.model import apply_row_to_document
+                rd = _cp.deepcopy(self._doc)
+                apply_row_to_document(rd.batch, rd, row)
+                body_copy = None
+                for pg in rd.pages:
+                    for o in getattr(pg, "objects", []):
+                        if getattr(o, "id", None) == oid:
+                            body_copy = o; break
+                    if body_copy is not None:
+                        break
+                if body_copy is not None and getattr(body_copy, "runs", None):
+                    # remember the live runs once, so we can restore exactly
+                    if getattr(self, "_inline_live_runs", None) is None:
+                        self._inline_live_runs = ed._runs
+                    ed._runs = _clone_runs(body_copy.runs)
+                    ed._clamp_cursor() if hasattr(ed, "_clamp_cursor") else None
+                    ed._invalidate()
+            else:
+                live = getattr(self, "_inline_live_runs", None)
+                if live is not None:
+                    ed._runs = live
+                    self._inline_live_runs = None
+                    ed._clamp_cursor() if hasattr(ed, "_clamp_cursor") else None
+                    ed._invalidate()
+        except Exception:
+            pass
+
+    def clear_batch_preview(self):
+        """Convenience: drop any batch preview and re-render the base."""
+        if getattr(self, "_batch_preview_row", None) is not None:
+            try:
+                from edof.engine.debug_log import log as _dlog
+                _dlog("canvas.clear_batch_preview")
+            except Exception: pass
+            self._batch_preview_row = None
+            self._apply_template_lock()
+            self._invalidate_page_cache(self._page_idx)
+            self._start_render()
+
+    def set_edit_mode(self, mode):
+        """Set the canvas edit mode: 'classic' or 'batch'. Repaints the overlay
+        so the BATCH EDIT banner appears/disappears."""
+        mode = "batch" if mode == "batch" else "classic"
+        if mode == getattr(self, "_edit_mode", "classic"):
+            return
+        try:
+            from edof.engine.debug_log import log as _dlog
+            _dlog("canvas.set_edit_mode", mode=mode)
+        except Exception: pass
+        self._edit_mode = mode
+        self.viewport().update()
+
+    def set_batch_recording(self, on):
+        """Mark whether a batch record is being recorded (changes the banner to
+        a red REC state)."""
+        try:
+            from edof.engine.debug_log import log as _dlog
+            _dlog("canvas.set_batch_recording", on=bool(on))
+        except Exception: pass
+        self._batch_is_recording = bool(on)
+        self._apply_template_lock()
+        self.viewport().update()
 
     def schedule_render(self,ms=80):
         # v4.1.15.1: Don't reset the timer if it's already pending to fire
@@ -1634,7 +1898,13 @@ class EdofCanvas(QGraphicsView):
                         if getattr(fx, 'type', '') == 'halftone'
                         and getattr(fx, 'enabled', False)]
             if _ht_dots:
-                _ht_floor = int(min(24.0 * 25.4 / max(0.05, min(_ht_dots)), 600.0))
+                # v4.4.0 perf: 24 px/cell pinned recipe pages to ~470-600
+                # DPI and a single CPU render took ~4.6 s (the cookbook's
+                # "some pages are really slow"). The lattice is visually
+                # converged well below that: 12 px/cell, capped at 450,
+                # renders ~4x faster with an identical dot count and no
+                # zoom re-sampling (the floor still fixes the lattice DPI).
+                _ht_floor = int(min(12.0 * 25.4 / max(0.05, min(_ht_dots)), 450.0))
                 if render_dpi < _ht_floor:
                     render_dpi = _ht_floor
                     _wpx = mm_to_px(_pg_ht.width, render_dpi)
@@ -1670,18 +1940,44 @@ class EdofCanvas(QGraphicsView):
         self._rid_info[rid] = (pg_idx, display, scale)
         dpi = render_dpi
         doc = self._doc
+        # v4.3.5.9: if a batch preview row is active, render a deep copy of the
+        # document with that row applied (non-destructive); the live doc is
+        # untouched. Disable the object cache for this render since the copy's
+        # objects differ from the cached base.
+        preview_row = getattr(self, "_batch_preview_row", None)
         def task():
             try:
                 from edof.engine.renderer import render_page, render_page_active
-                pg = doc.pages[pg_idx]
+                render_doc = doc
+                use_cache_local = use_cache
+                if preview_row is not None:
+                    try:
+                        import copy as _cp
+                        from edof.batch.model import apply_row_to_document
+                        render_doc = _cp.deepcopy(doc)
+                        n_app = apply_row_to_document(render_doc.batch, render_doc, preview_row)
+                        use_cache_local = False
+                        try:
+                            from edof.engine.debug_log import log as _dlog
+                            _eff_counts = [len(getattr(o, "effects", []) or [])
+                                           for pg in render_doc.pages
+                                           for o in getattr(pg, "objects", [])]
+                            _dlog("render.batch_preview applied",
+                                  n_applied=n_app,
+                                  total_effects_on_page=sum(_eff_counts),
+                                  pg_idx=pg_idx)
+                        except Exception: pass
+                    except Exception:
+                        render_doc = doc
+                pg = render_doc.pages[pg_idx]
                 img = None
-                if active_id is not None:
-                    img = render_page_active(pg, doc.resources, doc.variables,
+                if active_id is not None and preview_row is None:
+                    img = render_page_active(pg, render_doc.resources, render_doc.variables,
                                              active_id, dpi=dpi,
                                              active_scale=active_scale)
                 if img is None:
-                    img = render_page(pg, doc.resources, doc.variables,
-                                      dpi=dpi, use_cache=use_cache)
+                    img = render_page(pg, render_doc.resources, render_doc.variables,
+                                      dpi=dpi, use_cache=use_cache_local)
                 img = img.convert("RGB")
                 buf = _io.BytesIO(); img.save(buf, "PNG"); buf.seek(0)
                 _render_signals.done.emit(buf.read(), rid)
@@ -1781,6 +2077,251 @@ class EdofCanvas(QGraphicsView):
                 except Exception: pass
         except Exception: pass
 
+    def _after_link_edit(self):
+        """v4.4.1: shared refresh after a link/anchor edit on the inline
+        editor: sync to the box, persist hf template if applicable, redraw."""
+        ied = getattr(self, "_inline_widget", None)
+        if ied is not None:
+            try: ied.sync_to_tb_silent()
+            except Exception: pass
+        try: self._commit_hf_runs_from_inline()
+        except Exception: pass
+        try: self._reflow_current_body()
+        except Exception: pass
+        self._invalidate_page_cache(self._page_idx)
+        try: self.objectChanged.emit()
+        except Exception: pass
+        self.schedule_render(0)
+
+    def _make_text_link(self):
+        """v4.4.1: insert/edit a hyperlink on the current inline selection.
+        Two kinds: external (http/https/mailto URL) and in-document (a jump to
+        an anchor span marked via 'Mark as link target'). Shared by the
+        toolbar button, Ctrl+K and the right-click menu."""
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                                     QLineEdit, QRadioButton, QComboBox,
+                                     QDialogButtonBox, QPushButton,
+                                     QMessageBox as _QMB)
+        ed = getattr(self, '_inline_widget', None)
+        if ed is None:
+            return
+        if not ed._has_selection() and ed.selection_link() is None:
+            _QMB.information(self, "Link",
+                             "Select the text that should become a link first.")
+            return
+        cur = ed.selection_link()
+        anchors = self.collect_anchors()
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Link")
+        v = QVBoxLayout(dlg)
+        rb_ext = QRadioButton("External link (web, mail)")
+        rb_int = QRadioButton("In-document link (jump to a marked target)")
+        v.addWidget(rb_ext)
+        url_edit = QLineEdit()
+        url_edit.setPlaceholderText("https://…  or  mailto:…")
+        v.addWidget(url_edit)
+        v.addWidget(rb_int)
+        combo = QComboBox()
+        for aid, (name, pi, _oid) in sorted(anchors.items(),
+                                            key=lambda kv: kv[1][1]):
+            combo.addItem("%s   (page %d)" % (name, pi + 1), aid)
+        combo.setEnabled(bool(anchors))
+        v.addWidget(combo)
+        if not anchors:
+            hint = QLabel("No targets yet: select text and use\n"
+                          "'Mark as link target (anchor)' first.")
+            hint.setStyleSheet("color:#888;")
+            v.addWidget(hint)
+        if cur and cur.startswith("#"):
+            rb_int.setChecked(True)
+            i = combo.findData(cur[1:])
+            if i >= 0:
+                combo.setCurrentIndex(i)
+        else:
+            rb_ext.setChecked(True)
+            if cur:
+                url_edit.setText(cur)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                              QDialogButtonBox.StandardButton.Cancel)
+        if cur:
+            btn_rm = QPushButton("Remove link")
+            bb.addButton(btn_rm, QDialogButtonBox.ButtonRole.DestructiveRole)
+            btn_rm.clicked.connect(lambda: (dlg.done(2)))
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        rc = dlg.exec()
+        if rc == 2:                                   # remove
+            ed.set_link_on_selection(None)
+            self._after_link_edit()
+            return
+        if rc != QDialog.DialogCode.Accepted:
+            return
+        if rb_int.isChecked():
+            aid = combo.currentData()
+            if not aid:
+                return
+            link = "#" + str(aid)
+        else:
+            # v4.4.0 security: whitelist http/https/mailto (bare domains get
+            # https://); javascript:, file:, data:, free text are refused.
+            from edof.utils.links import validate_link
+            link = validate_link(url_edit.text())
+            if link is None:
+                _QMB.information(
+                    self, "Link",
+                    "That is not a usable link. Allowed: http(s)://…, "
+                    "mailto:…, or a plain domain like example.com.")
+                return
+        ed.set_link_on_selection(link)
+        self._after_link_edit()
+
+    def _make_text_anchor(self):
+        """v4.4.1: mark the current selection as an in-document link TARGET
+        (a named anchor other links can jump to)."""
+        from PyQt6.QtWidgets import QInputDialog, QMessageBox as _QMB
+        ed = getattr(self, '_inline_widget', None)
+        if ed is None:
+            return
+        if not ed._has_selection():
+            _QMB.information(self, "Link target",
+                             "Select the target text first.")
+            return
+        # v4.4.0: the anchor button TOGGLES: on an existing target it offers
+        # removal (targets can be deleted again).
+        cur_aid = ed.selection_anchor() if hasattr(ed, "selection_anchor") else None
+        if cur_aid:
+            r = _QMB.question(
+                self, "Link target",
+                "This text is already a link target. Remove the mark?\n"
+                "(Links pointing to it will go nowhere until re-marked.)",
+                _QMB.StandardButton.Yes | _QMB.StandardButton.No,
+                _QMB.StandardButton.No)
+            if r == _QMB.StandardButton.Yes:
+                ed.clear_anchor_in_selection()
+                self._after_link_edit()
+            return
+        a, b = ed._sel_range()
+        _txt = "".join(r.text or "" for r in (getattr(ed, '_runs', None) or []))
+        default = _txt[a:b][:40]
+        name, ok = QInputDialog.getText(self, "Link target",
+                                        "Target name:", text=default)
+        if not ok:
+            return
+        ed.make_anchor_from_selection(name.strip() or None)
+        self._after_link_edit()
+
+    def _make_text_variable(self):
+        """v4.3.6.0/.3: turn the current inline-text selection into a batch
+        variable. Shared by the toolbar button, the editor's right-click menu
+        and the Ctrl+Shift+B shortcut. On an existing variable it offers to
+        remove it; otherwise it hands off to the batch panel's add-text-variable
+        flow (attribute picker + auto record + value seeding) so every entry
+        point behaves exactly like the panel's 'Add variable'."""
+        from PyQt6.QtWidgets import QMessageBox as _QMB
+        ed = getattr(self, '_inline_widget', None)
+        if ed is None:
+            return
+        if self._batch_template_locked():
+            _QMB.information(self, "Variable text",
+                             "The template is read-only while previewing a batch "
+                             "row. Turn off the row preview (or record) to edit it.")
+            return
+        # v4.4.0: header/footer variables ARE supported now (canonical band box
+        # ids + rid persisted to the body template), so no block here anymore.
+        cfg = getattr(self._doc, 'batch', None) if getattr(self, '_doc', None) else None
+        mw = self.parent()
+        # v4.3.6.15: prefer the TEMPLATE panel -- it owns _add_text_variable
+        # (which syncs the rid to the textbox and refreshes the Objects panel).
+        # The wrapper (_batch_panel) lacks that method, so using it dropped the
+        # right-click variable into the fallback path (no sync, no panel refresh)
+        # while the toolbar button worked, which is exactly the inconsistency
+        # the user hit.
+        bp = (getattr(mw, '_batch_tpl', None)
+              or getattr(mw, '_batch_panel', None)) if mw else None
+        rid_cur, vname_cur = ed.selection_variable()
+        if rid_cur is not None:
+            if _QMB.question(self, "Variable text",
+                             "This text is the variable '%s'. Remove the "
+                             "variable (keep the text)?" % (vname_cur or "")
+                             ) == _QMB.StandardButton.Yes:
+                ed.clear_variable_in_selection()
+                if cfg is not None:
+                    for c in list(cfg.columns):
+                        if getattr(c, 'run_id', '') == rid_cur:
+                            cfg.remove_column(c.column_id)
+                self._reflow_current_body()
+                if bp is not None:
+                    try: bp.rebuild()
+                    except Exception: pass
+                try: self.changed.emit()
+                except Exception: pass
+            self._refocus_inline(); return
+        if not ed._has_selection():
+            _QMB.information(self, "Variable text",
+                             "Select a span of text first, then make it a "
+                             "variable.")
+            self._refocus_inline(); return
+        # hand off to the panel's flow (picker + record + seed)
+        if bp is not None and hasattr(bp, "_add_text_variable"):
+            bp._add_text_variable(ed)
+            self._refocus_inline(); return
+        # fallback (no panel available): text-only, with a record so it does
+        # something immediately
+        # v4.4.0: names must be unique; count run var_names too, not only
+        # columns (a no-attribute variable has no column)
+        existing = {(c.var_name or "").strip().lower()
+                    for c in (cfg.columns if cfg else [])}
+        try:
+            for _pg in (self._doc.pages or []):
+                for _o in (getattr(_pg, "objects", None) or []):
+                    for _r in (getattr(_o, "runs", None) or []):
+                        vn = (getattr(_r, "var_name", "") or "").strip()
+                        if vn:
+                            existing.add(vn.lower())
+        except Exception:
+            pass
+        n = 1
+        while ("inlinetext%02d" % n) in existing:
+            n += 1
+        name = "inlinetext%02d" % n
+        rid = ed.make_variable_from_selection(name)
+        # v4.3.6.15: push the rid to the textbox so it survives the reflow and
+        # shows in the Objects panel (same fix as the panel flow).
+        try: ed.sync_to_tb_silent()
+        except Exception: pass
+        if rid and cfg is not None and getattr(self, '_inline_obj', None) is not None:
+            try:
+                from edof.batch.model import build_ref
+                page = self._doc.pages[self._page_idx]
+                ref = build_ref(page, self._inline_obj)
+                if ref is not None:
+                    col = cfg.add_column(ref, "run.text", name, "text")
+                    col.run_id = rid
+            except Exception:
+                pass
+        self._reflow_current_body()
+        # v4.3.6.15: turn the rainbow on and refresh the Objects panel directly
+        # (belt-and-suspenders beyond objectChanged) so the new variable is both
+        # visible and listed even on the first one.
+        try:
+            from edof.engine.text_engine import set_show_variables
+            set_show_variables(True)
+            _a = getattr(mw, "_act_show_vars", None)
+            if _a is not None: _a.setChecked(True)
+            if ed is not None: ed._invalidate()
+        except Exception: pass
+        try: self.changed.emit()
+        except Exception: pass
+        try: self.objectChanged.emit()   # refresh the Objects panel
+        except Exception: pass
+        try:
+            _op = getattr(mw, "_obj_panel", None)
+            if _op is not None: _op.refresh()
+        except Exception: pass
+        self._refocus_inline()
+
     def _apply_page_pixmap(self, px, scale):
         """Place a rendered page pixmap so it occupies the base-DPI scene rect.
         When the page was rendered at a higher DPI (crisp zoom-in), scale < 1
@@ -1816,6 +2357,10 @@ class EdofCanvas(QGraphicsView):
         if rid != self._render_id and pg_idx != self._page_idx:
             return   # stale display render for a page we already left
         self._apply_page_pixmap(px, scale)
+        # v4.3.6.7: a repagination may have shrunk the page count; keep the
+        # current index valid before any pages[_page_idx] access downstream.
+        if self._doc and self._doc.pages and self._page_idx >= len(self._doc.pages):
+            self._page_idx = len(self._doc.pages) - 1
         self._refresh_overlay(); self._update_ghosts()
         self._reposition_inline()
 
@@ -1825,6 +2370,10 @@ class EdofCanvas(QGraphicsView):
         for item in self._ghost_items: self.scene().removeItem(item)
         self._ghost_items.clear()
         if not self._doc or not self._doc.pages: return
+        # v4.3.6.7: clamp the page index -- a document-mode repagination (e.g.
+        # deleting text) can shrink the page count below the current index.
+        if self._page_idx >= len(self._doc.pages):
+            self._page_idx = len(self._doc.pages) - 1
         pen=QPen(QColor(200,80,80,160),1,Qt.PenStyle.DashLine)
         brs=QBrush(QColor(200,80,80,20))
         for obj in self._doc.pages[self._page_idx].objects:
@@ -1859,7 +2408,325 @@ class EdofCanvas(QGraphicsView):
                 return
         except Exception:
             pass
-        self._overlay.update_for(sel, self._dpi)
+        # v4.3.5.20: while a batch row is projected, the canvas renders the row
+        # applied to a deep copy, so the live object still has the OLD geometry.
+        # Drive the selection box off the PROJECTED object instead, so the
+        # bounding box matches what's drawn (e.g. a batched size change).
+        sel = self._overlay_target_for(sel)
+        # v4.3.5.40: with a multi-selection, the union box (drawForeground) is
+        # the selection UI, so DON'T also show the primary object's single
+        # transform box -- otherwise a stray handle box lingers on the first/last
+        # object alongside the union box.
+        if len(getattr(self, "_multi_sel_ids", None) or set()) >= 1 \
+                and len(self.selected_objects()) >= 2:
+            self._overlay.update_for(None, self._dpi)
+            return
+        # v4.3.5.62: if the selection is a child of one or more groups, pass the
+        # group chain so the overlay carries the groups' rotation (a rotated
+        # group renders its children rotated).
+        pgroups = self._parent_groups_of(self._sel_id)
+        self._overlay.update_for(sel, self._dpi, parent_groups=pgroups)
+
+    def _overlay_target_for(self, sel):
+        """If a batch preview row is active, return a projected copy of `sel`
+        (the row applied) so the selection overlay matches the rendered size /
+        position; otherwise return `sel` unchanged."""
+        if sel is None:
+            return None
+        row = getattr(self, "_batch_preview_row", None)
+        if row is None or self._doc is None:
+            return sel
+        try:
+            import copy as _cp
+            from edof.batch.model import apply_row_to_document
+            sel_id = getattr(sel, "id", None)
+            if sel_id is None:
+                return sel
+            dcopy = _cp.deepcopy(self._doc)
+            apply_row_to_document(dcopy.batch, dcopy, row)
+            pg = dcopy.pages[self._page_idx] if self._page_idx < len(dcopy.pages) else None
+            if pg is None:
+                return sel
+            proj = pg.get_object(sel_id)
+            return proj if proj is not None else sel
+        except Exception:
+            return sel
+
+    def _selected_objects_projected(self):
+        """v4.3.5.35: all selected objects (primary + multi-select). During a
+        batch preview each is replaced by its projected copy (the row applied),
+        so a multi-selection box matches what's rendered, not the template."""
+        ids = []
+        if getattr(self, "_sel_id", None):
+            ids.append(self._sel_id)
+        for mid in (getattr(self, "_multi_sel_ids", None) or set()):
+            if mid not in ids:
+                ids.append(mid)
+        if not ids or self._doc is None:
+            return []
+        pg = (self._doc.pages[self._page_idx]
+              if self._page_idx < len(self._doc.pages) else None)
+        if pg is None:
+            return []
+        row = getattr(self, "_batch_preview_row", None)
+        if row is not None:
+            try:
+                import copy as _cp
+                from edof.batch.model import apply_row_to_document
+                dcopy = _cp.deepcopy(self._doc)
+                apply_row_to_document(dcopy.batch, dcopy, row)
+                pgp = (dcopy.pages[self._page_idx]
+                       if self._page_idx < len(dcopy.pages) else None)
+                if pgp is not None:
+                    pg = pgp
+            except Exception:
+                pass
+        out = []
+        for oid in ids:
+            o = pg.get_object(oid)
+            if o is not None and getattr(o, "visible", True):
+                out.append(o)
+        return out
+
+    def _union_bbox_mm(self, objs=None):
+        """v4.3.5.37: axis-aligned union (in mm) of the live selected objects'
+        bounding boxes, expanded for rotation. Returns (x0,y0,x1,y1) or None.
+        Uses LIVE objects (not projected) so transform handles act on the real
+        ones."""
+        import math as _m
+        if objs is None:
+            objs = self.selected_objects()
+        xs, ys = [], []
+        for o in objs:
+            t = getattr(o, "transform", None)
+            if t is None:
+                continue
+            cx, cy = t.x + t.width / 2.0, t.y + t.height / 2.0
+            rot = _m.radians(getattr(t, "rotation", 0) or 0)
+            for (px, py) in [(t.x, t.y), (t.x + t.width, t.y),
+                             (t.x + t.width, t.y + t.height), (t.x, t.y + t.height)]:
+                if rot:
+                    dx, dy = px - cx, py - cy
+                    px = cx + dx * _m.cos(rot) - dy * _m.sin(rot)
+                    py = cy + dx * _m.sin(rot) + dy * _m.cos(rot)
+                xs.append(px); ys.append(py)
+        if not xs:
+            return None
+        return (min(xs), min(ys), max(xs), max(ys))
+
+    def _union_handles_px(self):
+        """v4.3.5.37: screen-pixel positions of the multi-selection transform
+        handles (8 resize + rotate), keyed like the single-object overlay, or
+        None when fewer than 2 objects are selected."""
+        if len(self._multi_sel_ids or set()) < 1:
+            return None
+        objs = self.selected_objects()
+        if len(objs) < 2:
+            return None
+        bb = self._union_bbox_mm(objs)
+        if bb is None:
+            return None
+        x0, y0, x1, y1 = bb
+        px0 = mm_to_px(x0, self._dpi); py0 = mm_to_px(y0, self._dpi)
+        px1 = mm_to_px(x1, self._dpi); py1 = mm_to_px(y1, self._dpi)
+        mxp = (px0 + px1) / 2.0; myp = (py0 + py1) / 2.0
+        rot_y = py0 - mm_to_px(8, self._dpi)
+        return {
+            'TL': QPointF(px0, py0), 'TC': QPointF(mxp, py0), 'TR': QPointF(px1, py0),
+            'ML': QPointF(px0, myp), 'MR': QPointF(px1, myp),
+            'BL': QPointF(px0, py1), 'BC': QPointF(mxp, py1), 'BR': QPointF(px1, py1),
+            'ROT': QPointF(mxp, rot_y),
+        }
+
+    def _hit_union_handle(self, sp):
+        """Return the union-box handle under the point, or None."""
+        handles = self._union_handles_px()
+        if not handles:
+            return None
+        z = self._zoom if self._zoom > 1e-6 else 1.0
+        hit = (HSIZE + 6) / z
+        for k, pt in handles.items():
+            if abs(sp.x() - pt.x()) <= hit and abs(sp.y() - pt.y()) <= hit:
+                return k
+        return None
+
+    def _apply_multi_transform(self, dm, sp, shift, no_snap):
+        """v4.3.5.37: resize or rotate the whole multi-selection about the union
+        box, from the baselines captured at drag start (_multi_tf0, _multi_bb0).
+        Resize: corner = both axes, edge = one axis; Shift forces uniform on a
+        corner. Rotate: every object's center rotates around the union center and
+        its rotation gains the same delta. Lines/paths follow their box."""
+        import math as _m
+        from edof.format.objects import Shape, SHAPE_LINE, SHAPE_PATH
+        bb = getattr(self, "_multi_bb0", None)
+        snaps = getattr(self, "_multi_tf0", None)
+        if bb is None or not snaps:
+            return
+        x0, y0, x1, y1 = bb
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        bw = max(1e-6, x1 - x0); bh = max(1e-6, y1 - y0)
+        mx, my = self._to_mm(sp)
+
+        if dm == 'multi_rotate':
+            a0 = _m.degrees(_m.atan2(self._to_mm(self._drag_sp0)[1] - cy,
+                                     self._to_mm(self._drag_sp0)[0] - cx))
+            a1 = _m.degrees(_m.atan2(my - cy, mx - cx))
+            dang = a1 - a0
+            if shift and not no_snap:
+                dang = round(dang / 15.0) * 15.0
+            rad = _m.radians(dang)
+            cosr, sinr = _m.cos(rad), _m.sin(rad)
+            for oid, snap in snaps.items():
+                o = self._find_obj(oid)
+                if o is None:
+                    continue
+                tf0 = snap['tf']
+                ocx, ocy = tf0.x + tf0.width / 2.0, tf0.y + tf0.height / 2.0
+                ndx = ocx - cx; ndy = ocy - cy
+                nrx = cx + ndx * cosr - ndy * sinr
+                nry = cy + ndx * sinr + ndy * cosr
+                o.transform.x = nrx - tf0.width / 2.0
+                o.transform.y = nry - tf0.height / 2.0
+                o.transform.rotation = (getattr(tf0, "rotation", 0) + dang) % 360
+                self._transform_geometry_follow(o, snap, tf0,
+                                                 o.transform.x - tf0.x,
+                                                 o.transform.y - tf0.y, 1.0, 1.0)
+            return
+
+        # multi_resize_<HANDLE>
+        handle = dm.replace('multi_resize_', '')
+        sgn = SelectionOverlay._SIGN.get(handle, (1, 1))
+        sgx, sgy = sgn
+        # anchor = opposite corner/edge of the union box (fixed point)
+        ax = x1 if sgx < 0 else (x0 if sgx > 0 else cx)
+        ay = y1 if sgy < 0 else (y0 if sgy > 0 else cy)
+        # new width/height from the dragged edge relative to the anchor
+        if sgx != 0:
+            new_bw = abs(mx - ax)
+        else:
+            new_bw = bw
+        if sgy != 0:
+            new_bh = abs(my - ay)
+        else:
+            new_bh = bh
+        sx = new_bw / bw if sgx != 0 else 1.0
+        sy = new_bh / bh if sgy != 0 else 1.0
+        # uniform: Shift on a corner (both axes), or any edge keeps the other 1
+        if shift and sgx != 0 and sgy != 0:
+            s = max(sx, sy)
+            sx = sy = s
+        # clamp tiny/negative
+        sx = max(0.02, sx); sy = max(0.02, sy)
+        from edof.format.objects import QRCode as _QRm
+        for oid, snap in snaps.items():
+            o = self._find_obj(oid)
+            if o is None:
+                continue
+            tf0 = snap['tf']
+            nx = ax + (tf0.x - ax) * sx
+            ny = ay + (tf0.y - ay) * sy
+            o.transform.x = nx; o.transform.y = ny
+            base_rot = getattr(tf0, "rotation", 0) or 0
+            is_qr = isinstance(o, _QRm)
+            if base_rot % 360 != 0 and not is_qr and \
+                    (abs(sx - 1.0) > 1e-9 or abs(sy - 1.0) > 1e-9):
+                # v4.3.5.51: pre-rotated object deforms in the selection's axes
+                # (Photoshop-style skew) via RQ decomposition.
+                nrot, nw, nh, nshx = _shear_decompose(
+                    sx, sy, base_rot, tf0.width, tf0.height)
+                o.transform.rotation = nrot % 360
+                o.transform.width = nw
+                o.transform.height = nh
+                o.transform.shear_x = nshx
+            elif is_qr:
+                s = max(sx, sy)
+                o.transform.width = max(0.5, tf0.width * s)
+                o.transform.height = max(0.5, tf0.height * s)
+                o.transform.shear_x = 0.0
+            else:
+                o.transform.width = max(0.5, tf0.width * sx)
+                o.transform.height = max(0.5, tf0.height * sy)
+                self._transform_geometry_follow(o, snap, tf0, nx - tf0.x,
+                                                ny - tf0.y, sx, sy)
+
+    def _scale_child_geometry(self, ch, snap, sx, sy):
+        """v4.3.5.46: when a group is resized, scale a child's local geometry to
+        match. LINE points are absolute (scale about the child's box origin);
+        PATH data are local (scale about 0,0); text glyph scale multiplies so the
+        text squashes/stretches with the group. `snap` holds the baseline."""
+        from edof.format.objects import Shape, SHAPE_LINE, SHAPE_PATH, TextBox
+        bx, by, bw, bh, bgsx, bgsy = snap
+        pts0 = getattr(self, "_drag_group_pts0", {}).get(id(ch))
+        pdat0 = getattr(self, "_drag_group_path0", {}).get(id(ch))
+        if isinstance(ch, Shape) and ch.shape_type == SHAPE_LINE and pts0:
+            # v4.3.5.48: line points are LOCAL -> scale about (0,0) like a path
+            ch.points = [[px * sx, py * sy] for (px, py) in pts0]
+        elif isinstance(ch, Shape) and ch.shape_type == SHAPE_PATH and pdat0 \
+                and (abs(sx - 1.0) > 1e-9 or abs(sy - 1.0) > 1e-9):
+            new_data = []
+            for cmd in pdat0:
+                if not cmd:
+                    new_data.append(cmd); continue
+                op = cmd[0]
+                if op in ("M", "L"):
+                    new_data.append([op, cmd[1] * sx, cmd[2] * sy])
+                elif op == "C":
+                    new_data.append([op, cmd[1] * sx, cmd[2] * sy,
+                                     cmd[3] * sx, cmd[4] * sy,
+                                     cmd[5] * sx, cmd[6] * sy])
+                elif op == "Q":
+                    new_data.append([op, cmd[1] * sx, cmd[2] * sy,
+                                     cmd[3] * sx, cmd[4] * sy])
+                else:
+                    new_data.append(cmd)
+            ch.path_data = new_data
+        if isinstance(ch, TextBox):
+            try:
+                ch.style.glyph_scale_x = max(0.05, bgsx * sx)
+                ch.style.glyph_scale_y = max(0.05, bgsy * sy)
+            except Exception:
+                pass
+
+    def _transform_geometry_follow(self, o, snap, tf0, dx, dy, sx, sy):
+        """Keep a shape's local geometry in step with a multi-transform: LINE
+        points are absolute (translate + scale about the box origin); PATH data
+        are local (scale about 0,0). v4.3.5.41: text boxes also get their glyph
+        scale multiplied so a non-uniform resize squashes/stretches the text
+        non-uniformly (not just the box). Uses the drag-start snapshot."""
+        from edof.format.objects import Shape, SHAPE_LINE, SHAPE_PATH, TextBox
+        if isinstance(o, TextBox) and (snap.get('gsx') is not None) \
+                and (abs(sx - 1.0) > 1e-9 or abs(sy - 1.0) > 1e-9):
+            try:
+                o.style.glyph_scale_x = max(0.05, snap['gsx'] * sx)
+                o.style.glyph_scale_y = max(0.05, snap['gsy'] * sy)
+            except Exception:
+                pass
+            return
+        if not isinstance(o, Shape):
+            return
+        if o.shape_type == SHAPE_LINE and snap.get('points'):
+            # v4.3.5.48: line points are LOCAL -> scale about (0,0); the box's
+            # x/y already moved, no per-point translation needed.
+            o.points = [[px * sx, py * sy] for (px, py) in snap['points']]
+        elif o.shape_type == SHAPE_PATH and snap.get('path_data') \
+                and (abs(sx - 1.0) > 1e-9 or abs(sy - 1.0) > 1e-9):
+            new_data = []
+            for cmd in snap['path_data']:
+                if not cmd:
+                    new_data.append(cmd); continue
+                op = cmd[0]
+                if op in ("M", "L"):
+                    new_data.append([op, cmd[1] * sx, cmd[2] * sy])
+                elif op == "C":
+                    new_data.append([op, cmd[1] * sx, cmd[2] * sy,
+                                     cmd[3] * sx, cmd[4] * sy,
+                                     cmd[5] * sx, cmd[6] * sy])
+                elif op == "Q":
+                    new_data.append([op, cmd[1] * sx, cmd[2] * sy,
+                                     cmd[3] * sx, cmd[4] * sy])
+                else:
+                    new_data.append(cmd)
+            o.path_data = new_data
 
     # v4.1.0: grid as semi-transparent dots + visible margins
     def drawForeground(self, painter, rect):
@@ -1935,23 +2802,34 @@ class EdofCanvas(QGraphicsView):
                     # own y from the page edge, so the visible band did not line
                     # up with the box the double-click targets -- it looked like
                     # a band at the page boundary that could not be clicked.
+                    #
+                    # v4.4.0 CRITICAL: this paints in drawForeground, i.e. OVER
+                    # every scene item -- including the band's own rendered
+                    # text AND the open inline editor. The band must therefore
+                    # NEVER have an opaque fill (an opaque white fill here hid
+                    # the header editor completely: typing worked, nothing was
+                    # visible). No fill at all: the page is already white,
+                    # which is the requested look. Decoration is skipped
+                    # entirely while THIS band is being edited.
+                    if getattr(self, '_inline_id', None) == getattr(box, 'id', None):
+                        continue
                     t = box.transform
                     bx = mm_to_px(t.x, self._dpi); by = mm_to_px(t.y, self._dpi)
                     bw = mm_to_px(t.width, self._dpi); bh = mm_to_px(t.height, self._dpi)
                     empty = not ((box.text or '').strip())
                     painter.save()
-                    pen = QPen(QColor(90, 150, 210, 150), 1.0, Qt.PenStyle.DashLine)
+                    pen = QPen(QColor(165, 165, 178, 150), 1.0, Qt.PenStyle.DashLine)
                     pen.setCosmetic(True); pen.setDashPattern([3, 3])
                     painter.setPen(pen)
-                    painter.setBrush(QColor(120, 160, 220, 26))
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
                     painter.drawRect(QRectF(bx, by, bw, bh))
                     if empty:
-                        painter.setPen(QColor(90, 120, 170, 210))
+                        painter.setPen(QColor(120, 120, 135, 210))
                         f = painter.font(); f.setPointSizeF(max(6.0, 9.0 / z)); painter.setFont(f)
                         painter.drawText(
                             QRectF(bx + 6, by, bw - 12, bh),
                             int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
-                            f"{label} (double-click to edit)")
+                            f"{label} (click to edit)")
                     painter.restore()
         except Exception:
             pass
@@ -1968,6 +2846,105 @@ class EdofCanvas(QGraphicsView):
                         painter.drawLine(QPointF(0, pos), QPointF(page_w_px, pos))
                     else:
                         painter.drawLine(QPointF(pos, 0), QPointF(pos, page_h_px))
+            painter.restore()
+
+        # v4.3.5.35: when several objects are selected, draw ONE bounding box
+        # around all of them (like Photoshop) instead of separate frames. During
+        # a batch preview the box is computed from the PROJECTED geometry so it
+        # matches what's rendered (not the template), fixing the "template boxes"
+        # the user saw.
+        if getattr(self, "_multi_sel_ids", None):
+            sel_objs = self._selected_objects_projected()
+            if len(sel_objs) >= 2:
+                # axis-aligned union of every selected object's bbox (account
+                # for rotation by expanding to the rotated corners' extent)
+                import math as _m
+                xs0, ys0, xs1, ys1 = [], [], [], []
+                for o in sel_objs:
+                    t = getattr(o, "transform", None)
+                    if t is None:
+                        continue
+                    cx, cy = t.x + t.width / 2.0, t.y + t.height / 2.0
+                    rot = _m.radians(getattr(t, "rotation", 0) or 0)
+                    corners = [(t.x, t.y), (t.x + t.width, t.y),
+                               (t.x + t.width, t.y + t.height), (t.x, t.y + t.height)]
+                    for (px, py) in corners:
+                        if rot:
+                            dx, dy = px - cx, py - cy
+                            px = cx + dx * _m.cos(rot) - dy * _m.sin(rot)
+                            py = cy + dx * _m.sin(rot) + dy * _m.cos(rot)
+                        xs0.append(px); ys0.append(py); xs1.append(px); ys1.append(py)
+                if xs0:
+                    ux0, uy0 = min(xs0), min(ys0)
+                    ux1, uy1 = max(xs1), max(ys1)
+                    painter.save()
+                    pen = QPen(QColor(80, 140, 255), 1.5)
+                    pen.setCosmetic(True)
+                    pen.setStyle(Qt.PenStyle.DashLine)
+                    painter.setPen(pen)
+                    painter.setBrush(QColor(80, 140, 255, 22))
+                    bx = mm_to_px(ux0, self._dpi); by = mm_to_px(uy0, self._dpi)
+                    bw = mm_to_px(ux1 - ux0, self._dpi)
+                    bh = mm_to_px(uy1 - uy0, self._dpi)
+                    painter.drawRect(QRectF(bx, by, bw, bh))
+                    # small solid corner marks so the box reads as a selection
+                    pen2 = QPen(QColor(80, 140, 255), 2.0); pen2.setCosmetic(True)
+                    painter.setPen(pen2); painter.setBrush(Qt.BrushStyle.NoBrush)
+                    ml = 7.0
+                    for (hx, hy, dxs, dys) in [
+                        (bx, by, 1, 1), (bx + bw, by, -1, 1),
+                        (bx, by + bh, 1, -1), (bx + bw, by + bh, -1, -1)]:
+                        painter.drawLine(QPointF(hx, hy), QPointF(hx + dxs * ml, hy))
+                        painter.drawLine(QPointF(hx, hy), QPointF(hx, hy + dys * ml))
+                    painter.restore()
+                    # v4.3.5.37: draw transform handles (resize + rotate) so the
+                    # whole selection can be scaled/rotated like one object.
+                    handles = self._union_handles_px()
+                    if handles:
+                        painter.save()
+                        hs = HSIZE / max(1e-6, self._zoom)
+                        hpen = QPen(QColor(80, 140, 255), 1.5); hpen.setCosmetic(True)
+                        painter.setPen(hpen)
+                        painter.setBrush(QColor(255, 255, 255))
+                        # line up to the rotate handle
+                        painter.drawLine(handles['TC'], handles['ROT'])
+                        for k, pt in handles.items():
+                            if k == 'ROT':
+                                painter.setBrush(QColor(80, 140, 255))
+                                painter.drawEllipse(pt, hs, hs)
+                                painter.setBrush(QColor(255, 255, 255))
+                            else:
+                                painter.drawRect(QRectF(pt.x() - hs, pt.y() - hs,
+                                                        2 * hs, 2 * hs))
+                        painter.restore()
+
+        # v4.3.5.10: BATCH EDIT banner. When the canvas is in batch edit mode,
+        # paint a clear screen-fixed banner so it's unmistakable that edits feed
+        # a batch record, not the base document. Drawn in viewport coordinates
+        # (cosmetic) so it stays put and legible at any zoom.
+        if getattr(self, "_edit_mode", "classic") == "batch":
+            painter.save()
+            painter.resetTransform()           # draw in device/viewport space
+            from PyQt6.QtGui import QFont as _QFont
+            vp_w = self.viewport().width()
+            rec = bool(getattr(self, "_batch_is_recording", False))
+            text = "● REC  BATCH EDIT" if rec else "BATCH EDIT"
+            bg = QColor(200, 40, 40, 235) if rec else QColor(196, 120, 0, 230)
+            f = _QFont(); f.setPointSize(10); f.setBold(True)
+            painter.setFont(f)
+            fm = painter.fontMetrics()
+            tw = fm.horizontalAdvance(text)
+            pad = 10
+            bw = tw + 2 * pad
+            bh = fm.height() + 6
+            bx = (vp_w - bw) / 2.0
+            by = 8
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(bg)
+            painter.drawRoundedRect(QRectF(bx, by, bw, bh), 5, 5)
+            painter.setPen(QColor(255, 255, 255, 255))
+            painter.drawText(QRectF(bx, by, bw, bh),
+                             Qt.AlignmentFlag.AlignCenter, text)
             painter.restore()
 
     # ── Coordinates ───────────────────────────────────────────────────────────
@@ -2128,6 +3105,7 @@ class EdofCanvas(QGraphicsView):
         ed = EdofTextEditor(obj, dpi=dpi, page_bg=page_bg,
                               bg_snapshot=snapshot_qimg,
                               is_doc_body=is_body)
+        ed._host_canvas = self     # v4.4.1: for link follow (anchor jumps)
         # v4.1.23.18: mark the editor "continued" when this doc body is on a
         # page that is NOT the last page carrying the body — its content
         # flows onto the next page. The editor then suppresses the trailing
@@ -2167,6 +3145,11 @@ class EdofCanvas(QGraphicsView):
                     ed._host_save = mw._save
                 if hasattr(mw, '_save_as'):
                     ed._host_save_as = mw._save_as
+        # v4.3.6.1: let the editor's right-click menu and Ctrl+Shift+V make a
+        # text variable through the canvas (which owns the doc + batch config).
+        ed._make_var_cb = self._make_text_variable
+        # v4.3.6.2: read-only while previewing a batch row (not recording).
+        ed._read_only = self._batch_template_locked()
         # v4.1.16.4: signals trigger UI cleanup AFTER editor has written
         # data back. Editor.py drives commit/cancel directly; signals are
         # for after-the-fact cleanup only — no recursion possible.
@@ -2378,6 +3361,25 @@ class EdofCanvas(QGraphicsView):
             pg_menu.addAction("Number, right-aligned",  _ins("{page_number_right}"))
             btn_pgnum = _btn("#▾", "Insert page number", lambda: None, fixed_w=40)
             btn_pgnum.setMenu(pg_menu)
+        # v4.3.6.0: turn the current text selection into a batch variable. The
+        # logic lives in EdofCanvas._make_text_variable so the toolbar button,
+        # the right-click menu and the Ctrl+Shift+V shortcut all share it.
+        btn_var = _btn("{ }", "Make selection a batch variable (Ctrl+Shift+V)",
+                       self._make_text_variable)
+        btn_var.setStyleSheet(btn_var.styleSheet() +
+                              "QPushButton{color:#9ad;font-weight:bold}")
+        # v4.4.0: hyperlink on the selection (external URL or anchor jump)
+        btn_link = _btn("🔗", "Link (Ctrl+K); Ctrl+click follows a link",
+                        self._make_text_link)
+        btn_link.setStyleSheet(btn_link.styleSheet() +
+                               "QPushButton{color:#7ec8ff}")
+        # v4.4.0: mark the selection as an in-document link TARGET (anchor).
+        # A visible toolbar entry point; the right-click menu has it too.
+        btn_anchor = _btn("⚓", "Mark selection as link target (anchor)",
+                          self._make_text_anchor)
+        btn_anchor.setStyleSheet(btn_anchor.styleSheet() +
+                                 "QPushButton{color:#9fd89f}")
+
         # v4.1.16.3: Font size spinbox — applies to current selection.
         # v4.1.17: now in mm (canonical EDOF unit).
         sp_size = FocusKeepingSpinBox()
@@ -2633,7 +3635,7 @@ class EdofCanvas(QGraphicsView):
         row1_items += [cb_font, sp_size, sp_ls, sp_letsp]
         row2_items = [btn_al, btn_ac, btn_ar, btn_aj, btn_ajf,
                       btn_ul, btn_ol, btn_ind, btn_ded,
-                      btn_vt, btn_vm, btn_vb]
+                      btn_vt, btn_vm, btn_vb, btn_var, btn_link, btn_anchor]
         tail_items = [] if is_body else [btn_ok, btn_cancel]
         if is_body:
             btn_ok.hide(); btn_cancel.hide()
@@ -2822,6 +3824,19 @@ class EdofCanvas(QGraphicsView):
         its runs back to the textbox; the widget then emits `committed`
         which triggers cleanup. NOT recursive."""
         if not self._inline_widget or not self._inline_id: return
+        # v4.4.0: while a batch row is PREVIEWED, the editor shows a mirrored,
+        # value-substituted copy of the runs (_apply_preview_to_inline). A
+        # commit fired in that state (e.g. clicking into the batch panel) used
+        # to write the PREVIEW VALUES into the live object, and for a header/
+        # footer into the shared template, which repaginated, refreshed the
+        # panels, re-mirrored and looped. Restore the live runs first, ALWAYS.
+        _live = getattr(self, "_inline_live_runs", None)
+        if _live is not None:
+            try:
+                self._inline_widget._runs = _live
+            except Exception:
+                pass
+            self._inline_live_runs = None
         pg = self._cur_page()
         obj = pg.get_object(self._inline_id) if pg else None
         # Restore visibility BEFORE commit so user sees correct state
@@ -2874,6 +3889,13 @@ class EdofCanvas(QGraphicsView):
                 # applies on every page of this parity.
                 try:
                     sd = committed_obj.style.to_dict()
+                    # v4.4.0: never persist padding into the band template
+                    # style (bands are padding-0 by rule; a non-zero value
+                    # armed the paginate zero/restore flicker loop)
+                    for _pad in ('padding', 'padding_top', 'padding_bot',
+                                 'padding_left', 'padding_right'):
+                        if _pad in sd:
+                            sd[_pad] = 0.0
                     setattr(body, f'{hf_role}_style{suff}', sd)
                 except Exception:
                     pass
@@ -2900,6 +3922,22 @@ class EdofCanvas(QGraphicsView):
                     self.verticalScrollBar().setValue(_vsb)
                 except Exception:
                     pass
+                # v4.3.6.9: return the sticky inline editor to the body. Without
+                # this, after editing the header/footer the body had no active
+                # editor, so text selection (and typing) in the body silently
+                # stopped working until a manual click re-opened it.
+                if not skip_sticky:
+                    from PyQt6.QtCore import QTimer as _QT
+                    def _reenter_body_hf():
+                        pg2 = self._cur_page()
+                        if pg2 is None:
+                            return
+                        for _o in pg2.sorted_objects():
+                            if self._is_document_body(_o):
+                                self.set_sel_id(_o.id)
+                                self._start_inline(_o)
+                                break
+                    _QT.singleShot(50, _reenter_body_hf)
                 return
             except Exception:
                 import traceback as _tb; _tb.print_exc()
@@ -3457,6 +4495,135 @@ class EdofCanvas(QGraphicsView):
                     QTimer.singleShot(60, self._scroll_to_cursor)
                 except Exception: pass
         QTimer.singleShot(40, _hop)
+        # v4.3.6.19: if the set of variable rids changed (e.g. a variable's text
+        # was fully deleted so its run is gone), drop orphan columns and refresh
+        # the Objects panel so the variable entity and its columns disappear.
+        try:
+            self._sync_variable_entities()
+        except Exception:
+            pass
+
+    def _merge_inline_runs(self, primary_rid, primary_name, merge_rids):
+        """v4.3.6.23: when the document body is being edited inline, its runs
+        live as a COPY on the inline editor; the page box gets refreshed FROM
+        that copy on reflow. So after a variable merge on the page box we must
+        apply the same rid reassignment to the inline editor's runs (and sync),
+        otherwise the reflow overwrites the merge with the stale copy."""
+        ied = getattr(self, "_inline_widget", None)
+        if ied is None:
+            return
+        mset = {r for r in (merge_rids or []) if r and r != primary_rid}
+        if not mset:
+            return
+        changed = False
+        for r in (getattr(ied, "_runs", None) or []):
+            if getattr(r, "rid", None) in mset:
+                try:
+                    r.rid = primary_rid
+                    r.var_name = primary_name
+                    changed = True
+                except Exception:
+                    pass
+        if changed:
+            try: ied.sync_to_tb_silent()
+            except Exception: pass
+
+    def _commit_hf_runs_from_inline(self):
+        """v4.4.0: persist the OPEN inline header/footer editor's runs to the
+        body template WITHOUT closing the editor. Used when a batch variable is
+        made in the header/footer: the rid must live on the template runs, or
+        the next repagination would overwrite the per-page box from a template
+        that never knew about the variable."""
+        role = getattr(self, "_inline_hf_role", None)
+        ied = getattr(self, "_inline_widget", None)
+        doc = getattr(self, "_doc", None)
+        body = getattr(doc, "body", None) if doc is not None else None
+        if not role or ied is None or body is None:
+            return False
+        suff = "_even" if getattr(self, "_inline_hf_even", False) else ""
+        import copy as _c
+        # v4.4.0: never persist mirrored PREVIEW runs into the template
+        _src = getattr(self, "_inline_live_runs", None)
+        if _src is None:
+            _src = getattr(ied, "_runs", None)
+        runs = [_c.deepcopy(r) for r in (_src or [])]
+        try:
+            setattr(body, "%s_runs%s" % (role, suff), runs)
+        except Exception:
+            return False
+        return True
+
+    def _sync_variable_entities(self):
+        """v4.3.6.19: keep variable entities + their batch columns in sync with
+        the actual runs. When a variable's text is fully deleted its run (and rid)
+        is gone; drop any batch column bound to that rid and refresh the Objects
+        panel so the entity stops showing. Change-detected so it doesn't fire on
+        every keystroke."""
+        doc = getattr(self, "_doc", None)
+        if doc is None:
+            return
+        present = set()
+        for pg in (getattr(doc, "pages", None) or []):
+            objs = list(getattr(pg, "objects", None) or [])
+            i = 0
+            while i < len(objs):
+                o = objs[i]; i += 1
+                kids = getattr(o, "children", None)
+                if kids:
+                    objs.extend(kids)
+                for r in (getattr(o, "runs", None) or []):
+                    rid = getattr(r, "rid", None)
+                    if rid:
+                        present.add(rid)
+        # v4.4.0: header/footer template rids count as present too (the page
+        # clones can be momentarily gone, e.g. band toggled off, and the GC
+        # must not drop their columns then)
+        body = getattr(doc, "body", None)
+        if body is not None:
+            for attr in ("header_runs", "footer_runs",
+                         "header_runs_even", "footer_runs_even"):
+                for r in (getattr(body, attr, None) or []):
+                    rid = getattr(r, "rid", None)
+                    if rid:
+                        present.add(rid)
+            for attr in ("header_objects", "footer_objects"):
+                for o in (getattr(body, attr, None) or []):
+                    for r in (getattr(o, "runs", None) or []):
+                        rid = getattr(r, "rid", None)
+                        if rid:
+                            present.add(rid)
+        last = getattr(self, "_last_var_rids", None)
+        if last == present:
+            return
+        prev = last
+        self._last_var_rids = set(present)
+        if prev is None:
+            return   # first call just primes the set; never GC on load timing
+        cfg = getattr(doc, "batch", None)
+        if cfg is not None:
+            orphan = [c.column_id for c in list(cfg.columns)
+                      if getattr(c, "run_id", "")
+                      and str(getattr(c, "attr_path", "") or "").startswith("run.")
+                      and c.run_id not in present]
+            for cid in orphan:
+                try: cfg.remove_column(cid)
+                except Exception: pass
+            # v4.3.6.28: dropping a column changes the batch config, so the
+            # panels must rebuild too, or the bottom table keeps showing the
+            # dead column until some unrelated rebuild happens.
+            if orphan:
+                mw = self.parent()
+                tp = getattr(mw, "_batch_tpl", None) if mw is not None else None
+                if tp is not None:
+                    try: tp.rebuild()
+                    except Exception: pass
+                elif mw is not None:
+                    bp = getattr(mw, "_batch_panel", None)
+                    if bp is not None:
+                        try: bp.rebuild()
+                        except Exception: pass
+        try: self.objectChanged.emit()
+        except Exception: pass
 
     def _on_merge_with_previous(self, tb):
         """v4.1.22.1: backspace at cursor=0 inside a doc body. Find the
@@ -3789,6 +4956,8 @@ class EdofCanvas(QGraphicsView):
         self.schedule_render(0)
 
     def _cancel_inline(self):
+        # v4.4.0: a mirrored preview snapshot must not survive the session
+        self._inline_live_runs = None
         # v4.1.1/4.1.7: restore visibility AND text snapshot so cancelling
         # leaves the textbox exactly as it was before edit.
         obj = getattr(self, '_inline_obj', None)
@@ -3882,6 +5051,33 @@ class EdofCanvas(QGraphicsView):
                                    self.verticalScrollBar().value())
             self.viewport().setCursor(tcur('hand_grab', Qt.CursorShape.ClosedHandCursor))
             event.accept(); return
+        # v4.4.0: Ctrl+click follows a hyperlink directly on the canvas, no
+        # need to enter inline editing first (this is what makes links usable
+        # in basic mode). With an open inline editor the editor's own
+        # Ctrl+click handler applies instead.
+        if (btn == Qt.MouseButton.LeftButton
+                and (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+                and self._inline_widget is None):
+            _lnk = None
+            try:
+                _sp = self.mapToScene(event.pos())
+                _lnk = self._link_at_scene_pos(_sp.x(), _sp.y())
+            except Exception:
+                _lnk = None
+            if _lnk:
+                self._follow_link_str(_lnk)
+                event.accept(); return
+        # v4.4.0: SINGLE-click switching between the document body and the
+        # header/footer bands, done synchronously through ONE code path
+        # (_switch_inline_to). The switch fully owns the click: it commits the
+        # open session, neutralises interaction state and the matching release
+        # is swallowed, so nothing downstream sees a half-handled press.
+        if (btn == Qt.MouseButton.LeftButton
+                and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+                and not getattr(self, '_hand_tool', False)
+                and self._doc_click_switch(event)):
+            event.accept()
+            return
         # v4.1.16.4: when inline edit is active and user clicks outside
         # both the editor (proxy widget) AND the toolbar, auto-commit.
         # This is more reliable than the previous focusOutEvent approach
@@ -4089,9 +5285,40 @@ class EdofCanvas(QGraphicsView):
                     super().mousePressEvent(event); return
 
             sp=self._sp(event); handle=self._overlay.hit_handle(sp)
+            # v4.3.5.37: when several objects are selected, the union box's
+            # handles transform the whole selection (resize/rotate together).
+            uhandle = self._hit_union_handle(sp) if not handle else None
+            if uhandle and self._batch_template_locked():
+                uhandle = None
+            if uhandle:
+                objs = self.selected_objects()
+                bb = self._union_bbox_mm(objs)
+                if bb is not None:
+                    self._drag_mode = ('multi_rotate' if uhandle == 'ROT'
+                                       else 'multi_resize_' + uhandle)
+                    self._drag_sp0 = sp
+                    self._multi_bb0 = bb
+                    # snapshot each object's transform (+ line points / path data)
+                    self._multi_tf0 = {}
+                    from edof.format.objects import Shape, SHAPE_LINE, SHAPE_PATH, TextBox
+                    for o in objs:
+                        snap = {'tf': copy.copy(o.transform)}
+                        if isinstance(o, Shape):
+                            if o.shape_type == SHAPE_LINE and o.points:
+                                snap['points'] = list(o.points)
+                            elif o.shape_type == SHAPE_PATH and o.path_data:
+                                snap['path_data'] = copy.deepcopy(o.path_data)
+                        # v4.3.5.41: capture text glyph scale so a non-uniform
+                        # resize squashes/stretches the text non-uniformly too.
+                        if isinstance(o, TextBox):
+                            snap['gsx'] = float(getattr(o.style, 'glyph_scale_x', 1.0) or 1.0)
+                            snap['gsy'] = float(getattr(o.style, 'glyph_scale_y', 1.0) or 1.0)
+                        self._multi_tf0[o.id] = snap
+                    super().mousePressEvent(event); return
             if handle:
                 obj=self._sel_obj()
                 if (obj and not obj.locked and not getattr(obj, 'lock_position', False)
+                        and not self._batch_template_locked()
                         and not (getattr(self._doc, 'mode', '') == 'document'
                                  and self._is_document_body(obj))):
                     mode='rotate' if handle=='ROT' else f'resize_{handle}'
@@ -4107,6 +5334,13 @@ class EdofCanvas(QGraphicsView):
                         self._drag_path_data0 = copy.deepcopy(obj.path_data)
                     else:
                         self._drag_path_data0 = None
+                    # v4.3.5.47: snapshot line endpoints so resizing scales them
+                    from edof.format.objects import SHAPE_LINE as _SLcap
+                    if (isinstance(obj, Shape) and obj.shape_type == _SLcap
+                            and getattr(obj, "points", None)):
+                        self._drag_line_pts0 = list(obj.points)
+                    else:
+                        self._drag_line_pts0 = None
                     # v4.1.16.5: snapshot font sizes so Shift/Ctrl resize
                     # can scale fonts proportionally without drift.
                     # v4.1.16.7: also snapshot glyph_scale_x/y for the
@@ -4125,6 +5359,30 @@ class EdofCanvas(QGraphicsView):
                         self._drag_font_sizes0_runs = None
                         self._drag_glyph_scale_x0 = 1.0
                         self._drag_glyph_scale_y0 = 1.0
+                    # v4.3.5.46: snapshot a group's children so resize/rotate can
+                    # transform the whole group as a unit without drift.
+                    from edof.format.objects import Group as _GrpS, Shape as _ShS, SHAPE_LINE as _SLS, SHAPE_PATH as _SPS, TextBox as _TBS
+                    if isinstance(obj, _GrpS):
+                        self._drag_group_tf0 = []
+                        self._drag_group_pts0 = {}
+                        self._drag_group_path0 = {}
+                        self._drag_group_crot0 = {}
+                        self._drag_group_cshear0 = {}
+                        self._drag_group_rot0 = obj.transform.rotation or 0.0
+                        for ch in obj.flatten():
+                            t = ch.transform
+                            gsx = float(getattr(getattr(ch, "style", None), "glyph_scale_x", 1.0) or 1.0) if isinstance(ch, _TBS) else 1.0
+                            gsy = float(getattr(getattr(ch, "style", None), "glyph_scale_y", 1.0) or 1.0) if isinstance(ch, _TBS) else 1.0
+                            self._drag_group_tf0.append(
+                                (t.x, t.y, t.width, t.height, gsx, gsy))
+                            self._drag_group_crot0[id(ch)] = t.rotation or 0.0
+                            self._drag_group_cshear0[id(ch)] = getattr(t, "shear_x", 0.0) or 0.0
+                            if isinstance(ch, _ShS) and ch.shape_type == _SLS and getattr(ch, "points", None):
+                                self._drag_group_pts0[id(ch)] = list(ch.points)
+                            elif isinstance(ch, _ShS) and ch.shape_type == _SPS and getattr(ch, "path_data", None):
+                                self._drag_group_path0[id(ch)] = copy.deepcopy(ch.path_data)
+                    else:
+                        self._drag_group_tf0 = None
                 return
             hit=self._hit_obj(sp)
             # v4.1.17.1: if user has a selected object and clicked inside its
@@ -4180,16 +5438,33 @@ class EdofCanvas(QGraphicsView):
                             and not getattr(obj, 'lock_position', False)
                             and not (getattr(self._doc, 'mode', '') == 'document'
                                      and self._is_document_body(obj))
+                            and not self._batch_template_locked()
                             and (not self._doc or obj.can_modify(self._doc)))
                 if can_drag:
                     self._drag_mode='move'; self._drag_sp0=sp
                     self._drag_tf0=copy.copy(obj.transform)
+                    # v4.3.5.36: capture baseline line points so dragging a line
+                    # translates them without drift across many mouseMoves.
+                    from edof.format.objects import Shape as _Sh0, SHAPE_LINE as _SL0, Group as _Grp0
+                    self._drag_pts0 = (list(obj.points)
+                                       if isinstance(obj, _Sh0)
+                                       and obj.shape_type == _SL0
+                                       and getattr(obj, "points", None) else None)
+                    # v4.3.5.42: baseline child positions so moving a group moves
+                    # its contents without drift.
+                    self._drag_group0 = ([(ch.transform.x, ch.transform.y)
+                                          for ch in obj.flatten()]
+                                         if isinstance(obj, _Grp0) else None)
                     # Capture starting transforms of all multi-selected objects
                     self._multi_drag_tf0={}
+                    self._multi_drag_pts0={}
                     for mid in self._multi_sel_ids:
                         mobj=self._find_obj(mid)
                         if mobj and not mobj.locked and not getattr(mobj, 'lock_position', False):
                             self._multi_drag_tf0[mid]=copy.copy(mobj.transform)
+                            if (isinstance(mobj, _Sh0) and mobj.shape_type == _SL0
+                                    and getattr(mobj, "points", None)):
+                                self._multi_drag_pts0[mid]=list(mobj.points)
             else:
                 self._drag_mode=None; self._multi_sel_ids.clear()
                 # v4.0.1: start lasso selection on empty click
@@ -4211,6 +5486,26 @@ class EdofCanvas(QGraphicsView):
             self.verticalScrollBar().setValue(self._pan_scroll0[1]-d.y())
             event.accept(); return
         sp=self._sp(event)
+
+        # v4.3.5.32: rubber-band (rectangle) selection while dragging from empty
+        # space. Draw the box; objects inside are selected on release.
+        if self._lasso_start is not None and self._drag_mode is None:
+            from PyQt6.QtWidgets import QGraphicsRectItem
+            from PyQt6.QtGui import QPen, QBrush, QColor
+            from PyQt6.QtCore import QRectF
+            x0, y0 = self._lasso_start.x(), self._lasso_start.y()
+            x1, y1 = sp.x(), sp.y()
+            rect = QRectF(min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))
+            if self._lasso_rect_item is None:
+                it = QGraphicsRectItem(rect)
+                it.setPen(QPen(QColor(80, 140, 255), 0, Qt.PenStyle.DashLine))
+                it.setBrush(QBrush(QColor(80, 140, 255, 40)))
+                it.setZValue(10000)
+                self.scene().addItem(it)
+                self._lasso_rect_item = it
+            else:
+                self._lasso_rect_item.setRect(rect)
+            event.accept(); return
 
         # v4.1.15: rectangle draw — live-update preview while button held
         if (self._rect_draw_kind is not None
@@ -4481,11 +5776,58 @@ class EdofCanvas(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self,event):
+        # v4.4.0: the press that switched inline editing consumed the whole
+        # click; its release must not reach the drag/lasso/proxy machinery.
+        if getattr(self, "_swallow_next_release", False):
+            self._swallow_next_release = False
+            event.accept()
+            return
         # v4.1.16.3: forward to editor when inline active
         if self._inline_widget is not None and self._pan_start is None:
             super().mouseReleaseEvent(event); return
         # v4.2.9.8: interaction ended -> next render is full quality
         self._interacting = False
+        # v4.3.5.32: finish a rubber-band selection -> select objects whose
+        # bounding box intersects the dragged rectangle. Ctrl/Shift add to the
+        # current selection; otherwise the rectangle replaces it.
+        if self._lasso_start is not None:
+            started = self._lasso_start
+            self._lasso_start = None
+            if self._lasso_rect_item is not None:
+                sp = self._sp(event)
+                mx0, my0 = self._to_mm(started)
+                mx1, my1 = self._to_mm(sp)
+                rx0, rx1 = min(mx0, mx1), max(mx0, mx1)
+                ry0, ry1 = min(my0, my1), max(my0, my1)
+                try: self.scene().removeItem(self._lasso_rect_item)
+                except Exception: pass
+                self._lasso_rect_item = None
+                # only treat as a marquee if it's bigger than a click jitter
+                if (rx1 - rx0) > 0.5 or (ry1 - ry0) > 0.5:
+                    mods = event.modifiers()
+                    add = bool(mods & (Qt.KeyboardModifier.ControlModifier
+                                       | Qt.KeyboardModifier.ShiftModifier))
+                    picked = []
+                    pg = self._cur_page()
+                    for o in (getattr(pg, "objects", []) if pg else []):
+                        if not getattr(o, "visible", True):
+                            continue
+                        t = getattr(o, "transform", None)
+                        if t is None:
+                            continue
+                        # intersect object's axis-aligned bbox with the rectangle
+                        if (t.x < rx1 and t.x + t.width > rx0 and
+                                t.y < ry1 and t.y + t.height > ry0):
+                            picked.append(o.id)
+                    if not add:
+                        self._sel_id = None
+                        self._multi_sel_ids = set()
+                    cur = ([self._sel_id] if self._sel_id else []) + list(self._multi_sel_ids)
+                    for oid in picked:
+                        if oid not in cur:
+                            cur.append(oid)
+                    self.set_multi_selection(cur)
+                    event.accept(); return
         # v4.1.1: hand tool release
         if getattr(self, '_hand_tool', False) and event.button() == Qt.MouseButton.LeftButton:
             self._pan_start=None; self._pan_scroll0=None
@@ -4566,6 +5908,17 @@ class EdofCanvas(QGraphicsView):
             if getattr(self, '_path_edit_obj_id', None):
                 self._refresh_path_edit_handles()
         self._drag_mode=None; self._drag_sp0=None; self._drag_tf0=None; self._drag_anchor=None
+        self._multi_tf0=None; self._multi_bb0=None   # v4.3.5.37
+        # v4.3.5.46: after resizing/rotating a group, recompute its bounding box
+        # from the (now transformed) children, and drop the drag baselines.
+        if getattr(self, "_drag_group_tf0", None):
+            from edof.format.objects import Group as _GrpRel
+            o = self._sel_obj()
+            if isinstance(o, _GrpRel):
+                o.compute_bounds()
+        self._drag_group_tf0=None; self._drag_group0=None
+        self._drag_group_pts0=None; self._drag_group_path0=None
+        self._drag_group_crot0=None
         super().mouseReleaseEvent(event)
 
     def contextMenuEvent(self, event):
@@ -5500,6 +6853,224 @@ class EdofCanvas(QGraphicsView):
         if len(obj.path_data) <= 2: return
         del obj.path_data[ci]
 
+    def _switch_inline_to(self, oid, click_scene_pos=None) -> bool:
+        """v4.4.0: THE single code path for switching inline text editing in
+        document mode (body <-> header <-> footer, and initial entry).
+
+        Synchronous and self-contained: commits the open session (restoring
+        live runs if a batch preview mirror is active), suppresses the body's
+        sticky re-entry, cancels any half-started interaction state, starts
+        the target editor, places the caret at the click position, and keeps
+        the viewport where it was. Re-entrant calls are ignored."""
+        if getattr(self, "_inline_switch_busy", False):
+            return False
+        self._inline_switch_busy = True
+        self._inline_switching = True
+        try:
+            tgt = self._find_obj(oid)
+            if tgt is None:
+                return False
+            # v4.4.0: an active batch-row PREVIEW locks the template read-only,
+            # which silently swallowed every keystroke in the freshly opened
+            # editor ("click on the header, can't type"). Clicking into a text
+            # box IS an explicit intent to edit the template: drop the preview
+            # (recording is untouched).
+            if (getattr(self, "_batch_preview_row", None) is not None
+                    and not getattr(self, "_batch_is_recording", False)):
+                try:
+                    self.clear_batch_preview()
+                except Exception:
+                    pass
+            if (self._inline_widget is not None
+                    and getattr(self._inline_obj, 'id', None) == oid):
+                return False            # already editing this one
+            _hsb = self.horizontalScrollBar().value()
+            _vsb = self.verticalScrollBar().value()
+            # commit whatever is open; never commit mirrored preview values
+            ied = self._inline_widget
+            if ied is not None:
+                _live = getattr(self, "_inline_live_runs", None)
+                if _live is not None:
+                    try: ied._runs = _live
+                    except Exception: pass
+                    self._inline_live_runs = None
+                self._skip_sticky_reentry = True
+                try:
+                    ied.commit_to_textbox()
+                except Exception:
+                    pass
+                if self._inline_widget is not None:
+                    self._skip_sticky_reentry = True
+                    self._cancel_inline()
+                self._skip_sticky_reentry = False
+            # neutralise interaction state so a following release/move can't
+            # act on a half-initialised drag/lasso/pan
+            for _attr in ("_lasso_start", "_pan_start", "_press_pos",
+                          "_drag_mode"):
+                try: setattr(self, _attr, None)
+                except Exception: pass
+            # commit may have repaginated; re-resolve the target instance
+            fresh = self._find_obj(oid) or tgt
+            self._sel_id = fresh.id
+            # v4.4.0 CRITICAL: the press that triggered this switch is
+            # CONSUMED (super() never runs), so Qt's default focus-on-click
+            # for the view never happens. Without this, keyboard focus stays
+            # wherever it was (e.g. a batch panel field) and the freshly
+            # opened editor never receives a single keystroke.
+            try:
+                self.activateWindow()
+                self.setFocus(Qt.FocusReason.MouseFocusReason)
+                # v4.4.0: with the GPU canvas the viewport is a QOpenGLWidget;
+                # proxy-widget keyboard focus needs the VIEWPORT focused too
+                # (raster viewports delegate, the GL one does not always).
+                self.viewport().setFocus(Qt.FocusReason.MouseFocusReason)
+            except Exception:
+                try: self.setFocus()
+                except Exception: pass
+            self._start_inline(fresh)
+            if self._inline_widget is None:
+                try:
+                    from edof.engine.debug_log import log as _dlog
+                    _dlog("switch_inline.start_failed", oid=str(oid)[:12])
+                except Exception: pass
+                return False
+            # belt-and-braces: re-assert the proxy/widget focus after the
+            # view has focus (start_inline does it too, but before our view
+            # focus fix the chain could be broken)
+            try:
+                if self._inline_proxy is not None:
+                    self._inline_proxy.setFocus()
+                self._inline_widget.setFocus()
+            except Exception:
+                pass
+            # second, LATE focus reassert for the GL viewport (the first one
+            # can run before the GL surface finished its swap/activation)
+            try:
+                from PyQt6.QtCore import QTimer as _ST
+                _prx = self._inline_proxy
+                _wdg = self._inline_widget
+                def _late_focus():
+                    try:
+                        self.viewport().setFocus()
+                        if _prx is not None and _prx.scene() is not None:
+                            _prx.setFocus()
+                        if _wdg is not None:
+                            _wdg.setFocus()
+                    except Exception:
+                        pass
+                _ST.singleShot(60, _late_focus)
+            except Exception:
+                pass
+            try:
+                from edof.engine.debug_log import log as _dlog
+                _dlog("switch_inline.ok", oid=str(oid)[:12],
+                      role=str(getattr(self, "_inline_hf_role", None)))
+            except Exception: pass
+            # caret where the user clicked (falls back to the default spot)
+            if click_scene_pos is not None:
+                try:
+                    ied2 = self._inline_widget
+                    t = fresh.transform
+                    lx = click_scene_pos.x() - mm_to_px(t.x, self._dpi)
+                    ly = click_scene_pos.y() - mm_to_px(t.y, self._dpi)
+                    ied2._ensure_render()
+                    if ied2._layout is not None:
+                        idx = ied2._layout.hit_test(lx, ly)
+                        ied2._cursor = idx
+                        ied2._anchor = None
+                        ied2._invalidate()
+                except Exception:
+                    pass
+            try:
+                self.horizontalScrollBar().setValue(_hsb)
+                self.verticalScrollBar().setValue(_vsb)
+            except Exception:
+                pass
+            return True
+        except Exception:
+            return False
+        finally:
+            self._inline_switching = False
+            self._inline_switch_busy = False
+
+    def _doc_click_switch(self, event) -> bool:
+        """v4.4.0: single click routing in document mode: a click on the
+        body, header or footer box that is NOT the currently edited one
+        switches editing to it. Returns True when the click was handled (the
+        matching release is swallowed by mouseReleaseEvent)."""
+        doc = self._doc
+        if doc is None or getattr(doc, 'mode', '') != 'document':
+            return False
+        try:
+            sp = self._sp(event)
+            hit = self._hit_obj(sp, allow_hf=True)
+            tgt = self._find_obj(hit) if hit else None
+            try:
+                from edof.engine.debug_log import log as _dlog
+                _dlog("doc_click_switch.hit", hit=str(hit)[:12],
+                      tgt=type(tgt).__name__ if tgt is not None else None,
+                      inline=str(getattr(self, "_inline_id", None))[:12])
+            except Exception: pass
+            from edof.format.document_boxes import (
+                DocumentTextBox, DocumentHeaderBox, DocumentFooterBox)
+            if tgt is None:
+                # _hit_obj deliberately never returns the document BODY (it
+                # must not be selectable as an object). For editing-switch
+                # purposes the body is a first-class target: test its rect
+                # directly.
+                if self._inline_widget is None:
+                    return False       # nothing open: keep old entry behavior
+                from edof.engine.document_paginate import (
+                    find_document_body_on_page)
+                pg = self._cur_page()
+                body = find_document_body_on_page(pg) if pg is not None else None
+                if body is None:
+                    return False
+                mx, my = self._to_mm(sp)
+                t = body.transform
+                if not (t.x <= mx <= t.x + t.width
+                        and t.y <= my <= t.y + t.height):
+                    return False
+                tgt = body
+            elif not isinstance(tgt, (DocumentTextBox, DocumentHeaderBox,
+                                      DocumentFooterBox)):
+                return False           # a real object: normal selection
+            if (self._inline_widget is not None
+                    and getattr(self._inline_obj, 'id', None) == tgt.id):
+                return False    # caret placement inside the open editor
+            if self._switch_inline_to(tgt.id, click_scene_pos=sp):
+                self._swallow_next_release = True
+                return True
+            return False
+        except Exception:
+            try:
+                import traceback as _tb
+                from edof.engine.debug_log import log as _dlog
+                _dlog("doc_click_switch.exception", tb=_tb.format_exc()[-400:])
+            except Exception: pass
+            return False
+
+    def _try_enter_hf_inline(self, event) -> bool:
+        """Compatibility wrapper (tests, double-click fallback): hit-test the
+        header/footer band and switch to it via _switch_inline_to."""
+        doc = self._doc
+        if doc is None or getattr(doc, 'mode', '') != 'document':
+            return False
+        try:
+            sp = self._sp(event)
+            hit = self._hit_obj(sp, allow_hf=True)
+            if not hit:
+                return False
+            tgt = self._find_obj(hit)
+            from edof.format.document_boxes import (DocumentHeaderBox,
+                                                    DocumentFooterBox)
+            if tgt is None or not isinstance(
+                    tgt, (DocumentHeaderBox, DocumentFooterBox)):
+                return False
+            return self._switch_inline_to(tgt.id, click_scene_pos=sp)
+        except Exception:
+            return False
+
     def mouseDoubleClickEvent(self,event):
         # v4.0.3: double-click finishes path drawing
         if getattr(self, '_path_drawing', False):
@@ -5862,6 +7433,19 @@ class EdofCanvas(QGraphicsView):
         from edof.format.objects import ImageBox
         no_snap = alt or ctrl   # v4.0.3: Ctrl is the new "bypass snap"
 
+        # v4.3.5.37: transform the whole multi-selection around the union box.
+        dm = self._drag_mode or ''
+        if dm.startswith('multi_'):
+            self._apply_multi_transform(dm, sp, shift, no_snap)
+            self._refresh_overlay()
+            self.viewport().update()
+            # v4.3.5.40: use the interactive (live-preview) render path so the
+            # whole selection repaints together and responsively while dragging,
+            # instead of separate async renders that made objects appear to jump
+            # out of sync during rotation.
+            self.schedule_render_interactive(15)
+            return
+
         if self._drag_mode=='move':
             dx=px_to_mm(sp.x()-self._drag_sp0.x(),self._dpi)
             dy=px_to_mm(sp.y()-self._drag_sp0.y(),self._dpi)
@@ -5880,11 +7464,23 @@ class EdofCanvas(QGraphicsView):
                 new_x, new_y, snapped = self._snap_to_neighbors(
                     obj, new_x, new_y, tf.width, tf.height)
             obj.transform.x=new_x; obj.transform.y=new_y
-            # Move multi-selected objects together
+            # v4.3.5.48: line points are LOCAL now (renderer adds the transform),
+            # so moving only changes the transform -- no point translation needed
+            # (paths already worked this way). PATH data are local too.
             applied_dx=new_x-tf.x; applied_dy=new_y-tf.y
+            from edof.format.objects import Shape as _Sh, SHAPE_LINE as _SL, Group as _Grp
+            # v4.3.5.42: a Group's children are absolute too -> translate them by
+            # the same delta so moving the group moves its contents.
+            if (isinstance(obj, _Grp) and getattr(self, "_drag_group0", None)
+                    and (abs(applied_dx) > 1e-9 or abs(applied_dy) > 1e-9)):
+                for ch, (bx, by) in zip(obj.flatten(), self._drag_group0):
+                    ch.transform.x = bx + applied_dx
+                    ch.transform.y = by + applied_dy
+            # Move multi-selected objects together
             for mid, mtf0 in getattr(self, '_multi_drag_tf0', {}).items():
                 mobj=self._find_obj(mid)
                 if mobj:
+                    # v4.3.5.48: line points are local -> only the transform moves
                     mobj.transform.x=mtf0.x+applied_dx
                     mobj.transform.y=mtf0.y+applied_dy
 
@@ -5897,17 +7493,27 @@ class EdofCanvas(QGraphicsView):
             elif self._snap_to_grid and not no_snap:
                 angle=round(angle/15)*15
             obj.transform.rotation=angle%360
+            # v4.3.5.49: a GROUP now rotates as a unit via its own transform
+            # rotation (the renderer rotates the whole group buffer). Children
+            # stay in the group's local, un-rotated space, so resizing happens in
+            # that local space and the box shows rotated -- exactly like every
+            # other object. (No per-child rotation here anymore.)
 
         elif self._drag_mode.startswith('line_'):
             ptk=self._drag_mode.split('_')[1]; mx,my=self._to_mm(sp)
             if self._snap_to_grid and not no_snap:
                 s=self._snap_size_mm
                 mx=round(mx/s)*s; my=round(my/s)*s
+            # v4.3.5.48: points are LOCAL now. The dragged endpoint comes in world
+            # coords -> store it local to the current origin, set the other point
+            # local too, then normalize so the box becomes the points' bbox and
+            # the points are re-based to 0 (exactly like editing a path).
             idx=0 if ptk=='P1' else 1
-            pts=list(obj.points); pts[idx]=[mx,my]; obj.points=pts
-            x1,y1=pts[0]; x2,y2=pts[1]
-            obj.transform.x=min(x1,x2); obj.transform.y=min(y1,y2)
-            obj.transform.width=max(abs(x2-x1),MIN_MM); obj.transform.height=max(abs(y2-y1),MIN_MM)
+            ox,oy=obj.transform.x,obj.transform.y
+            pts=[list(p) for p in obj.points]
+            pts[idx]=[mx-ox, my-oy]
+            obj.points=pts
+            obj.normalize_line()
 
         else:
             # Resize
@@ -5996,6 +7602,18 @@ class EdofCanvas(QGraphicsView):
                                 new_data.append(cmd)
                         obj.path_data = new_data
 
+            # v4.3.5.48: a LINE's points are LOCAL now (like a path), so scale
+            # them about the local origin (0,0), same as path_data. The box's
+            # x/y is set below from the anchor; points stay local to it.
+            from edof.format.objects import SHAPE_LINE as _SLr
+            if (isinstance(obj, Shape) and obj.shape_type == _SLr
+                    and getattr(self, "_drag_line_pts0", None)
+                    and tf.width > 0 and tf.height > 0):
+                sx = new_w / tf.width
+                sy = new_h / tf.height
+                obj.points = [[px * sx, py * sy]
+                              for (px, py) in self._drag_line_pts0]
+
             # v4.1.16.7: TextBox font deformation — Shift only.
             # Instead of multiplying font_size (which scales uniformly),
             # we update glyph_scale_x/y. The renderer then renders the
@@ -6018,6 +7636,63 @@ class EdofCanvas(QGraphicsView):
             obj.transform.y = new_cy - new_h/2
             obj.transform.width = new_w
             obj.transform.height = new_h
+            # v4.3.5.46: resizing a GROUP scales its children about the anchor,
+            # so the whole group resizes as a unit (like Photoshop). Uses the
+            # baseline child transforms captured at drag start.
+            from edof.format.objects import Group as _GrpR
+            if isinstance(obj, _GrpR) and getattr(self, "_drag_group_tf0", None):
+                from edof.format.objects import QRCode as _QRr
+                sx = new_w / tf.width if tf.width > 1e-6 else 1.0
+                sy = new_h / tf.height if tf.height > 1e-6 else 1.0
+                crot0 = getattr(self, "_drag_group_crot0", {}) or {}
+                # v4.3.5.63: children live in the group's LOCAL, UN-ROTATED space
+                # (the renderer rotates the whole group buffer about the box
+                # center). So children scale AXIS-ALIGNED in that local space,
+                # relative to the group box: map each child from the baseline box
+                # to the new box by (sx, sy). The 4.3.5.52 attempt projected child
+                # centers through the group rotation, which scattered them off the
+                # box (positions drifted, the perpendicular axis sheared). The
+                # group box itself is already updated above (anchor stays fixed in
+                # world); here we only place children inside it.
+                obox = self._drag_tf0          # baseline group box (local)
+                ox0, oy0 = obox.x, obox.y
+                nx0, ny0 = obj.transform.x, obj.transform.y
+                for ch, snap in zip(obj.flatten(), self._drag_group_tf0):
+                    bx, by, bw, bh, bgsx, bgsy = snap
+                    # child center in the baseline box, scaled into the new box
+                    bcx = bx + bw / 2.0; bcy = by + bh / 2.0
+                    ncx = nx0 + (bcx - ox0) * sx
+                    ncy = ny0 + (bcy - oy0) * sy
+                    base_rot = crot0.get(id(ch), 0.0)
+                    base_shx = (getattr(self, "_drag_group_cshear0", {}) or {}).get(id(ch), 0.0)
+                    is_qr = isinstance(ch, _QRr)
+                    if (base_rot % 360 != 0 or abs(base_shx) > 1e-9) and not is_qr and \
+                            (abs(sx - 1.0) > 1e-9 or abs(sy - 1.0) > 1e-9):
+                        # a pre-rotated OR pre-sheared child deforms in the
+                        # group's (local) axes -> rotation/size/shear via RQ
+                        # decomposition (4.3.5.51). v4.3.5.67: feed the child's
+                        # existing shear so back-and-forth resizes compose right.
+                        nrot, nw, nh, nshx = _shear_decompose(
+                            sx, sy, base_rot, bw, bh, base_shx)
+                        ch.transform.rotation = nrot % 360
+                        ch.transform.width = nw; ch.transform.height = nh
+                        ch.transform.shear_x = nshx
+                        ch.transform.x = ncx - nw / 2.0
+                        ch.transform.y = ncy - nh / 2.0
+                    elif is_qr:
+                        # keep QR square: uniform scale by the larger factor
+                        s = max(sx, sy)
+                        nw = max(0.5, bw * s); nh = max(0.5, bh * s)
+                        ch.transform.width = nw; ch.transform.height = nh
+                        ch.transform.shear_x = 0.0
+                        ch.transform.x = ncx - nw / 2.0
+                        ch.transform.y = ncy - nh / 2.0
+                    else:
+                        nw = max(0.5, bw * sx); nh = max(0.5, bh * sy)
+                        ch.transform.width = nw; ch.transform.height = nh
+                        ch.transform.x = ncx - nw / 2.0
+                        ch.transform.y = ncy - nh / 2.0
+                        self._scale_child_geometry(ch, snap, sx, sy)
 
         self._refresh_overlay(); self._show_preview(obj)
         # v4.1.15.1: realtime canvas re-render during drag (not just preview).
@@ -6905,6 +8580,14 @@ class EdofCanvas(QGraphicsView):
                 self.viewport().setCursor(tcur('add_point', Qt.CursorShape.CrossCursor))
             return
         handle=self._overlay.hit_handle(sp)
+        # v4.3.5.37: union-box handle cursors for multi-selection transform
+        uhandle = self._hit_union_handle(sp) if not handle else None
+        if uhandle:
+            if uhandle == 'ROT':
+                self.viewport().setCursor(tcur('rotate', Qt.CursorShape.CrossCursor))
+            else:
+                self.viewport().setCursor(self._resize_cursor(uhandle, 0.0))
+            return
         if handle:
             obj=self._sel_obj()
             rot=getattr(obj.transform,'rotation',0.0) if obj else 0.0
@@ -6952,6 +8635,53 @@ class EdofCanvas(QGraphicsView):
 
     def _ctx_menu(self,vpos):
         sp=self.mapToScene(vpos)
+        # v4.3.6.2: the inline text editor is embedded as a proxy, but the view's
+        # CustomContextMenu policy swallows the right-click before the editor's
+        # own contextMenuEvent runs. So when the click is over the active inline
+        # editor and there's a selection (or it's already a variable), offer the
+        # text-variable actions here. This is the right-click path the document
+        # mode body uses.
+        ed = getattr(self, '_inline_widget', None)
+        proxy = getattr(self, '_inline_proxy', None)
+        if ed is not None and proxy is not None and \
+                proxy.sceneBoundingRect().contains(sp):
+            try:
+                rid, vname = ed.selection_variable()
+            except Exception:
+                rid, vname = (None, None)
+            has_sel = False
+            try: has_sel = ed._has_selection()
+            except Exception: pass
+            if rid is not None or has_sel:
+                menu = QMenu(self)
+                if rid is not None:
+                    act_v = menu.addAction("Remove variable  '%s'" % (vname or ""))
+                else:
+                    act_v = menu.addAction("Make variable from selection\tCtrl+Shift+B")
+                menu.addSeparator()
+                ro = bool(getattr(ed, "_read_only", False))
+                act_cut = menu.addAction("Cut\tCtrl+X")
+                act_cut.setEnabled(has_sel and not ro)
+                act_copy = menu.addAction("Copy\tCtrl+C")
+                act_copy.setEnabled(has_sel)
+                act_paste = menu.addAction("Paste\tCtrl+V")
+                act_paste.setEnabled(not ro)
+                chosen = menu.exec(self.viewport().mapToGlobal(vpos))
+                if chosen is None:
+                    return
+                if chosen is act_v:
+                    self._make_text_variable()
+                elif chosen is act_cut:
+                    try: ed._cut()
+                    except Exception: pass
+                elif chosen is act_copy:
+                    try: ed._copy()
+                    except Exception: pass
+                elif chosen is act_paste:
+                    try: ed._paste()
+                    except Exception: pass
+                    self._refocus_inline()
+                return
         # v4.1.10.1: if in path edit mode and right-clicked on an anchor,
         # show point-type menu instead of object context menu
         if getattr(self, '_path_edit_obj_id', None):
@@ -7217,13 +8947,30 @@ class EdofCanvas(QGraphicsView):
         return self._doc.pages[self._page_idx] if self._page_idx<len(self._doc.pages) else None
 
     def _sel_obj(self):
-        pg=self._cur_page()
-        return pg.get_object(self._sel_id) if pg and self._sel_id else None
+        # v4.3.5.43: resolve through groups too (a group child can be selected)
+        return self._find_obj(self._sel_id) if self._sel_id else None
 
     def _find_obj(self, oid):
-        """v4.0.1: helper for multi-select."""
+        """v4.0.1: helper for multi-select. v4.3.5.43: also searches inside
+        groups, so a child of a group can be selected / targeted."""
         pg=self._cur_page()
-        return pg.get_object(oid) if pg and oid else None
+        if not pg or not oid:
+            return None
+        found = pg.get_object(oid)
+        if found is not None:
+            return found
+        from edof.format.objects import Group
+        def _search(objs):
+            for o in objs:
+                if getattr(o, "id", None) == oid:
+                    return o
+                kids = getattr(o, "children", None)
+                if kids:
+                    hit = _search(kids)
+                    if hit is not None:
+                        return hit
+            return None
+        return _search(list(getattr(pg, "objects", []) or []))
 
     def selected_objects(self):
         """v4.0.1: return list of all selected objects (primary + multi)."""
@@ -7235,15 +8982,387 @@ class EdofCanvas(QGraphicsView):
             if o: out.append(o)
         return out
 
+    def _parent_groups_of(self, oid):
+        """v4.3.5.62: the chain of Group ancestors of the object with id `oid`,
+        outermost first. Empty if the object is top-level or not found. Used so a
+        selected child's overlay can be placed in world space (a rotated group
+        renders its children rotated, so the child box must carry the group's
+        rotation/position)."""
+        pg = self._cur_page()
+        if not pg or not oid:
+            return []
+        from edof.format.objects import Group
+        path = []
+        def _search(objs, trail):
+            for o in objs:
+                if getattr(o, "id", None) == oid:
+                    return trail
+                kids = getattr(o, "children", None)
+                if kids:
+                    hit = _search(kids, trail + [o])
+                    if hit is not None:
+                        return hit
+            return None
+        res = _search(list(getattr(pg, "objects", []) or []), [])
+        return [o for o in (res or []) if isinstance(o, Group)]
+
     def get_sel_id(self): return self._sel_id
+
+    def focus_text_variables(self, vrun_ids):
+        """v4.3.7.0: multi-select of variable objects from the panel -> rainbow
+        -highlight all of them and focus the first. Runs in the same textbox all
+        light up at once."""
+        rids = []
+        first = None
+        for vid in vrun_ids:
+            try:
+                _, obj_id, rid = vid.split(":", 2)
+            except ValueError:
+                continue
+            rids.append(rid)
+            if first is None:
+                first = (obj_id, rid)
+        if first is None:
+            return
+        self._in_var_focus_multi = True
+        try:
+            self.focus_text_variable(first[0], first[1])
+        finally:
+            self._in_var_focus_multi = False
+        self._selected_var_rids = set(rids)
+        # v4.4.0: remember the full vid list so panel refreshes keep the whole
+        # multi-selection highlighted, not just the primary
+        self._selected_var_vids = list(vrun_ids)
+        ed = getattr(self, "_inline_widget", None)
+        if ed is not None:
+            try:
+                ed._sel_var_rids = set(rids)
+                ed._invalidate()
+            except Exception:
+                pass
+        self._invalidate_page_cache(self._page_idx)
+        self._start_render()
+
+    def collect_anchors(self):
+        """v4.4.1: every in-document link TARGET as {anchor_id: (name, page_idx,
+        obj_id)}. Scans page objects (incl. groups) and the header/footer
+        templates (page None for those; the jump resolves to the current
+        page's clone)."""
+        out = {}
+        doc = getattr(self, "_doc", None)
+        if doc is None:
+            return out
+        for pi, pg in enumerate(getattr(doc, "pages", None) or []):
+            objs = list(getattr(pg, "objects", None) or [])
+            i = 0
+            while i < len(objs):
+                o = objs[i]; i += 1
+                kids = getattr(o, "children", None)
+                if kids:
+                    objs.extend(kids)
+                for r in (getattr(o, "runs", None) or []):
+                    aid = getattr(r, "anchor", None)
+                    if aid and aid not in out:
+                        out[aid] = (getattr(r, "anchor_name", None) or aid,
+                                    pi, getattr(o, "id", None))
+        return out
+
+    def follow_anchor(self, anchor_id):
+        """v4.4.1: jump to the in-document link target: switch to its page,
+        open the inline editor on its textbox and select the anchored span."""
+        if not anchor_id:
+            return False
+        anchors = self.collect_anchors()
+        hit = anchors.get(anchor_id)
+        if hit is None:
+            return False
+        _name, page_idx, obj_id = hit
+        try:
+            if page_idx != getattr(self, "_page_idx", 0):
+                self.set_document(self._doc, page_idx)
+        except Exception:
+            pass
+        obj = self._find_obj(obj_id)
+        if obj is None:
+            return False
+        try: self.set_sel_id(obj_id)
+        except Exception: pass
+        try:
+            if getattr(self, "_inline_id", None) != obj_id:
+                self._start_inline(obj)
+        except Exception:
+            pass
+        ied = getattr(self, "_inline_widget", None)
+        if ied is not None and getattr(ied, "_runs", None):
+            off = 0
+            start = end = None
+            for r in ied._runs:
+                ln = len(r.text or "")
+                if getattr(r, "anchor", None) == anchor_id and start is None:
+                    start, end = off, off + ln
+                elif start is not None and getattr(r, "anchor", None) == anchor_id:
+                    end = off + ln
+                off += ln
+            if start is not None:
+                try:
+                    ied._anchor = start
+                    ied._cursor = end
+                    ied._invalidate()
+                except Exception:
+                    pass
+        try:
+            t = obj.transform
+            cx = mm_to_px((t.x + t.width / 2.0), self._dpi)
+            cy = mm_to_px((t.y + t.height / 2.0), self._dpi)
+            self.centerOn(cx, cy)
+        except Exception:
+            pass
+        self._invalidate_page_cache(self._page_idx)
+        self._start_render()
+        return True
+
+    def _link_at_scene_pos(self, px, py):
+        """v4.4.0: the link string under scene coordinates (page px at the
+        canvas dpi), or None. Topmost object first; rotated boxes are skipped
+        (follow those from the inline editor)."""
+        pg = self._cur_page()
+        if pg is None:
+            return None
+        from edof.engine.text_layout import layout_textbox
+        objs = (pg.sorted_objects() if hasattr(pg, "sorted_objects")
+                else list(getattr(pg, "objects", None) or []))
+        for o in reversed(list(objs)):
+            runs = getattr(o, "runs", None)
+            if not runs or not any(getattr(r, "link", None) for r in runs):
+                continue
+            t = o.transform
+            if getattr(t, "rotation", 0) % 360 != 0:
+                continue
+            x0 = mm_to_px(t.x, self._dpi); y0 = mm_to_px(t.y, self._dpi)
+            x1 = mm_to_px(t.x + t.width, self._dpi)
+            y1 = mm_to_px(t.y + t.height, self._dpi)
+            if not (x0 <= px <= x1 and y0 <= py <= y1):
+                continue
+            try:
+                lay = layout_textbox(o, self._dpi)
+            except Exception:
+                continue
+            for line in lay.lines:
+                for c in line.chars:
+                    if getattr(c, "is_newline", False):
+                        continue
+                    if (c.x <= px <= c.x + c.w
+                            and c.line_top <= py <= c.line_top + c.line_h):
+                        ri = getattr(c, "run_idx", None)
+                        if ri is not None and 0 <= ri < len(runs):
+                            return getattr(runs[ri], "link", None)
+        return None
+
+    def _follow_link_str(self, link):
+        """v4.4.0: follow a link string: '#<anchor>' jumps in-document, the
+        rest opens the browser. The target is validated first, so a link
+        carried by an untrusted FILE cannot smuggle javascript:/file:/..."""
+        from edof.utils.links import validate_link
+        link = validate_link(link)
+        if not link:
+            return False
+        if link.startswith("#"):
+            return bool(self.follow_anchor(link[1:]))
+        url = link
+        try:
+            from PyQt6.QtGui import QDesktopServices
+            from PyQt6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl(url))
+            return True
+        except Exception:
+            return False
+
+    def set_var_focus_rids(self, rids):
+        """v4.3.6.28: highlight the given variable rids on the canvas render
+        (page render AND batch preview), independent of the Show Variables
+        toggle. Pass None or an empty set to clear. Used by the batch table so
+        the focused column shows WHICH span its values drive."""
+        try:
+            from edof.engine.text_engine import set_focus_var_rids, focus_var_rids
+            if (set(rids) if rids else None) == focus_var_rids():
+                return                      # no change, skip the re-render
+            set_focus_var_rids(rids)
+        except Exception:
+            return
+        ied = getattr(self, "_inline_widget", None)
+        if ied is not None:
+            try:
+                ied._sel_var_rids = set(rids) if rids else None
+                ied._invalidate()
+            except Exception:
+                pass
+        try:
+            from edof.engine.renderer import clear_object_cache
+            clear_object_cache()
+        except Exception:
+            pass
+        try: self._invalidate_page_cache(self._page_idx)
+        except Exception: pass
+        self.schedule_render(0)
+
+    def focus_text_variable(self, obj_id, rid):
+        """v4.3.7.0: focus a virtual text-variable object picked in the Objects
+        panel: select its textbox, enter inline edit, select the run's span, and
+        flag it so the rainbow highlight shows even when Show Variables is off."""
+        obj = self._find_obj(obj_id)
+        if obj is None:
+            return
+        # v4.3.6.12: remember this is a variable focus and guard set_sel_id so it
+        # does not wipe the focus while selecting the parent textbox. _on_sel
+        # uses _active_var_focus to keep the VIRTUAL item selected in the panel
+        # (otherwise the refresh in _on_sel re-selected the parent textbox row
+        # and the variable could never stay selected by clicking).
+        self._active_var_focus = (obj_id, rid)
+        self._in_var_focus = True
+        try:
+            self.set_sel_id(obj_id)
+        finally:
+            self._in_var_focus = False
+        self._selected_var_rids = {rid}
+        if not getattr(self, "_in_var_focus_multi", False):
+            self._selected_var_vids = ["vrun:%s:%s" % (obj_id, rid)]
+        # enter inline edit on the textbox (no-op re-enter is fine)
+        try:
+            if getattr(self, "_inline_id", None) != obj_id:
+                self._start_inline(obj)
+        except Exception:
+            pass
+        # select the run's span in the editor
+        ed = getattr(self, "_inline_widget", None)
+        if ed is not None and getattr(ed, "_runs", None):
+            off = 0
+            start = end = None
+            for r in ed._runs:
+                ln = len(r.text or "")
+                if getattr(r, "rid", None) == rid:
+                    start, end = off, off + ln
+                    break
+                off += ln
+            if start is not None:
+                try:
+                    ed._anchor = start
+                    ed._cursor = end
+                    ed._sel_var_rids = set(self._selected_var_rids)
+                    ed._invalidate()
+                except Exception:
+                    pass
+        # bring the object into view
+        try:
+            t = obj.transform
+            cx = mm_to_px((t.x + t.width / 2.0), self._dpi)
+            cy = mm_to_px((t.y + t.height / 2.0), self._dpi)
+            self.centerOn(cx, cy)
+        except Exception:
+            pass
+        self._invalidate_page_cache(self._page_idx)
+        self._start_render()
+
     def set_sel_id(self,oid):
+        # v4.3.7.0: selecting anything clears the panel-focused variable mark
+        # (focus_text_variable re-sets it right after its own set_sel_id call).
+        if not getattr(self, "_in_var_focus", False):
+            self._selected_var_rids = set()
+            self._active_var_focus = None
+            _ed0 = getattr(self, "_inline_widget", None)
+            if _ed0 is not None:
+                try: _ed0._sel_var_rids = None
+                except Exception: pass
+            self._selected_var_vids = []
+            # v4.3.6.28: also drop the batch-table span highlight
+            try:
+                from edof.engine.text_engine import set_focus_var_rids
+                set_focus_var_rids(None)
+            except Exception:
+                pass
         # v4.1.7: if leaving path edit mode (selected something else, or nothing)
         # exit it cleanly so handles disappear
         if (getattr(self, '_path_edit_obj_id', None) is not None
             and self._path_edit_obj_id != oid):
             self._exit_path_edit_mode()
-        self._sel_id=oid; self._refresh_overlay()
+        self._sel_id=oid
+        # v4.3.5.44: a single selection must clear any prior multi-selection,
+        # otherwise leftover ids linger (e.g. selecting a freshly-made group
+        # still counted its children, so "batch on the group" wrongly expanded
+        # to every child).
+        if getattr(self, "_multi_sel_ids", None):
+            self._multi_sel_ids = set()
+        self._refresh_overlay()
         self.objectSelected.emit(self._sel_obj())
+
+    def set_multi_selection(self, oids):
+        """v4.3.5.32: set the selection to a list of object ids (primary first),
+        mirroring a multi-select made in the Objects list. Updates the overlay
+        and the multi-select set the batch panel reads."""
+        oids = [o for o in (oids or []) if o]
+        if not oids:
+            self._sel_id = None
+            self._multi_sel_ids = set()
+        else:
+            self._sel_id = oids[0]
+            self._multi_sel_ids = set(oids[1:])
+        if (getattr(self, '_path_edit_obj_id', None) is not None
+                and self._path_edit_obj_id != self._sel_id):
+            self._exit_path_edit_mode()
+        self._refresh_overlay()
+        self.objectSelected.emit(self._sel_obj())
+
+    def group_selection(self):
+        """v4.3.5.42: turn the current multi-selection into a Group. The selected
+        objects become the group's children (preserving stacking order) and are
+        removed from the page's top level; the group is selected afterwards.
+        Returns the new group, or None."""
+        from edof.format.objects import Group
+        pg = self._cur_page()
+        if pg is None:
+            return None
+        objs = self.selected_objects()
+        if len(objs) < 2:
+            return None
+        # keep page stacking order
+        ordered = [o for o in pg.sorted_objects() if o in objs]
+        g = Group()
+        top_layer = max((o.layer for o in ordered), default=0)
+        for o in ordered:
+            pg.remove_object(o.id)
+            g.add(o)
+        g.layer = top_layer
+        g.compute_bounds()
+        pg.add_object(g)
+        self._push_history() if hasattr(self, "_push_history") else None
+        self.set_sel_id(g.id)
+        self.schedule_render(0)
+        self.objectChanged.emit()
+        return g
+
+    def ungroup_selection(self):
+        """v4.3.5.42: dissolve the selected group(s) back into their children at
+        the page's top level. Returns the freed child objects."""
+        from edof.format.objects import Group
+        pg = self._cur_page()
+        if pg is None:
+            return []
+        targets = [o for o in self.selected_objects() if isinstance(o, Group)]
+        if not targets:
+            return []
+        freed = []
+        for g in targets:
+            base_layer = g.layer
+            for ch in g.children:
+                ch.layer = base_layer
+                pg.add_object(ch)
+                freed.append(ch)
+            pg.remove_object(g.id)
+        self._push_history() if hasattr(self, "_push_history") else None
+        if freed:
+            self.set_multi_selection([o.id for o in freed])
+        self.schedule_render(0)
+        self.objectChanged.emit()
+        return freed
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -7303,6 +9422,7 @@ def _copy_layer_effects(obj):
         'blend_mode': getattr(obj, 'blend_mode', 'normal'),
         'opacity': getattr(obj, 'opacity', 1.0),
         'fill_opacity': getattr(obj, 'fill_opacity', 1.0),
+        'effects_enabled': bool(getattr(obj, 'effects_enabled', False)),
     }
     return True
 
@@ -7316,6 +9436,10 @@ def _paste_layer_effects(obj):
     obj.blend_mode = _FX_CLIPBOARD['blend_mode']
     obj.opacity = _FX_CLIPBOARD['opacity']
     obj.fill_opacity = _FX_CLIPBOARD['fill_opacity']
+    # v4.3.5.38: carry the master 'All effects' flag too, so pasted effects
+    # actually render (the master gates them).
+    if 'effects_enabled' in _FX_CLIPBOARD:
+        obj.effects_enabled = _FX_CLIPBOARD['effects_enabled']
     return True
 
 
@@ -7339,13 +9463,45 @@ def _icon_for_obj(obj) -> str:
         return _SHAPE_SUBTYPE_ICONS.get(st, _TYPE_ICONS['shape'])
     return _TYPE_ICONS.get(t, '·')
 
+def _variable_runs(obj):
+    """v4.3.7.0: list of (rid, var_name) for the variable runs in obj, de-duped
+    by rid in first-seen order. These surface in the Objects panel as virtual
+    'text variable' objects so they can be picked without hunting in the text.
+
+    v4.4.0: returns (rid, var_name, n_spans) where n_spans counts the SEPARATE
+    (non-adjacent) spans carrying the rid. After folding one variable into
+    another the entity is one, but the panel shows 'name (x2)' instead of
+    looking like a variable silently vanished."""
+    runs = getattr(obj, "runs", None) or []
+    order = []
+    spans = {}
+    names = {}
+    prev_rid = None
+    for r in runs:
+        rid = getattr(r, "rid", None)
+        vn = getattr(r, "var_name", None)
+        if rid and vn:
+            if rid not in spans:
+                order.append(rid)
+                spans[rid] = 0
+                names[rid] = vn
+            if prev_rid != rid:
+                spans[rid] += 1
+        prev_rid = rid
+    return [(rid, names[rid], spans[rid]) for rid in order]
+
+
 class ObjectListPanel(QWidget):
-    objectSelected=pyqtSignal(str)   # object id
+    objectSelected=pyqtSignal(str)   # object id (primary)
+    objectsSelected=pyqtSignal(list) # v4.3.5.32: all selected ids (multi-select)
 
     def __init__(self,canvas,parent=None):
         super().__init__(parent); self._canvas=canvas
         vb=QVBoxLayout(self); vb.setContentsMargins(4,4,4,4); vb.setSpacing(4)
         self._list=QListWidget()
+        # v4.3.5.32: allow Ctrl/Shift multi-selection in the list, mirrored to
+        # the canvas. ExtendedSelection gives native Ctrl-toggle + Shift-range.
+        self._list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         # v4.0.3: dark-theme friendly styling — no alternating rows (the default
         # zebra was bright and hard to read on dark theme)
         self._list.setAlternatingRowColors(False)
@@ -7365,9 +9521,14 @@ class ObjectListPanel(QWidget):
             QListWidget.EditTrigger.DoubleClicked
         )
         self._list.itemChanged.connect(self._on_item_renamed)
+        # v4.4.0: vrun rows are not Qt-selectable (checkbox multi-select), a
+        # plain click on the row still focuses the variable via itemClicked
+        self._list.itemClicked.connect(self._on_item_clicked)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_context_menu)
         self._list.currentItemChanged.connect(self._on_item_changed)
+        # v4.3.5.32: emit the full multi-selection when it changes
+        self._list.itemSelectionChanged.connect(self._on_selection_changed)
         # v4.1.17.1: click on the visibility / lock toggles at the right edge
         # of each row to toggle the property. Detected via mousePressEvent.
         self._list.mousePressEvent = self._on_list_mouse_press
@@ -7388,28 +9549,66 @@ class ObjectListPanel(QWidget):
         pg=self._canvas._cur_page()
         if not pg: self._list.blockSignals(False); self._suppress_rename_signal=False; return
         sel=self._canvas.get_sel_id()
-        for obj in reversed(pg.sorted_objects()):
-            # v4.1.19.11: full custom row widget — icon + editable name +
-            # variable tag + toggle buttons. setItemWidget hides the item's
-            # own text rendering, so all visible content has to live in this
-            # widget. The list item still carries the object id for selection
-            # / context menu / drag-drop reorder.
+        from edof.format.objects import Group
+        from PyQt6.QtCore import QSize as _QSize
+
+        def _add_row(obj, depth):
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, obj.id)
-            row = self._make_row_widget(obj)
-            # Match Qt's row sizing to the widget so it doesn't get clipped
-            item.setSizeHint(row.sizeHint())
+            row = self._make_row_widget(obj, depth=depth)
+            sh = row.sizeHint()
+            item.setSizeHint(_QSize(sh.width(), max(40 if depth == 0 else 36, sh.height())))
+            if depth > 0:
+                # children move with their group, so they aren't drag-reordered
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
             self._list.addItem(item)
             self._list.setItemWidget(item, row)
-            if obj.id==sel: self._list.setCurrentItem(item)
+            if obj.id == sel:
+                self._list.setCurrentItem(item)
+            # v4.3.7.0: list this object's text variables as virtual children, so
+            # a span variable can be selected from the panel (much easier than
+            # clicking the exact run in the text).
+            for rid, vn, n_spans in _variable_runs(obj):
+                vitem = QListWidgetItem()
+                vid = "vrun:%s:%s" % (obj.id, rid)
+                vitem.setData(Qt.ItemDataRole.UserRole, vid)
+                vitem.setFlags((vitem.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
+                               & ~Qt.ItemFlag.ItemIsSelectable)
+                # v4.4.0: a rid living on several separate spans shows the
+                # count (multiple occurrences of one variable via "Add to")
+                label = vn if n_spans <= 1 else "%s (×%d)" % (vn, n_spans)
+                # vrun rows are NOT part of the Qt selection model (checkbox
+                # handles multi-select); a plain click still focuses via
+                # itemClicked below.
+                vrow = self._make_var_row_widget(label, depth + 1, vid=vid)
+                vsh = vrow.sizeHint()
+                vitem.setSizeHint(_QSize(vsh.width(), max(32, vsh.height())))
+                self._list.addItem(vitem)
+                self._list.setItemWidget(vitem, vrow)
+                # v4.4.0: multi-select state lives in the row CHECKBOXES
+                # (restored by _make_var_row_widget from the canvas set), so no
+                # Qt-selection games here anymore.
+            # v4.3.5.64: recurse so a group nested inside a group still lists its
+            # OWN children (they used to vanish from the panel below depth 1).
+            if isinstance(obj, Group):
+                for ch in reversed(obj.children):
+                    _add_row(ch, depth + 1)
+
+        for obj in reversed(pg.sorted_objects()):
+            _add_row(obj, 0)
         self._list.blockSignals(False)
         self._suppress_rename_signal=False
 
-    def _make_row_widget(self, obj):
+    def _make_row_widget(self, obj, indent=False, depth=None):
         """v4.1.19.11: Build the full row widget shown in the Objects panel.
         Contains: icon, editable name (double-click to rename), variable tag
         if present, and clickable visibility + lock toggle buttons docked on
-        the right edge."""
+        the right edge. v4.3.5.64: `depth` (group nesting level, 0 = top) drives
+        the indent so nested groups step further in; `indent` is kept for
+        backward compatibility (True == depth 1)."""
+        if depth is None:
+            depth = 1 if indent else 0
+        indent = depth > 0
         from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QPushButton,
                                        QLabel, QLineEdit, QStackedLayout)
         canvas = self._canvas
@@ -7420,11 +9619,23 @@ class ObjectListPanel(QWidget):
         # ":selected" highlight (the blue bar) shows across the WHOLE row,
         # not just a thin outline.
         row.setStyleSheet("background:transparent;")
-        # v4.1.19.12: explicit minimum height so the QLineEdit's bottom edge
-        # doesn't get clipped. The global QSS sets QLineEdit min-height 24px
-        # + padding 3+3px = ~30px needed; we go 32px for safety margin.
-        row.setMinimumHeight(32)
-        h = QHBoxLayout(row); h.setContentsMargins(6, 4, 4, 4); h.setSpacing(4)
+        # v4.3.5.34: let clicks on empty row area fall through to the list so
+        # Ctrl/Shift multi-selection works (the buttons are children and still
+        # receive their own clicks; only the gaps pass through). Without this the
+        # row widget ate the click and Ctrl-click never reached the list.
+        row.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        # v4.3.5.34: taller rows so the selection bar doesn't crowd the icon and
+        # text (the small highlight overlapped both before).
+        row.setMinimumHeight(40)
+        h = QHBoxLayout(row); h.setContentsMargins(8 + 22 * depth, 6, 6, 6)
+        h.setSpacing(6)
+        if indent:
+            # v4.3.5.42: a small connector glyph marks a child of a group
+            from PyQt6.QtWidgets import QLabel as _QL
+            tick = _QL("\u2514")
+            tick.setStyleSheet("background:transparent;color:#7a7a9a;font-size:11pt;")
+            tick.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            h.addWidget(tick)
 
         icon = _icon_for_obj(obj)
         name = obj.name or obj.id[:12] + "…"
@@ -7442,6 +9653,27 @@ class ObjectListPanel(QWidget):
         # selected (and a drag can start) no matter where on the row you click.
         ico_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         h.addWidget(ico_lbl)
+
+        # v4.4.0: header/footer container members carry a visible badge so it
+        # is clear the object repeats on every page (the clone lives on the
+        # page, but its home is the body template).
+        _hf_role = getattr(obj, "_hf_container", None)
+        if not _hf_role:
+            _doc0 = getattr(canvas, "_doc", None)
+            _body0 = getattr(_doc0, "body", None) if _doc0 is not None else None
+            if _body0 is not None:
+                for _r0 in ("header", "footer"):
+                    if any(getattr(t, "id", None) == obj.id for t in
+                           (getattr(_body0, _r0 + "_objects", None) or [])):
+                        _hf_role = _r0
+                        break
+        if _hf_role:
+            hf_lbl = QLabel("▤ %s" % _hf_role)
+            hf_lbl.setStyleSheet(
+                "background:transparent;color:#8fb3ff;font-size:8pt;")
+            hf_lbl.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            h.addWidget(hf_lbl)
 
         # Editable name — QLineEdit that looks like a label until focused
         name_edit = QLineEdit(name)
@@ -7486,12 +9718,8 @@ class ObjectListPanel(QWidget):
         # Single click selects the item (route through list)
         h.addWidget(name_edit, 1)
 
-        # Variable tag if present
-        if obj.variable:
-            var_lbl = QLabel(f"[{obj.variable}]")
-            var_lbl.setStyleSheet("background:transparent;color:#7070a0;font-size:9pt;")
-            var_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            h.addWidget(var_lbl)
+        # v4.3.5.60: the [variable] tag was removed (variable bindings are
+        # consolidated into the 3D Batch; objects no longer carry obj.variable).
 
         # Toggle buttons
         def _mk_btn(symbol_fn, tooltip_fn, toggle_fn, icon_fn=None):
@@ -7534,11 +9762,132 @@ class ObjectListPanel(QWidget):
         h.addWidget(lock_btn)
         return row
 
+    def _make_var_row_widget(self, var_name, depth=1, vid=None):
+        """v4.3.7.0: compact row for a virtual text-variable object: a little
+        rainbow chip plus the variable name.
+
+        v4.4.0: multi-select of variables goes through an explicit CHECKBOX on
+        the row (ctrl+click selection painted the rows and confused the object
+        selection). Checked variables form the shared set: all get the rainbow
+        highlight and the shared-attributes menu targets them."""
+        from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QCheckBox
+        row = QWidget()
+        row.setStyleSheet("background:transparent;")
+        # NOT mouse-transparent anymore: the checkbox must receive its clicks.
+        row.setMinimumHeight(32)
+        h = QHBoxLayout(row)
+        h.setContentsMargins(8 + 22 * depth, 4, 6, 4)
+        h.setSpacing(6)
+        cb = QCheckBox()
+        cb.setToolTip("Select this variable (check several for shared "
+                      "attributes / linking)")
+        cb.setStyleSheet("background:transparent;")
+        checked_set = getattr(self._canvas, "_checked_var_vids", None) or set()
+        cb.setChecked(bool(vid and vid in checked_set))
+        if vid:
+            cb.toggled.connect(
+                lambda on, _vid=vid: self._on_var_checkbox(_vid, on))
+        h.addWidget(cb)
+        tick = QLabel("\u2514")
+        tick.setStyleSheet("background:transparent;color:#7a7a9a;font-size:11pt;")
+        tick.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        h.addWidget(tick)
+        chip = QLabel("\U0001F3F3\uFE0F\u200D\U0001F308")  # rainbow flag as a marker
+        chip.setStyleSheet("background:transparent;font-size:10pt;")
+        chip.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        h.addWidget(chip)
+        name = QLabel(var_name or "variable")
+        name.setStyleSheet("background:transparent;color:#c9b8f0;font:italic 9pt 'Segoe UI';")
+        name.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        h.addWidget(name)
+        h.addStretch(1)
+        return row
+
+    def _on_var_checkbox(self, vid, on):
+        """v4.4.0: checkbox multi-select of variables. Keeps the checked set
+        on the canvas (survives refreshes), rainbow-highlights the whole set
+        and feeds the shared-attribute targets of the batch panel."""
+        cv = self._canvas
+        checked = set(getattr(cv, "_checked_var_vids", None) or set())
+        if on:
+            checked.add(vid)
+        else:
+            checked.discard(vid)
+        cv._checked_var_vids = checked
+        vids = sorted(checked)
+        mw = cv.parent()
+        if vids:
+            try: cv.focus_text_variables(vids)
+            except Exception: pass
+            tpl = getattr(mw, "_batch_tpl", None) if mw is not None else None
+            if tpl is not None and hasattr(tpl, "set_shared_targets"):
+                try:
+                    targets = []
+                    pg = cv._cur_page()
+                    for v in vids:
+                        parts = v.split(":", 2)
+                        if len(parts) == 3 and pg is not None:
+                            o = pg.get_object(parts[1])
+                            if o is not None:
+                                targets.append((o, parts[2]))
+                    tpl.set_shared_targets(targets)
+                except Exception:
+                    pass
+        else:
+            try: cv.set_var_focus_rids(None)
+            except Exception: pass
+            try:
+                cv._selected_var_rids = set()
+                cv._selected_var_vids = []
+                ied = getattr(cv, "_inline_widget", None)
+                if ied is not None:
+                    ied._sel_var_rids = None
+                    ied._invalidate()
+                cv._invalidate_page_cache(cv._page_idx)
+                cv.schedule_render(0)
+            except Exception:
+                pass
+
+    def _on_item_clicked(self, item):
+        """v4.4.0: focus a variable when its (non-selectable) row is clicked
+        outside the checkbox."""
+        if self._suppress_rename_signal or item is None:
+            return
+        oid = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(oid, str) and oid.startswith("vrun:"):
+            self.objectSelected.emit(oid)
+
     def _on_item_changed(self,item):
         if self._suppress_rename_signal: return
+        # v4.4.0: during a ctrl+click multi-selection the currentItemChanged
+        # signal also fires; emitting the single-select here made the canvas
+        # re-focus one variable and collapse the multi-selection. Let
+        # _on_selection_changed report the full set instead.
+        try:
+            if len(self._list.selectedItems()) > 1:
+                return
+        except Exception:
+            pass
         if item:
             oid=item.data(Qt.ItemDataRole.UserRole)
             if oid: self.objectSelected.emit(oid)
+
+    def _on_selection_changed(self):
+        """v4.3.5.32: report all selected object ids (multi-select), primary
+        (current) first, so the canvas selection can mirror the list."""
+        if self._suppress_rename_signal:
+            return
+        ids = []
+        cur = self._list.currentItem()
+        cur_oid = cur.data(Qt.ItemDataRole.UserRole) if cur is not None else None
+        if cur_oid:
+            ids.append(cur_oid)
+        for it in self._list.selectedItems():
+            oid = it.data(Qt.ItemDataRole.UserRole)
+            if oid and oid not in ids:
+                ids.append(oid)
+        if ids:
+            self.objectsSelected.emit(ids)
 
     def _on_item_renamed(self, item):
         """v4.0.3: F2/dblclick rename committed. v4.1.19.10: simplified since
@@ -7588,12 +9937,90 @@ class ObjectListPanel(QWidget):
         self._canvas.objectChanged.emit()
         self._canvas.schedule_render()
 
+    def _var_context_menu(self, pos, item):
+        """v4.3.6.13: shared run-attribute menu for the selected text-variable
+        objects. Each attribute is a checkable item; toggling it adds or removes
+        that attribute as a batch variable for EVERY selected variable (the
+        common-attribute principle: every run shares the same set of possible
+        attributes)."""
+        # v4.4.0: the multi-selection of variables lives in the row
+        # CHECKBOXES (canvas._checked_var_vids), not in the Qt selection.
+        checked = sorted(getattr(self._canvas, "_checked_var_vids", None)
+                         or set())
+        vids = [v for v in checked
+                if isinstance(v, str) and v.startswith("vrun:")]
+        this = item.data(Qt.ItemDataRole.UserRole)
+        if this not in vids:
+            vids = [this]
+        pg = self._canvas._cur_page()
+        targets = []
+        for vid in vids:
+            try:
+                _, obj_id, rid = vid.split(":", 2)
+            except ValueError:
+                continue
+            obj = pg.get_object(obj_id) if pg else None
+            if obj is not None:
+                targets.append((obj, rid))
+        if not targets:
+            return
+        main = self._canvas
+        while main is not None and not isinstance(main, QMainWindow):
+            main = main.parent()
+        tpl = getattr(main, "_batch_tpl", None)
+        if tpl is None or not hasattr(tpl, "run_attr_state"):
+            return
+        menu = QMenu(self)
+        hdr = menu.addAction("Variables  (%d selected)" % len(targets))
+        hdr.setEnabled(False)
+        menu.addSeparator()
+        act = menu.addAction("Edit shared attributes\u2026")
+        act.triggered.connect(
+            lambda: tpl.edit_shared_attrs_dialog(targets))
+        # v4.3.6.20: rename the variable entity (its var_name on the runs + on
+        # every column bound to it). Single selection only.
+        if len(targets) == 1:
+            act_rn = menu.addAction("Rename variable\u2026")
+            def _do_rename():
+                from PyQt6.QtWidgets import QInputDialog
+                _obj, _rid = targets[0]
+                cur = ""
+                for r in (getattr(_obj, "runs", None) or []):
+                    if getattr(r, "rid", None) == _rid:
+                        cur = getattr(r, "var_name", "") or ""
+                        break
+                new, ok = QInputDialog.getText(
+                    self, "Rename variable", "Name:", text=cur)
+                if ok and new.strip():
+                    tpl.rename_run_variable(targets, new.strip())
+            act_rn.triggered.connect(_do_rename)
+            # v4.3.6.28: re-span the variable: the current selection in the
+            # inline text editor becomes the variable's new range (rid, columns
+            # and record values are kept).
+            act_cr = menu.addAction("Change range (use editor selection)")
+            act_cr.triggered.connect(
+                lambda: tpl.change_run_variable_range(targets[0][0],
+                                                      targets[0][1]))
+        # v4.3.6.19: remove the variable ENTITY (clears the rid from the runs
+        # and drops every column bound to it). Undoable.
+        act_rm = menu.addAction("Remove variable" if len(targets) == 1
+                                else "Remove variables")
+        act_rm.triggered.connect(
+            lambda: tpl.remove_run_variable(targets))
+        menu.exec(self._list.mapToGlobal(pos))
+
     def _on_context_menu(self, pos):
         """v4.0.3: right-click context menu on the object list."""
         item=self._list.itemAt(pos)
         if not item: return
         oid=item.data(Qt.ItemDataRole.UserRole)
         if not oid: return
+        # v4.3.6.13: right-click on a text-variable (virtual) object -> a shared
+        # run-attribute menu that toggles each attribute as a batch variable
+        # across ALL currently-selected variables at once.
+        if isinstance(oid, str) and oid.startswith("vrun:"):
+            self._var_context_menu(pos, item)
+            return
         pg=self._canvas._cur_page()
         if not pg: return
         obj=pg.get_object(oid)
@@ -7607,6 +10034,32 @@ class ObjectListPanel(QWidget):
         main=self._canvas
         while main is not None and not isinstance(main, QMainWindow):
             main=main.parent()
+
+        # v4.4.0: header/footer container ops (document mode only, not for the
+        # body/band boxes themselves)
+        _doc = getattr(self._canvas, "_doc", None)
+        _body = getattr(_doc, "body", None) if _doc is not None else None
+        if main is not None and _body is not None:
+            from edof.format.document_boxes import (DocumentTextBox,
+                                                    DocumentHeaderBox,
+                                                    DocumentFooterBox)
+            if not isinstance(obj, (DocumentTextBox, DocumentHeaderBox,
+                                    DocumentFooterBox)):
+                _in_hf = None
+                for _r in ("header", "footer"):
+                    if any(getattr(t, "id", None) == oid for t in
+                           (getattr(_body, _r + "_objects", None) or [])):
+                        _in_hf = _r
+                        break
+                if _in_hf is None:
+                    menu.addAction("Move to header",
+                                   lambda: main._move_object_to_hf(oid, "header"))
+                    menu.addAction("Move to footer",
+                                   lambda: main._move_object_to_hf(oid, "footer"))
+                else:
+                    menu.addAction("Detach from %s" % _in_hf,
+                                   lambda: main._move_object_to_hf(oid, None))
+                menu.addSeparator()
 
         if main:
             menu.addAction("Bring to Front",
@@ -7664,6 +10117,30 @@ class ObjectListPanel(QWidget):
             if self._list.item(i).data(Qt.ItemDataRole.UserRole)==obj_id:
                 self._list.setCurrentRow(i); break
         self._list.blockSignals(False)
+
+    def select_many(self, oids, primary=None):
+        """v4.3.5.45: highlight EVERY selected row for a multi-selection (the
+        list only showed the one current row before, so a multi-selection looked
+        like a single highlight). The primary becomes the current item; the rest
+        are added to the selection."""
+        ids = set(oids or [])
+        self._list.blockSignals(True)
+        try:
+            self._list.clearSelection()
+            cur_item = None
+            for i in range(self._list.count()):
+                it = self._list.item(i)
+                oid = it.data(Qt.ItemDataRole.UserRole)
+                if oid in ids:
+                    it.setSelected(True)
+                    if primary is not None and oid == primary:
+                        cur_item = it
+                    elif cur_item is None:
+                        cur_item = it
+            if cur_item is not None:
+                self._list.setCurrentItem(cur_item)
+        finally:
+            self._list.blockSignals(False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -7810,9 +10287,45 @@ class PropPanel(QWidget):
         h.addWidget(_mk('duplicate', '⧉', 'Copy layer effects', self._copy_effects))
         h.addWidget(_mk('fx', '⊕', 'Paste layer effects', self._paste_effects))
         h.addWidget(_mk('delete', '✕', 'Clear layer effects', self._clear_effects))
+        # v4.3.5.38: push this object's layer style onto every other selected
+        # object at once. v4.3.5.63: only meaningful with a multi-selection, so
+        # the button is hidden for a single selection (it confused users who saw
+        # "apply to all selected" with just one object/group selected). Tracked
+        # in _fx_apply_all_btns and toggled in load().
+        _apply_all = _mk('layers', '⮺',
+                         'Copy these layer effects to all selected objects '
+                         '(select several first)', self._apply_effects_to_selection)
+        if not hasattr(self, "_fx_apply_all_btns"):
+            self._fx_apply_all_btns = []
+        self._fx_apply_all_btns.append(_apply_all)
+        h.addWidget(_apply_all)
         h.addStretch(1)                          # row 2: copy / paste / clear
         v.addWidget(row)
         return container
+
+    def _apply_effects_to_selection(self):
+        """v4.3.5.38: copy the primary object's layer style (effects + blending)
+        to every other selected object, so a multi-selection gets the same
+        effects in one click."""
+        if self._obj is None:
+            return
+        others = self._multi_others()
+        if not others:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "Apply to selection",
+                "Select several objects first (Ctrl/Shift-click), then apply.")
+            return
+        _copy_layer_effects(self._obj)
+        n = 0
+        for o in others:
+            if _paste_layer_effects(o):
+                n += 1
+        try:
+            self._canvas.schedule_render(0)
+        except Exception:
+            pass
+        self.changed.emit()
 
     def _setup(self):
         """v4.1.3: Refactored properties panel.
@@ -7940,6 +10453,7 @@ class PropPanel(QWidget):
         self._stack.addWidget(self._mk_table())    # 6 Table
         self._stack.addWidget(self._mk_subdoc())   # 7 SubDocumentBox
         self._stack.addWidget(self._mk_pagesetup()) # 8 Document page setup (doc body)
+        self._stack.addWidget(self._mk_group())    # 9 Group (v4.3.5.62)
 
         # ── 3. Visibility & Locking ─────────────────────────────────────
         g_lock=QGroupBox("Visibility & Locking")
@@ -8008,11 +10522,13 @@ class PropPanel(QWidget):
         self.le_name=QLineEdit(); self.le_name.setPlaceholderText("Editor label")
         self.le_name.editingFinished.connect(lambda:self._aa('name',self.le_name.text()))
         fo.addRow(t('prop_name'),self.le_name)
-        self.le_var=QLineEdit(); self.le_var.setPlaceholderText("variable_name")
-        bv=QPushButton(t('btn_bind')); bv.setFixedWidth(60); bv.clicked.connect(self._bind_var)
-        rv=QWidget(); hbv=QHBoxLayout(rv); hbv.setContentsMargins(0,0,0,0); hbv.setSpacing(4)
-        hbv.addWidget(self.le_var); hbv.addWidget(bv)
-        fo.addRow(t('prop_variable'), rv)
+        # v4.3.5.60: the variable-binding field was removed from the properties
+        # panel. Variable bindings are consolidated into the 3D Batch (an object
+        # bound to a variable is now a batch column targeting its text), so a
+        # separate "Variable" field here no longer makes sense. A hidden QLineEdit
+        # is kept so the rest of the panel code that references self.le_var keeps
+        # working without a binding UI.
+        self.le_var=QLineEdit(); self.le_var.setVisible(False)
         # v4.1.4: tags (comma-separated)
         self.le_tags=QLineEdit(); self.le_tags.setPlaceholderText("tag1, tag2, …")
         self.le_tags.setToolTip("Free-form labels for grouping / filtering objects in scripts")
@@ -8148,7 +10664,7 @@ class PropPanel(QWidget):
                    self.cb_ftr_shrink, self.cb_ftr_fill):
             cb.toggled.connect(self._apply_pagesetup)
             fhf.addRow("", cb)
-        hint = QLabel("Double-click the header/footer band on the page to edit "
+        hint = QLabel("Click the header/footer band on the page to edit "
                       "its text. Use the #▾ button there to insert page numbers.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#8a8aa0;font:8pt 'Segoe UI';padding:2px;")
@@ -8279,6 +10795,27 @@ class PropPanel(QWidget):
             except Exception: pass
             self._canvas.schedule_render(0)
             self._canvas.viewport().update()
+            # v4.3.6.9: enabling/disabling a header or footer repaginates and can
+            # drop the body's sticky inline editor; re-enter it so body text
+            # selection and typing keep working.
+            try:
+                if getattr(doc, 'mode', '') == 'document':
+                    from PyQt6.QtCore import QTimer as _QT
+                    cv = self._canvas
+                    def _reenter_body_ps():
+                        pg = cv._cur_page()
+                        if pg is None:
+                            return
+                        if getattr(cv, '_inline_widget', None) is not None:
+                            return
+                        for o in pg.sorted_objects():
+                            if cv._is_document_body(o):
+                                cv.set_sel_id(o.id)
+                                cv._start_inline(o)
+                                break
+                    _QT.singleShot(120, _reenter_body_ps)
+            except Exception:
+                pass
         except Exception:
             import traceback as _tb; _tb.print_exc()
 
@@ -8389,7 +10926,7 @@ class PropPanel(QWidget):
         btn_rep=QPushButton(t('btn_replace')); btn_rep.clicked.connect(self._replace_image)
         fl.addRow("",btn_rep)
         # v4.1.1: Layer Effects button (gives access to blend mode + opacity + effects)
-        btn_fx = QPushButton("✨ Layer Effects… (blend mode, effects)")
+        btn_fx = QPushButton("✨ Layer Effects…")
         btn_fx.setStyleSheet("font:bold 10pt 'Segoe UI';background:#3a3a5a;padding:6px;")
         btn_fx.clicked.connect(self._open_layer_effects_dialog)
         fl.addRow("", self._fx_actions_row(btn_fx))
@@ -8652,6 +11189,17 @@ class PropPanel(QWidget):
         self.sp_qr_brd.editingFinished.connect(lambda:self._aa('border_modules',self.sp_qr_brd.value()))
         fl.addRow(t('prop_qr_border'),self.sp_qr_brd)
         # v4.2.7.1: QR codes support layer effects too (respect alpha)
+        btn_fx=QPushButton("✨ Layer Effects…")
+        btn_fx.clicked.connect(self._open_layer_effects_dialog)
+        fl.addRow(self._fx_actions_row(btn_fx)); return w
+
+    def _mk_group(self):
+        # v4.3.5.62: groups can carry layer effects (applied to the combined
+        # silhouette of their children), so the group panel exposes the same
+        # Layer Effects entry point + copy/paste/delete-effect actions as other
+        # object types. Previously selecting a group showed the empty panel.
+        w=QWidget(); fl=QFormLayout(w); fl.setContentsMargins(8,8,8,6); fl.setSpacing(5)
+        fl.addRow(QLabel("Group — effects apply to the whole group."))
         btn_fx=QPushButton("✨ Layer Effects…")
         btn_fx.clicked.connect(self._open_layer_effects_dialog)
         fl.addRow(self._fx_actions_row(btn_fx)); return w
@@ -9235,6 +11783,9 @@ class PropPanel(QWidget):
                 # layer effects. ImageBox-specific fields (resource picker)
                 # remain inert when no image is attached.
                 self._load_img(obj); self._stack.setCurrentIndex(2)
+            elif isinstance(obj, edof.Group):
+                # v4.3.5.62: groups get their own panel (Layer Effects + actions)
+                self._stack.setCurrentIndex(9)
             else:                                  self._stack.setCurrentIndex(0)
             # v4.1.23.37: the document BODY is not a place for per-object text
             # effects (those belong to inserted text boxes). When it's selected
@@ -9249,6 +11800,15 @@ class PropPanel(QWidget):
                     self._btn_fx_tb.setVisible(not is_body)
                 if hasattr(self, '_lbl_body_note'):
                     self._lbl_body_note.setVisible(is_body)
+            except Exception:
+                pass
+            # v4.3.5.63: the "apply layer effects to all selected" button only
+            # makes sense with a multi-selection; hide it otherwise so a single
+            # object/group doesn't show a puzzling "to all selected" action.
+            try:
+                n_sel = len(self._canvas.selected_objects())
+                for b in getattr(self, "_fx_apply_all_btns", []) or []:
+                    b.setVisible(n_sel >= 2)
             except Exception:
                 pass
         finally: self._loading=False
@@ -9308,8 +11868,10 @@ class PropPanel(QWidget):
 
     def _load_line(self,obj):
         pts=obj.points if obj.points and len(obj.points)>=2 else [[0,0],[50,50]]
-        self.sp_lx1.setValue(pts[0][0]); self.sp_ly1.setValue(pts[0][1])
-        self.sp_lx2.setValue(pts[1][0]); self.sp_ly2.setValue(pts[1][1])
+        # v4.3.5.48: points are LOCAL; show world coords (add transform origin)
+        ox,oy=obj.transform.x,obj.transform.y
+        self.sp_lx1.setValue(pts[0][0]+ox); self.sp_ly1.setValue(pts[0][1]+oy)
+        self.sp_lx2.setValue(pts[1][0]+ox); self.sp_ly2.setValue(pts[1][1]+oy)
         self.btn_lstroke.setStyleSheet(_cswatch(obj.stroke.color or (0,0,0,255)))
         self.sp_lsw.setValue(getattr(obj.stroke,'width',1))
 
@@ -9317,12 +11879,53 @@ class PropPanel(QWidget):
 
     def _atf(self,key,val):
         if self._loading or not self._obj: return
-        setattr(self._obj.transform,key,val)
+        # v4.3.5.38: when several objects are selected, edit them together. X/Y
+        # apply as a DELTA (the selection moves by the same amount); width /
+        # height / rotation apply the same absolute value to each. Geometry of
+        # lines/paths follows via the batch descriptors.
+        others = self._multi_others()
+        if others:
+            from edof.batch import find_descriptor
+            if key in ("x", "y"):
+                delta = val - getattr(self._obj.transform, key)
+                for o in [self._obj] + others:
+                    d = find_descriptor(o, "transform." + key)
+                    if d is not None:
+                        d.set(o, getattr(o.transform, key) + delta)
+            else:
+                path = "transform." + ("width" if key == "width"
+                                       else "height" if key == "height" else key)
+                for o in [self._obj] + others:
+                    d = find_descriptor(o, path)
+                    if d is not None:
+                        d.set(o, val)
+                    else:
+                        setattr(o.transform, key, val)
+        else:
+            setattr(self._obj.transform,key,val)
         self._canvas._refresh_overlay(); self._canvas.schedule_render(); self.changed.emit()
+
+    def _multi_others(self):
+        """v4.3.5.38: the OTHER selected objects (besides the primary) when a
+        multi-selection is active, so property edits apply to all of them."""
+        cv = self._canvas
+        ids = getattr(cv, "_multi_sel_ids", None) or set()
+        if not ids:
+            return []
+        out = []
+        for oid in ids:
+            o = cv._find_obj(oid)
+            if o is not None and o is not self._obj:
+                out.append(o)
+        return out
 
     def _aa(self,key,val):
         if self._loading or not self._obj: return
-        setattr(self._obj,key,val); self._canvas.schedule_render(); self.changed.emit()
+        setattr(self._obj,key,val)
+        for o in self._multi_others():            # v4.3.5.38: apply to all
+            try: setattr(o, key, val)
+            except Exception: pass
+        self._canvas.schedule_render(); self.changed.emit()
 
     def _aa_obj(self,key,val):
         if self._loading or not self._obj: return
@@ -9522,50 +12125,13 @@ class PropPanel(QWidget):
         ADD_TYPES = [et for et, _ in EFFECT_LIST if et != 'blending']
 
         def _make_default(et):
-            e = LayerEffect(type=et, enabled=True)
-            if et == 'drop_shadow':
-                e.color = (0, 0, 0, 220); e.opacity = 0.7
-                e.size = 2.0; e.distance = 2.0; e.direction = 315.0
-                e.blend_mode = 'multiply'
-            elif et == 'inner_shadow':
-                e.color = (0, 0, 0, 220); e.opacity = 0.7
-                e.size = 2.0; e.distance = 2.0; e.direction = 315.0
-                e.blend_mode = 'multiply'
-            elif et == 'outer_glow':
-                e.color = (255, 255, 200, 255); e.opacity = 0.6
-                e.size = 4.0; e.blend_mode = 'screen'
-            elif et == 'inner_glow':
-                e.color = (255, 255, 200, 255); e.opacity = 0.6
-                e.size = 4.0; e.blend_mode = 'screen'
-            elif et == 'bevel':
-                e.color = (0, 0, 0, 200); e.color2 = (255, 255, 255, 255)
-                e.size = 3.0; e.direction = 135.0; e.bevel_kind = 'inner'
-            elif et == 'stroke':
-                e.color = (0, 0, 0, 255); e.size = 1.0
-                e.stroke_position = 'outside'
-            elif et == 'color_overlay':
-                e.color = (255, 0, 0, 255); e.opacity = 1.0
-                e.blend_mode = 'normal'
-            elif et == 'gradient_overlay':
-                e.gradient_start = (0, 0, 0, 255); e.gradient_end = (255, 255, 255, 255)
-                e.gradient_angle = 90.0; e.opacity = 1.0
-            elif et == 'texture_overlay':
-                e.opacity = 1.0; e.blend_mode = 'multiply'
-            elif et == 'long_shadow':
-                e.color = (0, 0, 0, 180); e.direction = 315.0
-                e.ls_length = 10.0; e.ls_fade = True; e.opacity = 0.7
-                e.blend_mode = 'normal'
-            elif et == 'chromatic_aberration':
-                e.ca_offset = 0.5; e.ca_angle = 0.0; e.opacity = 1.0
-                e.blend_mode = 'normal'
-            elif et == 'halftone':
-                e.color = (0, 0, 0, 255); e.ht_dot = 1.5
-                e.ht_angle = 72.0; e.ht_shape = 'dot'; e.opacity = 1.0
-                e.blend_mode = 'normal'
-            elif et == 'light_sweep':
-                e.color2 = (255, 255, 255, 255); e.lsw_pos = 0.5
-                e.lsw_width = 0.3; e.lsw_angle = 45.0; e.opacity = 0.6
-                e.blend_mode = 'screen'
+            # v4.3.5.11: use the shared registry defaults so the 'add effect'
+            # UI and Path-A batch effect creation never drift apart.
+            from edof.batch import make_default_effect
+            e = make_default_effect(et)
+            if e is None:
+                e = LayerEffect(type=et)
+            e.enabled = True            # the UI adds an effect already on
             return e
 
         # working: key -> LayerEffect; order: [key,...] render order
@@ -9600,9 +12166,11 @@ class PropPanel(QWidget):
 
         # Top header: master enable
         hdr = QHBoxLayout()
-        cb_master = QCheckBox("Effects enabled")
+        cb_master = QCheckBox("All effects")
         cb_master.setStyleSheet("font-weight:bold;")
-        cb_master.setChecked(any(e.enabled for e in self._obj.effects))
+        # v4.3.5.12: master reads the object's real effects_enabled flag (not a
+        # derived "any enabled"), so it round-trips and is batchable.
+        cb_master.setChecked(bool(getattr(self._obj, "effects_enabled", False)))
         hdr.addWidget(cb_master)
         hdr.addStretch()
         v.addLayout(hdr)
@@ -9693,10 +12261,16 @@ class PropPanel(QWidget):
             return _MmField(value=val, maximum=mx, decimals=dec, suffix=suffix, minimum=lo)
 
         def _live():
-            # Apply current instance list to obj (enabled, in order)
-            new_effects = [deepcopy(working[k]) for k in order
-                           if working[k].enabled and cb_master.isChecked()]
-            self._obj.effects = new_effects
+            # v4.3.5.12: store ALL effects on the object (including disabled
+            # ones), preserving each effect's own 'enabled' flag, and set the
+            # object's master effects_enabled from the master checkbox. The
+            # renderer skips disabled effects and skips everything when the
+            # master is off, but the effects stay on the object -- which is what
+            # lets them be batched and toggled per record (previously the master
+            # and disabled effects dropped effects, so batching had nothing to
+            # act on and effects you added but left off simply vanished).
+            self._obj.effects = [deepcopy(working[k]) for k in order]
+            self._obj.effects_enabled = bool(cb_master.isChecked())
             self._canvas.schedule_render_interactive(30)
 
         # ── Page 0: Blending Options ─────────────────────────────────────────
@@ -10711,6 +13285,13 @@ class PropPanel(QWidget):
 
         def _add_effect(et2):
             k = _new_key(et2); working[k] = _make_default(et2); order.append(k)
+            # v4.3.5.15: adding an effect turns the master 'All effects' on, so
+            # the freshly added effect is actually visible (the default for an
+            # object with no effects is off).
+            if not cb_master.isChecked():
+                cb_master.blockSignals(True)
+                cb_master.setChecked(True)
+                cb_master.blockSignals(False)
             _rebuild_list(keep_key=k); _show(k); _live()
         def _add_menu():
             m = QMenu(dlg)
@@ -10767,9 +13348,11 @@ class PropPanel(QWidget):
                 pass
             self._canvas.schedule_render(); self.changed.emit()
             return
-        # Commit final state (enabled instances, in order)
-        self._obj.effects = [deepcopy(working[k]) for k in order
-                             if working[k].enabled and cb_master.isChecked()]
+        # Commit final state: v4.3.5.12 keep ALL effects (incl. disabled) so they
+        # survive for batching; the renderer skips disabled ones, and skips all
+        # of them when the master is off. Master sets the object's flag.
+        self._obj.effects = [deepcopy(working[k]) for k in order]
+        self._obj.effects_enabled = bool(cb_master.isChecked())
         self._canvas.schedule_render(); self.changed.emit()
 
 
@@ -10803,13 +13386,18 @@ class PropPanel(QWidget):
 
     def _apply_line_pt(self,idx,coord,val):
         if self._loading or not self._obj: return
-        pts=list(self._obj.points) if self._obj.points else [[0,0],[50,50]]
+        # v4.3.5.48: spinboxes show WORLD coords; points are LOCAL. Convert the
+        # edited point to local, then normalize so the box tracks the bbox.
+        ox,oy=self._obj.transform.x,self._obj.transform.y
+        pts=[list(p) for p in (self._obj.points or [[0,0],[50,50]])]
         while len(pts)<=idx: pts.append([0,0])
-        pts[idx]=list(pts[idx]); pts[idx][0 if coord=='x' else 1]=val
+        if coord=='x':
+            pts[idx][0]=val-ox
+        else:
+            pts[idx][1]=val-oy
         self._obj.points=pts
-        x1,y1=pts[0]; x2,y2=pts[1]
-        self._obj.transform.x=min(x1,x2); self._obj.transform.y=min(y1,y2)
-        self._obj.transform.width=max(abs(x2-x1),MIN_MM); self._obj.transform.height=max(abs(y2-y1),MIN_MM)
+        if hasattr(self._obj, "normalize_line"):
+            self._obj.normalize_line()
         self._canvas._refresh_overlay(); self._canvas.schedule_render(); self.changed.emit()
 
     def _apply_stroke_w(self):
@@ -10821,11 +13409,9 @@ class PropPanel(QWidget):
         self._obj.stroke.width=self.sp_lsw.value(); self._canvas.schedule_render(); self.changed.emit()
 
     def _bind_var(self):
-        if not self._obj: return
-        name=self.le_var.text().strip(); self._obj.variable=name or None
-        doc=self._canvas._doc
-        if doc and name and name not in doc.variables.names(): doc.define_variable(name)
-        self._canvas.schedule_render(); self.changed.emit()
+        # v4.3.5.60: variable binding removed from the UI (consolidated into the
+        # 3D Batch). Kept as a no-op so any stray connection doesn't error.
+        return
 
     def _pick_text_color(self):
         if not isinstance(self._obj,edof.TextBox): return
@@ -10984,9 +13570,15 @@ class _UnifiedHistory:
     def undo(self):
         if self._ptr <= 0:
             return None
+        # v4.4.0: the caret goes to the site of the UNDONE change (the step we
+        # are leaving), not wherever it happened to be when the OLDER snapshot
+        # was taken. Restoring the older caret made undo jump to an unrelated
+        # spot, which was disorienting. Offsets are clamped by the caller, so
+        # a position past the restored (shorter) text is safe.
+        _cur_ctx = self._stack[self._ptr][1]
         self._ptr -= 1
         data, ctx, _desc = self._stack[self._ptr]
-        return (self._restore(data), ctx)
+        return (self._restore(data), _cur_ctx if _cur_ctx is not None else ctx)
 
     def redo(self):
         if self._ptr >= len(self._stack) - 1:
@@ -11210,6 +13802,10 @@ class EdofEditor(QMainWindow):
         # _do_new_page after Ctrl+Enter, merge-with-previous backspace).
         self._canvas.pageChanged.connect(self._on_canvas_page_changed)
         self._canvas.zoomChanged.connect(self._on_zoom_changed)
+        # v4.3.6.17: rebind the batch panels whenever a new document is bound,
+        # so the first variable made right after New/Open works (the panels used
+        # to rebind only when their tab was opened).
+        self._canvas.documentChanged.connect(self._sync_doc_to_batch_panels)
         self.setCentralWidget(self._canvas)
 
         # Left: pages + objects (tabbed)
@@ -11226,6 +13822,8 @@ class EdofEditor(QMainWindow):
         # Object list
         self._obj_panel=ObjectListPanel(self._canvas)
         self._obj_panel.objectSelected.connect(self._on_obj_select)
+        # v4.3.5.32: mirror a multi-selection in the Objects list to the canvas
+        self._obj_panel.objectsSelected.connect(self._on_objs_select)
         left_tabs.addTab(self._obj_panel,t('panel_objects'))
         ld=QDockWidget("",self); ld.setWidget(left_tabs)
         # v4.0.3: dock is movable + resizable (was Fixed)
@@ -11239,14 +13837,31 @@ class EdofEditor(QMainWindow):
         # object names and toggle buttons fit comfortably without scrolling.
         QTimer.singleShot(0, lambda: self.resizeDocks([ld], [220], Qt.Orientation.Horizontal))
 
-        # Right: properties (scrollable)
+        # Right: Properties + 3D Batch as tabs (v4.3.5.4: batch moved here from
+        # the old bottom dock, so it sits beside Properties and you switch
+        # between them in place).
         self._props=PropPanel(self._canvas); self._props.changed.connect(self._on_chg)
         scroll=QScrollArea(); scroll.setWidget(self._props); scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         # v4.1.9: ensure panel is never narrower than the spinboxes can fit
         scroll.setMinimumWidth(260)
         self._props.setMinimumWidth(240)
-        rd=QDockWidget(t('panel_properties'),self); rd.setWidget(scroll)
+
+        self._right_tabs = QTabWidget()
+        self._right_tabs.addTab(scroll, t('panel_properties'))
+        # v4.3.5.5: the right tab holds the Template editor (vertical, narrow);
+        # the Table editor lives in the bottom dock (created below) where it has
+        # the width for a grid + side preview.
+        try:
+            from edof._apps.batch_panel import EdofBatchTemplatePanel
+            self._batch_tpl = EdofBatchTemplatePanel(self._canvas, self)
+            self._batch_tpl.changed.connect(self._on_batch_changed)
+            self._right_tabs.addTab(self._batch_tpl, "3D Batch")
+            self._right_tabs.currentChanged.connect(self._on_right_tab_changed)
+        except Exception:
+            self._batch_tpl = None
+
+        rd=QDockWidget(t('panel_properties'),self); rd.setWidget(self._right_tabs)
         rd.setObjectName("RightDock")
         rd.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
                        QDockWidget.DockWidgetFeature.DockWidgetClosable)
@@ -11262,10 +13877,32 @@ class EdofEditor(QMainWindow):
         self._status=QStatusBar(); self.setStatusBar(self._status)
         self._status.addPermanentWidget(self._lbl_dpi)
         self._status.addPermanentWidget(self._lbl_zoom)
+        # v4.3.5.5: Table editor in a bottom dock (hidden until toggled).
+        try:
+            from edof._apps.batch_panel import EdofBatchPanel
+            self._batch_panel = EdofBatchPanel(self._canvas, self)
+            self._batch_panel.changed.connect(self._on_batch_changed)
+            # cross-link so editing in one refreshes the other (same model)
+            self._batch_panel._template_peer = self._batch_tpl
+            if self._batch_tpl is not None:
+                self._batch_tpl._table_peer = self._batch_panel
+            bd = QDockWidget("3D Batch (table)", self)
+            bd.setObjectName("BatchTableDock")
+            bd.setWidget(self._batch_panel)
+            bd.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                           QDockWidget.DockWidgetFeature.DockWidgetClosable |
+                           QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+            self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, bd)
+            bd.hide()
+            self._batch_dock = bd
+        except Exception:
+            self._batch_panel = None
+            self._batch_dock = None
         self._build_toolbar(); self._build_menu()
 
     def _build_toolbar(self):
         tb=self.addToolBar("Main"); tb.setMovable(False); tb.setIconSize(QSize(16,16))
+        self._main_toolbar = tb   # v4.3.6.14: kept so later actions can be added
         # v4.2.11.33: shortcuts used to be registered on BOTH the toolbar and the
         # menu action (Ctrl+S, Ctrl+N, Ctrl+O, Ctrl+Z, ...). Qt treats a key
         # bound to two actions as AMBIGUOUS and fires neither, so those
@@ -11346,7 +13983,22 @@ class EdofEditor(QMainWindow):
         tb.addSeparator()
         a("PNG",self._export_png,              tip="Export current page as PNG", icon="export")
         a("PDF",self._export_pdf,              tip="Export document as PDF…", icon="pdf")
-        a("📊 CSV",self._batch_csv,            tip="Batch generate from CSV", icon="csv")
+        # v4.3.5.61: the toolbar "CSV" button was removed; CSV batch is in the 3D
+        # Batch panel now (Import CSV + Generate). The File menu still has a
+        # redirecting entry for discoverability.
+
+        # v4.3.5.10: classic / batch edit toggle. Independent of the right-hand
+        # tab: this controls WHAT canvas edits affect (the base document vs a
+        # batch record), the tab controls what you're looking at. In batch mode
+        # the canvas shows a BATCH EDIT banner.
+        tb.addSeparator()
+        self._act_batch_edit = QAction("◆ Batch edit", self)
+        self._act_batch_edit.setCheckable(True)
+        self._act_batch_edit.setToolTip(
+            "Toggle BATCH EDIT mode: canvas edits feed a batch record instead "
+            "of the base document")
+        self._act_batch_edit.toggled.connect(self._on_toggle_edit_mode)
+        tb.addAction(self._act_batch_edit)
 
         # v4.1.20: paragraph-style dropdown for document mode. Shown always
         # but only relevant when the current doc has mode == 'document' and
@@ -11471,6 +14123,9 @@ class EdofEditor(QMainWindow):
         save_3x_act=QAction("Save as v3 (downgrade)…",self)
         save_3x_act.triggered.connect(self._save_as_v3)
         fm.addAction(save_3x_act)
+        opt_act=QAction("Save optimized copy…",self)
+        opt_act.triggered.connect(self._save_optimized)
+        fm.addAction(opt_act)
         a(fm,sep=True,tk="",slot=None)
         a(fm,'export_png',self._export_png); a(fm,'export_all',self._export_all)
         a(fm,'export_pdf',self._export_pdf)
@@ -11486,6 +14141,11 @@ class EdofEditor(QMainWindow):
         docx_act=QAction("Export Word (.docx)…",self)
         docx_act.triggered.connect(self._export_docx)
         fm.addAction(docx_act)
+        # v4.4.0: batch generation straight from the menu, no need to open
+        # the batch table first
+        gen_act=QAction("Generate batch…",self)
+        gen_act.triggered.connect(self._generate_batch)
+        fm.addAction(gen_act)
         a(fm,'batch_csv',self._batch_csv)
         # v4.1.17.1: CSV template generator — emit a blank CSV with columns
         # matching the document's variable names (only objects that have a
@@ -11498,6 +14158,16 @@ class EdofEditor(QMainWindow):
         em=m('menu_edit')
         a(em,'undo',self._undo,"Ctrl+Z"); a(em,'redo',self._redo,"Ctrl+Y")
         a(em,sep=True,tk="",slot=None); a(em,'duplicate',self._dup_obj,"Ctrl+D"); a(em,'delete',self._del_obj,"Delete")
+        a(em,sep=True,tk="",slot=None)
+        # v4.3.5.42: group / ungroup the current selection
+        group_act=QAction("Group selection",self)
+        self._reg_sc(group_act, "Ctrl+Shift+G")
+        group_act.triggered.connect(self._group_obj)
+        em.addAction(group_act)
+        ungroup_act=QAction("Ungroup",self)
+        self._reg_sc(ungroup_act, "Ctrl+Shift+U")
+        ungroup_act.triggered.connect(self._ungroup_obj)
+        em.addAction(ungroup_act)
         a(em,sep=True,tk="",slot=None)
         a(em,'find_replace',self._find_replace,"Ctrl+F")
         # v4.0.1: gradient editor
@@ -11538,6 +14208,14 @@ class EdofEditor(QMainWindow):
         relock_act=QAction("Re-lock (forget password)",self)
         relock_act.triggered.connect(self._relock_doc)
         dm.addAction(relock_act)
+        # v4.4.1: document-wide hyperlink style
+        a(dm,sep=True,tk="",slot=None)
+        link_style_act=QAction("Link style…",self)
+        link_style_act.setToolTip(
+            "Colour and underline of every hyperlink in the document "
+            "(links with their own formatting keep it)")
+        link_style_act.triggered.connect(self._show_link_style_dialog)
+        dm.addAction(link_style_act)
         vm=m('menu_view')
         a(vm,'zoom_in',lambda:self._zoom_step(1.25),"Ctrl+=")
         a(vm,'zoom_out',lambda:self._zoom_step(1/1.25),"Ctrl+-")
@@ -11556,6 +14234,77 @@ class EdofEditor(QMainWindow):
         grid_size_act = QAction("Grid Size…", self)
         grid_size_act.triggered.connect(self._set_grid_size_dlg)
         vm.addAction(grid_size_act)
+        # v4.3.6.1: highlight batch-variable text spans (view-only aid)
+        showvar_act = QAction("Show Variables", self)
+        showvar_act.setCheckable(True); showvar_act.setChecked(False)
+        self._reg_sc(showvar_act, "Ctrl+Shift+H")
+        def _toggle_showvars(chk):
+            try:
+                from edof.engine.text_engine import set_show_variables
+                set_show_variables(chk)
+            except Exception: pass
+            try:
+                if hasattr(self._canvas, "clear_object_cache"):
+                    self._canvas.clear_object_cache()
+            except Exception: pass
+            try: self._canvas.schedule_render(0)
+            except Exception: pass
+            try:
+                ed = getattr(self._canvas, "_inline_widget", None)
+                if ed is not None:
+                    ed._show_vars = chk; ed._invalidate()
+            except Exception: pass
+        showvar_act.triggered.connect(_toggle_showvars)
+        vm.addAction(showvar_act)
+        self._act_show_vars = showvar_act
+        # v4.4.0: highlight LINK TARGETS (anchors) with a translucent
+        # red -> blue gradient. View-only aid, default OFF; never exports.
+        showanch_act = QAction("Show Link Targets", self)
+        showanch_act.setCheckable(True); showanch_act.setChecked(False)
+        def _toggle_showanchors(chk):
+            try:
+                from edof.engine.text_engine import set_show_anchors
+                set_show_anchors(chk)
+            except Exception: pass
+            try:
+                from edof.engine.renderer import clear_object_cache
+                clear_object_cache()
+            except Exception: pass
+            try: self._canvas._invalidate_page_cache(None)
+            except Exception: pass
+            try: self._canvas.schedule_render(0)
+            except Exception: pass
+            try:
+                ed = getattr(self._canvas, "_inline_widget", None)
+                if ed is not None:
+                    ed._invalidate()
+            except Exception: pass
+        showanch_act.triggered.connect(_toggle_showanchors)
+        vm.addAction(showanch_act)
+        self._act_show_anchors = showanch_act
+        # v4.3.6.14: also surface the variable-highlight toggle on the toolbar.
+        # Separate action (so the menu keeps its "Show Variables" label) kept in
+        # sync with the menu action both ways.
+        try:
+            tb = getattr(self, "_main_toolbar", None)
+            if tb is not None:
+                tb.addSeparator()
+                var_tb_act = QAction("\U0001F308", self)
+                var_tb_act.setCheckable(True)
+                var_tb_act.setChecked(showvar_act.isChecked())
+                var_tb_act.setToolTip("Show variable highlights  (Ctrl+Shift+H)")
+                var_tb_act.setStatusTip(
+                    "Toggle the rainbow underlay on variables")
+
+                def _tb_toggle(chk):
+                    showvar_act.setChecked(chk)
+                    _toggle_showvars(chk)
+                var_tb_act.triggered.connect(_tb_toggle)
+                showvar_act.toggled.connect(var_tb_act.setChecked)
+                tb.addAction(var_tb_act)
+                self._act_show_vars_tb = var_tb_act
+        except Exception:
+            pass
         # v4.0.1: alignment guides toggle
         align_act=QAction("Show Alignment Guides",self)
         align_act.setCheckable(True); align_act.setChecked(True)
@@ -11585,6 +14334,25 @@ class EdofEditor(QMainWindow):
         reset_panels_act=QAction("Reset Panel Layout", self)
         reset_panels_act.triggered.connect(self._reset_panels)
         vm.addAction(reset_panels_act)
+
+        # v4.3.5.5: 3D Batch -- Template tab (right) + Table editor (bottom)
+        if getattr(self, "_batch_tpl", None) is not None or \
+                getattr(self, "_batch_panel", None) is not None:
+            vm.addSeparator()
+            if getattr(self, "_batch_tpl", None) is not None:
+                batch_act = QAction("3D Batch (Template panel)", self)
+                batch_act.triggered.connect(self._show_batch_tab)
+                vm.addAction(batch_act)
+                self._batch_act = batch_act
+            if getattr(self, "_batch_dock", None) is not None:
+                table_act = QAction("3D Batch (Table editor)", self)
+                table_act.setCheckable(True)
+                table_act.toggled.connect(self._toggle_batch_table)
+                vm.addAction(table_act)
+                self._batch_table_act = table_act
+                self._batch_dock.visibilityChanged.connect(
+                    lambda vis: table_act.setChecked(vis)
+                    if table_act.isChecked() != vis else None)
 
         # v4.0.3 / v4.1.0: Help menu
         hm=mb.addMenu("&Help")
@@ -11620,7 +14388,7 @@ class EdofEditor(QMainWindow):
             _dbg_state = bool(_dbg_on())
         except Exception:
             _dbg_state = False
-        self._dbg_log_act = QAction("Debug log (curves/keys)", self)
+        self._dbg_log_act = QAction("Debug log (curves / keys / batch)", self)
         self._dbg_log_act.setCheckable(True)
         self._dbg_log_act.setChecked(_dbg_state)
         self._dbg_log_act.triggered.connect(self._toggle_debug_log)
@@ -11671,9 +14439,10 @@ class EdofEditor(QMainWindow):
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Icon.Information)
             box.setWindowTitle("Debug log enabled")
-            box.setText("Detailed curve / key logging is ON.\n\n"
-                        "Draw and edit with the pen tool, then close the editor "
-                        "and send this file:")
+            box.setText("Detailed logging is ON (pen tool, keys, and 3D Batch).\n\n"
+                        "Reproduce the issue (e.g. add a batch variable, toggle "
+                        "Batch edit, fill a value), then close the editor and "
+                        "send this file:")
             box.setInformativeText(real)
             open_btn = box.addButton("Open folder", QMessageBox.ButtonRole.ActionRole)
             box.addButton(QMessageBox.StandardButton.Ok)
@@ -11706,7 +14475,28 @@ class EdofEditor(QMainWindow):
     def _on_sel(self,obj):
         self._props.load(obj)
         self._obj_panel.refresh()
-        if obj: self._obj_panel.select(obj.id)
+        # v4.3.6.12: if the selection came from focusing a text variable, keep
+        # the VIRTUAL item selected in the panel rather than its parent textbox.
+        avf = getattr(self._canvas, "_active_var_focus", None)
+        if avf is not None:
+            try:
+                vids = getattr(self._canvas, "_selected_var_vids", None) or []
+                primary = "vrun:%s:%s" % (avf[0], avf[1])
+                if len(vids) > 1:
+                    self._obj_panel.select_many(vids, primary=primary)
+                else:
+                    self._obj_panel.select(primary)
+            except Exception:
+                pass
+            return
+        # v4.3.5.45: highlight the whole multi-selection in the Objects panel,
+        # not just the primary row.
+        multi = getattr(self._canvas, "_multi_sel_ids", None) or set()
+        if obj and multi:
+            ids = [obj.id] + [m for m in multi if m != obj.id]
+            self._obj_panel.select_many(ids, primary=obj.id)
+        elif obj:
+            self._obj_panel.select(obj.id)
         # v4.1.20.5: in document mode, when nothing is selected (e.g. user
         # clicked empty page area or finished interacting with a just-placed
         # object), automatically resume inline edit on the body textbox so
@@ -11749,6 +14539,37 @@ class EdofEditor(QMainWindow):
     def _on_chg(self):
         self._modified=True; self._upd_title()
         self._obj_panel.refresh()
+        # v4.4.0: an edited header/footer container clone is written back to
+        # its template and re-synced to every page (guarded against re-entry
+        # from the objectChanged our own refresh may fire).
+        if (self.doc is not None and getattr(self.doc, "body", None) is not None
+                and not getattr(self, "_in_hf_writeback", False)):
+            try:
+                sel = self._canvas.get_sel_id()
+                pg = self._canvas._cur_page()
+                obj = pg.get_object(sel) if (pg is not None and sel) else None
+                if obj is not None:
+                    from edof.engine.document_paginate import writeback_hf_clone
+                    self._in_hf_writeback = True
+                    try:
+                        if writeback_hf_clone(self.doc, obj):
+                            self._canvas._invalidate_page_cache(None)
+                    finally:
+                        self._in_hf_writeback = False
+            except Exception:
+                pass
+        # v4.3.5.10: if a batch record is being recorded, capture this edit into
+        # the record (diff vs the baseline snapshot). Guarded against re-entry.
+        if not getattr(self, "_in_batch_capture", False):
+            tp = getattr(self, "_batch_tpl", None)
+            if tp is not None and getattr(tp, "_recording", False):
+                self._in_batch_capture = True
+                try:
+                    tp.capture_canvas_edit()
+                except Exception:
+                    pass
+                finally:
+                    self._in_batch_capture = False
         # v4.2.10.13: record this object edit as a coalesced history step.
         if self.doc is not None and not self._suppress_obj_history:
             self._obj_pending = True
@@ -11806,8 +14627,30 @@ class EdofEditor(QMainWindow):
                 self._pg_list.blockSignals(False)
         try: self._upd_title()   # refresh DPI/mm/px status for the new page
         except Exception: pass
+        # v4.3.5.5: page changed -> refresh template panel (if it's the active
+        # tab) and the table dock (if shown), so both follow the current page
+        tp = getattr(self, "_batch_tpl", None)
+        rt = getattr(self, "_right_tabs", None)
+        if tp is not None and rt is not None and rt.currentWidget() is tp:
+            try: tp.rebuild()
+            except Exception: pass
+        bp = getattr(self, "_batch_panel", None)
+        bd = getattr(self, "_batch_dock", None)
+        if bp is not None and bd is not None and bd.isVisible():
+            try: bp.notify_page_changed()
+            except Exception: pass
 
     def _on_obj_select(self,oid):
+        # v4.3.7.0: a virtual text-variable object was picked -> focus its span
+        # in the text (select the run, rainbow-mark it) instead of selecting an
+        # object.
+        if isinstance(oid, str) and oid.startswith("vrun:"):
+            try:
+                _, obj_id, rid = oid.split(":", 2)
+            except ValueError:
+                return
+            self._canvas.focus_text_variable(obj_id, rid)
+            return
         # v4.1.20.8: when Objects panel selects an object in document mode
         # that is NOT the inline-edit target (typically a shape/image the
         # user inserted and wants to manipulate), commit the active body
@@ -11823,6 +14666,51 @@ class EdofEditor(QMainWindow):
             try: canvas._inline_widget.commit_to_textbox()
             except Exception: canvas._after_inline_commit()
         canvas.set_sel_id(oid)
+
+    def _virtual_targets(self, vids):
+        """v4.3.6.13: resolve ["vrun:obj:rid", ...] to [(obj, rid), ...] using
+        the current page."""
+        pg = self._canvas._cur_page() if self._canvas else None
+        out = []
+        for vid in vids:
+            try:
+                _, obj_id, rid = vid.split(":", 2)
+            except ValueError:
+                continue
+            obj = pg.get_object(obj_id) if pg else None
+            if obj is not None:
+                out.append((obj, rid))
+        return out
+
+    def _on_objs_select(self, oids):
+        """v4.3.5.32: a multi-selection was made in the Objects list -> mirror it
+        to the canvas (so the batch panel sees all selected objects)."""
+        canvas = self._canvas
+        # v4.3.7.0: virtual text-variable ids ("vrun:...") aren't canvas objects.
+        # Drop them so they don't clear the real selection; a pure variable click
+        # is handled by _on_obj_select (focus). Multi-select of variables into
+        # common run attributes is a later step.
+        real = [o for o in oids
+                if not (isinstance(o, str) and o.startswith("vrun:"))]
+        virtual = [o for o in oids
+                   if isinstance(o, str) and o.startswith("vrun:")]
+        if virtual and not real:
+            # v4.3.7.0: multi-select of variable objects -> highlight them all
+            # (rainbow) and focus the first; compatible with the multi-select
+            # principle (the common run attributes are the shared ones).
+            self._canvas.focus_text_variables(virtual)
+            # v4.3.6.13 (variant 2): surface the shared run-attribute controls
+            # in the batch panel for the selected variables.
+            tpl = getattr(self, "_batch_tpl", None)
+            if tpl is not None and hasattr(tpl, "set_shared_targets"):
+                tpl.set_shared_targets(self._virtual_targets(virtual))
+            return
+        # selection is not a pure variable set -> hide the shared-attr controls
+        tpl = getattr(self, "_batch_tpl", None)
+        if tpl is not None and hasattr(tpl, "set_shared_targets"):
+            tpl.set_shared_targets([])
+        if hasattr(canvas, "set_multi_selection"):
+            canvas.set_multi_selection(real)
 
     # ── Document ──────────────────────────────────────────────────────────────
     # ─────────────────────────────────────────────────────────────────────
@@ -11950,6 +14838,21 @@ class EdofEditor(QMainWindow):
         self._close_welcome()
         if os.path.isfile(path):
             self._open_file(path)
+
+    def _sync_doc_to_batch_panels(self):
+        """v4.3.6.17: rebind the batch panels to the CURRENT document. They only
+        re-bound when their tab was opened, so a variable made right after New /
+        Open / undo hit a None doc (cfg was None) and the make-variable flow
+        returned early -- no column, no rainbow, nothing in the Objects panel.
+        Now every document swap rebinds them so the first variable works."""
+        d = getattr(self, "doc", None)
+        for nm in ("_batch_tpl", "_batch_panel"):
+            p = getattr(self, nm, None)
+            if p is not None and hasattr(p, "set_document"):
+                try:
+                    p.set_document(d)
+                except Exception:
+                    pass
 
     def _new_doc(self):
         if not self._confirm(): return
@@ -12531,6 +15434,286 @@ class EdofEditor(QMainWindow):
         self._modified = True
         self._upd_title()
 
+    def _show_link_style_dialog(self):
+        """v4.4.1: edit the DOCUMENT link style: base colour, underline and
+        hover colour. Applies to every link without an explicit per-run
+        override. Undoable (one step)."""
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                                     QCheckBox, QPushButton, QDialogButtonBox,
+                                     QColorDialog)
+        from PyQt6.QtGui import QColor
+        from edof.format.styles import (DEFAULT_LINK_STYLE,
+                                        set_active_link_style)
+        if self.doc is None:
+            return
+        cur = dict(DEFAULT_LINK_STYLE)
+        if getattr(self.doc, "link_style", None):
+            cur.update(self.doc.link_style)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Link style")
+        v = QVBoxLayout(dlg)
+        v.addWidget(QLabel("Style of every hyperlink in this document.\n"
+                           "A link with its own colour/underline keeps it."))
+        state = {"color": tuple(cur.get("color")),
+                 "hover_color": tuple(cur.get("hover_color"))}
+
+        def _row(label, key):
+            h = QHBoxLayout()
+            h.addWidget(QLabel(label))
+            btn = QPushButton()
+            def _upd():
+                c = state[key]
+                btn.setStyleSheet(
+                    "background:rgb(%d,%d,%d);min-width:60px;" % c[:3])
+            def _pick():
+                c0 = state[key]
+                c = QColorDialog.getColor(QColor(*c0[:3]), dlg, label)
+                if c.isValid():
+                    state[key] = (c.red(), c.green(), c.blue(), 255)
+                    _upd()
+            _upd()
+            btn.clicked.connect(_pick)
+            h.addWidget(btn)
+            h.addStretch(1)
+            v.addLayout(h)
+
+        _row("Link colour:", "color")
+        _row("Hover colour:", "hover_color")
+        cb_u = QCheckBox("Underline links")
+        cb_u.setChecked(bool(cur.get("underline", True)))
+        v.addWidget(cb_u)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                              QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._commit_pending_body()
+        self._commit_pending_obj()
+        self.doc.link_style = {"color": state["color"],
+                               "hover_color": state["hover_color"],
+                               "underline": bool(cb_u.isChecked())}
+        set_active_link_style(self.doc.link_style)
+        try:
+            from edof.engine.renderer import clear_object_cache
+            clear_object_cache()
+        except Exception:
+            pass
+        try: self._canvas._invalidate_page_cache(None)
+        except Exception: pass
+        ied = getattr(self._canvas, "_inline_widget", None)
+        if ied is not None:
+            try: ied._invalidate()
+            except Exception: pass
+        self._canvas.objectChanged.emit()
+        self._obj_pending = False
+        try: self._obj_commit_timer.stop()
+        except Exception: pass
+        self.push_history("Link style")
+        self._canvas.schedule_render(0)
+
+    def _move_object_to_hf(self, oid, role):
+        """v4.4.0: move a page object into the header/footer container (role
+        'header' or 'footer'), or detach it back to the current page (role is
+        None). Container objects repeat on every page with the SAME id; editing
+        any clone writes back to the template (see writeback_hf_clone)."""
+        doc = self.doc
+        cv = self._canvas
+        pg = cv._cur_page() if cv is not None else None
+        body = getattr(doc, "body", None) if doc is not None else None
+        if doc is None or pg is None:
+            return
+        if body is None:
+            QMessageBox.information(
+                self, "Header/footer",
+                "Header and footer containers work in document mode "
+                "(File: New document).")
+            return
+        obj = pg.get_object(oid)
+        if obj is None:
+            return
+        from edof.format.document_boxes import (DocumentTextBox,
+                                                DocumentHeaderBox,
+                                                DocumentFooterBox)
+        if isinstance(obj, (DocumentTextBox, DocumentHeaderBox,
+                            DocumentFooterBox)):
+            return
+        from edof.engine.document_paginate import (sync_hf_objects_all,
+                                                   paginate_document)
+        import copy as _c
+        self._commit_pending_body()
+        self._commit_pending_obj()
+        if role is None:
+            for r in ("header", "footer"):
+                lst = getattr(body, r + "_objects", None) or []
+                for t in list(lst):
+                    if getattr(t, "id", None) == oid:
+                        lst.remove(t)
+            for p2 in doc.pages:
+                if p2 is pg:
+                    continue
+                p2.objects[:] = [o for o in p2.objects
+                                 if getattr(o, "id", None) != oid]
+            try: del obj._hf_container
+            except Exception: pass
+            desc = "Detach from header/footer"
+        else:
+            tmpl = _c.deepcopy(obj)
+            try: del tmpl._hf_container
+            except Exception: pass
+            getattr(body, role + "_objects").append(tmpl)
+            if not getattr(body, role + "_enabled", False):
+                setattr(body, role + "_enabled", True)
+            try: pg.objects.remove(obj)
+            except Exception: pass
+            desc = "Move to %s" % role
+        try:
+            paginate_document(doc, dpi=self._canvas._dpi)
+        except Exception:
+            try: sync_hf_objects_all(doc)
+            except Exception: pass
+        try: self._canvas._invalidate_page_cache(None)
+        except Exception: pass
+        self._canvas.objectChanged.emit()
+        # one labelled undo step, no burst duplicate
+        self._obj_pending = False
+        try: self._obj_commit_timer.stop()
+        except Exception: pass
+        self.push_history(desc)
+        self._canvas.schedule_render(0)
+
+    def push_history(self, desc="Batch edit"):
+        """Public hook so the batch panels can record an undoable step (e.g.
+        deleting a variable). Snapshots the whole document, which includes the
+        batch config, so undo/redo restores it."""
+        if self.doc is None:
+            return
+        self.history.push(self.doc, None, desc)
+        self._modified = True
+        self._upd_title()
+
+    # ── 3D Batch (v4.3.3.0) ──────────────────────────────────────────────────
+    def _on_batch_changed(self):
+        """The batch panel edited the config: mark the document modified."""
+        self._modified = True
+        self._upd_title()
+
+    def _on_toggle_edit_mode(self, checked):
+        """Toolbar toggle. Batch edit and recording are the same thing: turning
+        it on starts recording canvas+Properties edits into the selected record;
+        turning it off stops and restores the base. (You can't edit in batch
+        mode without recording -- that would change the template.)"""
+        try:
+            from edof.engine.debug_log import log as _dlog
+            _dlog("editor.batch_edit_toggle", checked=bool(checked))
+        except Exception: pass
+        tp = getattr(self, "_batch_tpl", None)
+        if checked:
+            self._canvas.set_edit_mode("batch")
+            self._show_batch_tab()
+            if tp is not None and hasattr(tp, "start_recording"):
+                try: tp.start_recording()
+                except Exception: pass
+            # if recording refused to start (e.g. locked record), revert
+            if tp is not None and not getattr(tp, "_recording", False):
+                self._act_batch_edit.blockSignals(True)
+                self._act_batch_edit.setChecked(False)
+                self._act_batch_edit.blockSignals(False)
+                self._canvas.set_edit_mode("classic")
+        else:
+            if tp is not None and hasattr(tp, "stop_recording"):
+                try: tp.stop_recording()
+                except Exception: pass
+            self._canvas.set_edit_mode("classic")
+
+    def _batch_block(self, what="edit"):
+        """Return True (and warn) if a structural canvas action is blocked
+        because the canvas is in batch edit mode. In batch edit you may only
+        change attributes of existing objects (while recording) -- inserting,
+        deleting, or duplicating objects would change the shared template, which
+        batch edit must never do."""
+        cv = getattr(self, "_canvas", None)
+        if cv is None or getattr(cv, "_edit_mode", "classic") != "batch":
+            return False
+        msg = ("Batch edit mode is active, so you can't add, remove, or "
+               "duplicate objects here -- that would change the template for "
+               "every record. Turn off Batch edit to change the template.")
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Batch edit", msg)
+        except Exception:
+            pass
+        return True
+
+    def _show_batch_tab(self):
+        """Switch the right-side panel to the 3D Batch (template) tab and bind
+        it to the current document."""
+        tp = getattr(self, "_batch_tpl", None)
+        rt = getattr(self, "_right_tabs", None)
+        if tp is None or rt is None:
+            return
+        if self.doc is not None:
+            tp.set_document(self.doc)
+        rt.setCurrentWidget(tp)
+
+    def _on_right_tab_changed(self, _idx):
+        """When the user switches to the 3D Batch tab, bind it to the current
+        document; when leaving it, drop the projection and (unless recording)
+        leave batch edit mode so the BATCH EDIT banner doesn't linger."""
+        tp = getattr(self, "_batch_tpl", None)
+        rt = getattr(self, "_right_tabs", None)
+        if tp is None or rt is None:
+            return
+        if rt.currentWidget() is tp and self.doc is not None:
+            tp.set_document(self.doc)
+            # re-project the currently selected record
+            try: tp._project_to_canvas(tp._cur)
+            except Exception: pass
+        else:
+            # left the batch tab. If a recording is in progress, keep batch edit
+            # on (Properties edits now feed the record). Otherwise leave batch
+            # edit so the banner clears, and drop the projection unless the
+            # table dock still wants it.
+            recording = bool(getattr(tp, "_recording", False))
+            if not recording:
+                if getattr(self, "_act_batch_edit", None) is not None and \
+                        self._act_batch_edit.isChecked():
+                    self._act_batch_edit.blockSignals(True)
+                    self._act_batch_edit.setChecked(False)
+                    self._act_batch_edit.blockSignals(False)
+                try: self._canvas.set_edit_mode("classic")
+                except Exception: pass
+                bd = getattr(self, "_batch_dock", None)
+                if bd is None or not bd.isVisible():
+                    try: self._canvas.clear_batch_preview()
+                    except Exception: pass
+
+    def _toggle_batch_table(self, checked=None):
+        """Show/hide the bottom Table editor dock and bind it to the document."""
+        bd = getattr(self, "_batch_dock", None)
+        bp = getattr(self, "_batch_panel", None)
+        if bd is None or bp is None:
+            return
+        show = (not bd.isVisible()) if checked is None else bool(checked)
+        if show:
+            if self.doc is not None:
+                bp.set_document(self.doc)
+            bd.show(); bd.raise_()
+        else:
+            bd.hide()
+            # dropping the table dock clears the projection unless the template
+            # tab is the active right tab and still wants it
+            tp = getattr(self, "_batch_tpl", None)
+            rt = getattr(self, "_right_tabs", None)
+            tab_active = (rt is not None and tp is not None
+                          and rt.currentWidget() is tp)
+            if not tab_active:
+                try: self._canvas.clear_batch_preview()
+                except Exception: pass
+
+
     def _commit_inline_for_insert(self):
         """v4.1.20.1: Commit any active inline edit before triggering an
         insert action (textbox/image/shape/table/etc.). In document mode
@@ -12723,6 +15906,14 @@ class EdofEditor(QMainWindow):
             except Exception:
                 pass
             self._refresh_pages()
+        # v4.3.5.11: rebind the batch editors to the restored document's batch
+        # config so undo/redo of a batch change (e.g. removing a variable) shows
+        # up immediately in both panels.
+        for _attr in ("_batch_tpl", "_batch_panel"):
+            _p = getattr(self, _attr, None)
+            if _p is not None:
+                try: _p.set_document(self.doc)
+                except Exception: pass
         self._upd_title()
 
     # ── Insert ────────────────────────────────────────────────────────────────
@@ -12761,6 +15952,7 @@ class EdofEditor(QMainWindow):
         starts typing right away. Esc cancels. Drags below 5×5mm are
         ignored (clicked accidentally)."""
         if not self._check_perm("design", "Add TextBox"): return
+        if self._batch_block(): return
         self._commit_inline_for_insert()
         pg=self._cp()
         if not pg: return
@@ -12786,6 +15978,7 @@ class EdofEditor(QMainWindow):
 
     def _ins_image(self):
         if not self._check_perm("design", "Add Image"): return
+        if self._batch_block(): return
         self._commit_inline_for_insert()
         pg=self._cp()
         if not pg: return
@@ -12808,6 +16001,7 @@ class EdofEditor(QMainWindow):
         """v4.1.13: Import an SVG file as an SvgBox (raster display).
         User can double-click the box to convert into editable EDOF shapes."""
         if not self._check_perm("design", "Add SVG"): return
+        if self._batch_block(): return
         self._commit_inline_for_insert()
         pg = self._cp()
         if not pg: return
@@ -12910,6 +16104,7 @@ class EdofEditor(QMainWindow):
 
     def _ins_shape(self,stype):
         if not self._check_perm("design", f"Add {stype}"): return
+        if self._batch_block(): return
         self._commit_inline_for_insert()
         pg=self._cp()
         if not pg: return
@@ -12926,6 +16121,7 @@ class EdofEditor(QMainWindow):
         self._canvas.start_rect_draw(stype, _create)
 
     def _ins_line(self):
+        if self._batch_block(): return
         self._commit_inline_for_insert()
         pg=self._cp()
         if not pg: return
@@ -12936,14 +16132,19 @@ class EdofEditor(QMainWindow):
             sh=pg.add_shape("line", min(x_mm, ex), min(y_mm, ey),
                             max(0.1, abs(w_mm)), max(0.1, abs(h_mm)))
             sh.stroke.color=(40,40,40,255); sh.stroke.width=0.7; sh.fill.color=None
-            # Endpoints in absolute page mm, preserving the drawn direction
-            sh.points=[[x_mm, y_mm], [ex, ey]]
+            # v4.3.5.48: points are LOCAL (relative to transform). Set them in
+            # absolute mm first, then normalize so the box = points' bbox and the
+            # points are re-based to 0 (the drawn direction is preserved).
+            ox,oy=sh.transform.x,sh.transform.y
+            sh.points=[[x_mm-ox, y_mm-oy], [ex-ox, ey-oy]]
+            sh.normalize_line()
             self._auto_name(sh, "line")
             self._canvas.set_sel_id(sh.id); self._canvas.schedule_render()
             self._push("Add Line")
         self._canvas.start_rect_draw("line", _create)
 
     def _ins_qr(self):
+        if self._batch_block(): return
         self._commit_inline_for_insert()
         pg=self._cp()
         if not pg: return
@@ -12956,6 +16157,7 @@ class EdofEditor(QMainWindow):
     # v4.1.2: Insert embedded SubDocumentBox
     def _ins_subdoc(self):
         if not self._check_perm("design", "Insert sub-document"): return
+        if self._batch_block(): return
         self._commit_inline_for_insert()
         pg = self._cp()
         if not pg: return
@@ -12998,6 +16200,7 @@ class EdofEditor(QMainWindow):
     # v4.0.3: Insert Table
     def _ins_table(self):
         if not self._check_perm("design", "Insert table"): return
+        if self._batch_block(): return
         self._commit_inline_for_insert()
         pg=self._cp()
         if not pg: return
@@ -13063,6 +16266,7 @@ class EdofEditor(QMainWindow):
 
     def _ins_path(self):
         if not self._check_perm("design", "Draw path"): return
+        if self._batch_block(): return
         self._commit_inline_for_insert()
         pg=self._cp()
         if not pg: return
@@ -13075,6 +16279,7 @@ class EdofEditor(QMainWindow):
 
     def _dup_obj(self):
         if not self._check_perm("design", "Duplicate object"): return
+        if self._batch_block(): return
         pg=self._cp(); sid=self._canvas.get_sel_id()
         if not pg or not sid: return
         obj=pg.get_object(sid)
@@ -13082,9 +16287,57 @@ class EdofEditor(QMainWindow):
         new=obj.copy(); new.transform.translate(8,8); pg.add_object(new)
         self._canvas.set_sel_id(new.id); self._canvas.schedule_render(); self._push("Duplicate")
 
+    def _group_obj(self):
+        if not self._check_perm("design", "Group objects"): return
+        if self._batch_block(): return
+        # v4.3.5.44: must have a real multi-selection to group
+        if len(self._canvas.selected_objects()) < 2:
+            return
+        # ask for a name; empty -> auto "GroupNNN"
+        from PyQt6.QtWidgets import QInputDialog
+        default = self._next_group_name()
+        name, ok = QInputDialog.getText(
+            self, "Group selection", "Group name:", text=default)
+        if not ok:
+            return
+        name = (name or "").strip() or default
+        g = self._canvas.group_selection()
+        if g is not None:
+            g.name = name
+            self._obj_panel.refresh()
+            self._push("Group")
+
+    def _next_group_name(self):
+        """v4.3.5.44: next free 'GroupNNN' name on the current page."""
+        import re
+        pg = self._cp()
+        used = set()
+        if pg is not None:
+            for o in getattr(pg, "objects", []):
+                m = re.fullmatch(r"Group(\d+)", (getattr(o, "name", "") or ""))
+                if m:
+                    used.add(int(m.group(1)))
+        n = 1
+        while n in used:
+            n += 1
+        return "Group%03d" % n
+
+    def _ungroup_obj(self):
+        if not self._check_perm("design", "Ungroup"): return
+        if self._batch_block(): return
+        if self._canvas.ungroup_selection():
+            self._obj_panel.refresh()
+            self._push("Ungroup")
+
     def _del_obj(self):
         if not self._check_perm("design", "Delete object"): return
+        if self._batch_block(): return
         self._canvas._do_delete(); self._push("Delete")
+        # v4.3.3.0: drop batch columns whose target was just deleted
+        bp = getattr(self, "_batch_panel", None)
+        if bp is not None:
+            try: bp.prune_after_object_change()
+            except Exception: pass
 
     # ── Pages ─────────────────────────────────────────────────────────────────
     def _add_page(self):
@@ -13107,6 +16360,17 @@ class EdofEditor(QMainWindow):
         # canvas page-pixmap cache so stale thumbnails aren't shown on switch.
         try: self._canvas._invalidate_page_cache()
         except Exception: pass
+        # v4.3.5.5: keep both batch editors bound to the live document
+        tp = getattr(self, "_batch_tpl", None)
+        rt = getattr(self, "_right_tabs", None)
+        if tp is not None and rt is not None and rt.currentWidget() is tp and self.doc is not None:
+            try: tp.set_document(self.doc)
+            except Exception: pass
+        bp = getattr(self, "_batch_panel", None)
+        bd = getattr(self, "_batch_dock", None)
+        if bp is not None and bd is not None and bd.isVisible() and self.doc is not None:
+            try: bp.set_document(self.doc)
+            except Exception: pass
         self._pg_list.blockSignals(True); cur=self._pg_list.currentRow(); self._pg_list.clear()
         if self.doc:
             for i,p in enumerate(self.doc.pages):
@@ -14215,6 +17479,13 @@ populating the cells.</p>
         sp_custom.setSuffix(" DPI")
         v.addWidget(sp_custom)
         cb_dpi.currentIndexChanged.connect(lambda i: sp_custom.setValue(cb_dpi.currentData()))
+        # v4.4.0: export EVERY page in one go (both modes). The chosen file
+        # name becomes the base: name_p1.png, name_p2.png, ...
+        from PyQt6.QtWidgets import QCheckBox as _QCB
+        cb_all = None
+        if len(self.doc.pages) > 1:
+            cb_all = _QCB("All pages (%d), numbered files" % len(self.doc.pages))
+            v.addWidget(cb_all)
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); v.addWidget(bb)
         if dlg.exec() != QDialog.DialogCode.Accepted: return
@@ -14224,10 +17495,91 @@ populating the cells.</p>
         _rv = self._render_flush(dpi=target_dpi)
         try:
             fmt=os.path.splitext(p)[1].upper().lstrip(".")
-            self.doc.export_bitmap(p,page=self._cpi(),dpi=target_dpi,format=fmt or "PNG")
-            self._status.showMessage(t('status_saved',name=os.path.basename(p)))
+            if cb_all is not None and cb_all.isChecked():
+                from edof.export.bitmap import export_all_pages
+                base, ext = os.path.splitext(p)
+                ext = ext or ".png"
+                pattern = base + "_p{page}" + ext
+                ps = export_all_pages(self.doc, pattern, dpi=target_dpi,
+                                      format=fmt or "PNG")
+                self._status.showMessage(
+                    "Exported %d pages (%s...)" % (
+                        len(ps), os.path.basename(ps[0]) if ps else ""))
+            else:
+                self.doc.export_bitmap(p,page=self._cpi(),dpi=target_dpi,format=fmt or "PNG")
+                self._status.showMessage(t('status_saved',name=os.path.basename(p)))
         except Exception as e: QMessageBox.critical(self,"Error",str(e))
         finally: self._render_restore(_rv)
+
+    def _save_optimized(self):
+        """v4.4.0: Save a copy with recompressed images (PNG lossless or JPEG
+        at a chosen quality). Works on a deep copy, the open document is not
+        touched. For photo-heavy documents (large PNG sources) the JPEG
+        steps shrink the file by an order of magnitude."""
+        if not self.doc:
+            return
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
+                                     QLabel, QComboBox, QDialogButtonBox,
+                                     QFileDialog, QMessageBox)
+        dlg=QDialog(self); dlg.setWindowTitle("Save optimized copy")
+        dlg.setStyleSheet(QSS); dlg.resize(420, 170)
+        v=QVBoxLayout(dlg)
+        lab=QLabel("Re-encode the embedded images and save a copy. The open "
+                   "document keeps its original images.")
+        lab.setWordWrap(True); v.addWidget(lab)
+        h=QHBoxLayout(); h.addWidget(QLabel("Images:"))
+        cb=QComboBox()
+        for label, data in _IMAGE_COMPRESS_CHOICES:
+            cb.addItem(label, data)
+        cb.setCurrentIndex(2)          # JPEG good as the sane default here
+        h.addWidget(cb, 1); v.addLayout(h)
+        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                            QDialogButtonBox.StandardButton.Cancel)
+        bb.button(QDialogButtonBox.StandardButton.Ok).setText("Save as…")
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        if dlg.exec()!=QDialog.DialogCode.Accepted:
+            return
+        path,_=QFileDialog.getSaveFileName(self, "Save optimized copy", "",
+                                           "EDOF (*.edof)")
+        if not path:
+            return
+        if not path.lower().endswith(".edof"):
+            path += ".edof"
+        fmt, q = cb.currentData() or (None, 80)
+        import copy as _cp
+        try:
+            dcopy = _cp.deepcopy(self.doc)
+            if fmt:
+                n, before, after = dcopy.recompress_images(fmt, q)
+            else:
+                n, before, after = dcopy.recompress_images("png", 100)
+            dcopy.save(path)
+            saved = max(0, before - after)
+            QMessageBox.information(
+                self, "Save optimized copy",
+                "Saved %s\n%d image(s) re-encoded, %.1f MB -> %.1f MB "
+                "(saved %.1f MB)." % (os.path.basename(path), n,
+                                      before/1e6, after/1e6, saved/1e6))
+        except Exception as e:
+            QMessageBox.critical(self, "Save optimized copy", str(e))
+
+    def _generate_batch(self):
+        """v4.4.0: File menu entry for batch generation. Opens the same
+        Generate dialog the batch table uses; the table dock does not have to
+        be open (or ever opened)."""
+        bp = getattr(self, "_batch_panel", None)
+        if bp is None:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Generate batch",
+                                    "The batch module is not available.")
+            return
+        try:
+            bp._on_generate()
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Generate batch",
+                                "Generation failed:\n%s" % e)
 
     def _export_all(self):
         if not self.doc: return
@@ -14272,6 +17624,20 @@ populating the cells.</p>
         hb.addWidget(QLabel("Raster resolution:")); hb.addWidget(sp_dpi); hb.addStretch()
         v.addWidget(dpi_row)
 
+        # v4.4.0: image compression -- lossless PNG or JPEG quality steps.
+        # Photo-heavy documents shrink dramatically with JPEG.
+        img_row=QWidget(); ib=QHBoxLayout(img_row); ib.setContentsMargins(0,0,0,0)
+        ib.addWidget(QLabel("Images:"))
+        cb_img=QComboBox()
+        for label, data in _IMAGE_COMPRESS_CHOICES:
+            cb_img.addItem(label, data)
+        cb_img.setToolTip(
+            "Lossless keeps images exactly as they are (big files stay big).\n"
+            "JPEG re-encodes photos at the chosen quality; transparency is\n"
+            "preserved. Use it when the sources are large PNG photos.")
+        ib.addWidget(cb_img, 1)
+        v.addWidget(img_row)
+
         # v4.1.18: Embed source checkbox
         cb_embed = QCheckBox("Embed EDOF source so the PDF can be re-edited "
                               "(recipient needs the EDOF editor)")
@@ -14289,8 +17655,11 @@ populating the cells.</p>
         embed = cb_embed.isChecked()
         raster_dpi = sp_dpi.value() if not vector else None
         _rv = self._render_flush(dpi=raster_dpi)
+        img_fmt, img_q = cb_img.currentData() or (None, 80)
         try:
-            self.doc.export_pdf(p, vector=vector, dpi=raster_dpi, embed_source=embed)
+            self.doc.export_pdf(p, vector=vector, dpi=raster_dpi,
+                                embed_source=embed,
+                                image_format=img_fmt, image_quality=img_q)
             mode = "vector" if vector else "raster"
             embed_msg = " (with EDOF source)" if embed else ""
             self._status.showMessage(f"Saved {mode} PDF{embed_msg}: {os.path.basename(p)}")
@@ -14359,93 +17728,21 @@ populating the cells.</p>
             QMessageBox.critical(self, "CSV template", f"Could not write file:\n{e}")
 
     def _batch_csv(self):
-        """Item 26: CSV import for batch fill → export per row."""
-        if not self.doc: return
-        csv_path, _ = QFileDialog.getOpenFileName(
-            self, "Select CSV file", "", "CSV (*.csv);;All (*.*)")
-        if not csv_path: return
-        out_dir = QFileDialog.getExistingDirectory(self, "Output folder for exports")
-        if not out_dir: return
-
-        # Detect variables in template
-        var_names = self.doc.variables.names()
-        if not var_names:
-            QMessageBox.warning(self, "No variables",
-                "This template has no variables defined.\n"
-                "Bind objects to variables first.")
+        # v4.3.5.61: the old CSV-batch (map CSV columns to document variables ->
+        # export per row) is retired. The 3D Batch does this natively now: add
+        # columns, Import CSV (clean + meta, encoding autodetected), and Generate
+        # to files with a filename pattern. Redirect the user there.
+        if not self.doc:
             return
+        QMessageBox.information(
+            self, "CSV batch moved",
+            "CSV batch lives in the 3D Batch now.\n\n"
+            "Open the 3D Batch panel, add the columns you want to vary, then use "
+            "Import CSV to load rows and Generate to render every row to a file "
+            "(with a filename pattern). Encoding is autodetected and a meta file "
+            "keeps round-trips lossless.")
+        self._open_batch_tab()
 
-        import csv
-        try:
-            with open(csv_path, newline='', encoding='utf-8-sig') as f:
-                reader = csv.DictReader(f)
-                rows   = list(reader)
-                headers= reader.fieldnames or []
-        except Exception as e:
-            QMessageBox.critical(self, "CSV Error", str(e)); return
-
-        if not rows:
-            QMessageBox.information(self, "Empty", "CSV has no data rows."); return
-
-        # Show mapping dialog
-        dlg = QDialog(self); dlg.setWindowTitle("CSV → Variables mapping")
-        dlg.setStyleSheet(QSS); dlg.resize(480, 320)
-        vb = QVBoxLayout(dlg); vb.setContentsMargins(12,12,12,12)
-        vb.addWidget(QLabel(f"CSV has {len(rows)} rows. Map CSV columns to template variables:"))
-
-        scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        inner  = QWidget(); fl = QFormLayout(inner); scroll.setWidget(inner)
-        vb.addWidget(scroll, 1)
-
-        combos = {}
-        for var in var_names:
-            cb = QComboBox(); cb.addItem("(skip)")
-            cb.addItems(headers)
-            # Auto-match by name
-            if var in headers: cb.setCurrentText(var)
-            elif var.lower() in [h.lower() for h in headers]:
-                cb.setCurrentText(next(h for h in headers if h.lower()==var.lower()))
-            fl.addRow(f"Variable:  {var}", cb)
-            combos[var] = cb
-
-        # Filename pattern
-        le_pat = QLineEdit("{n:04d}.png"); le_pat.setPlaceholderText("{n}.png or {col_name}.png")
-        vb.addWidget(QLabel("Output filename pattern  (use {n} for row number, {column_name} for column value):"))
-        vb.addWidget(le_pat)
-
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
-                              QDialogButtonBox.StandardButton.Cancel)
-        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); vb.addWidget(bb)
-        if dlg.exec() != QDialog.DialogCode.Accepted: return
-
-        mapping  = {var: cb.currentText() for var,cb in combos.items() if cb.currentText() != "(skip)"}
-        pattern  = le_pat.text().strip() or "{n:04d}.png"
-        ok_count = 0; errors = []
-
-        for n, row in enumerate(rows, 1):
-            try:
-                fill = {var: row.get(col, "") for var, col in mapping.items()}
-                self.doc.fill_variables(fill)
-                # Build filename
-                fname = pattern
-                try:
-                    fname = pattern.format(n=n, **{k: v for k,v in row.items()
-                                                    if k and k.isidentifier()})
-                except Exception:
-                    fname = f"{n:04d}.png"
-                out_path = os.path.join(out_dir, fname)
-                ext      = os.path.splitext(out_path)[1].lower().lstrip(".")
-                fmt      = ext.upper() if ext in ("png","jpg","jpeg","tiff","bmp") else "PNG"
-                self.doc.export_bitmap(out_path, page=self._cpi(), dpi=300, format=fmt)
-                ok_count += 1
-            except Exception as e:
-                errors.append(f"Row {n}: {e}")
-
-        msg = f"Exported {ok_count}/{len(rows)} rows to:\n{out_dir}"
-        if errors:
-            msg += "\n\nErrors:\n" + "\n".join(errors[:5])
-        QMessageBox.information(self, "Batch export done", msg)
-        self._status.showMessage(f"Batch export: {ok_count}/{len(rows)} rows")
 
     def _render_flush(self, dpi=None):
         """v4.1.23.38: prepare the document for off-screen rendering
@@ -14709,34 +18006,30 @@ populating the cells.</p>
                 try: self._canvas.schedule_render()
                 except Exception: pass
 
+    def _open_batch_tab(self):
+        """v4.3.5.61: bring the 3D Batch panel forward (used when redirecting the
+        retired variable/CSV dialogs)."""
+        try:
+            tabs = getattr(self, "_right_tabs", None)
+            tpl = getattr(self, "_batch_tpl", None)
+            if tabs is not None and tpl is not None:
+                tabs.setCurrentWidget(tpl)
+        except Exception:
+            pass
+
     def _show_vars(self):
-        if not self.doc: return
-        dlg=QDialog(self); dlg.setWindowTitle(t('dlg_variables')); dlg.resize(520,380)
-        dlg.setStyleSheet(QSS); vb=QVBoxLayout(dlg); vb.setContentsMargins(12,12,12,12)
-        vb.addWidget(QLabel("Variables for templates / batch fill:"))
-        scroll=QScrollArea(); scroll.setWidgetResizable(True)
-        inner=QWidget(); fl=QFormLayout(inner); fl.setSpacing(5); scroll.setWidget(inner)
-        vb.addWidget(scroll,1); entries=[]
-        for name in self.doc.variables.names():
-            le=QLineEdit(str(self.doc.variables.get(name) or ""))
-            fl.addRow(name,le); entries.append((name,le))
-        ar=QWidget(); hb=QHBoxLayout(ar); hb.setContentsMargins(0,0,0,0)
-        le_new=QLineEdit(); le_new.setPlaceholderText("variable_name")
-        cb_t=QComboBox(); cb_t.addItems(["text","number","date","image","qr","url","bool"])
-        btn_a=QPushButton("Add"); hb.addWidget(le_new); hb.addWidget(cb_t); hb.addWidget(btn_a)
-        vb.addWidget(ar)
-        def do_add():
-            n=le_new.text().strip()
-            if n: self.doc.define_variable(n,type=cb_t.currentText())
-            dlg.close(); self._show_vars()
-        btn_a.clicked.connect(do_add)
-        bb=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
-        def apply():
-            for name,le in entries:
-                try: self.doc.set_variable(name,le.text())
-                except Exception: pass
-            self._canvas.schedule_render(); self._push("Update vars"); dlg.accept()
-        bb.accepted.connect(apply); bb.rejected.connect(dlg.reject); vb.addWidget(bb); dlg.exec()
+        # v4.3.5.61: the standalone Variables dialog is retired. Variables are
+        # consolidated into the 3D Batch (each binding is a batch column), so this
+        # now points the user at the 3D Batch instead of defining doc variables.
+        if not self.doc:
+            return
+        QMessageBox.information(
+            self, "Variables moved",
+            "The separate Variables system has been folded into the 3D Batch.\n\n"
+            "Each value you want to vary is now a 3D Batch column (with its own "
+            "rows, CSV import/export, and Generate). Old documents migrate "
+            "automatically on open.")
+        self._open_batch_tab()
 
     def _doc_info(self):
         if not self.doc: return

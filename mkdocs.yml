@@ -51,8 +51,12 @@ nav:
       - Document model: reference/01-document.md
       - Objects: reference/02-objects.md
       - Styles: reference/03-styles.md
+      - Layer effects: reference/12-effects.md
       - Variables: reference/04-variables.md
       - Export: reference/05-export.md
+      - Hyperlinks: reference/13-hyperlinks.md
+      - Header & Footer: reference/14-header-footer.md
+      - 3D Batch: reference/15-batch.md
       - Import (PDF / RTF): reference/06-import.md
       - Word (.docx): reference/11-docx.md
       - Encryption: reference/07-encryption.md
@@ -66,6 +70,7 @@ nav:
       - Batch PDF: cookbook/batch-pdf.md
       - PDF import & edit: cookbook/pdf-import-edit.md
       - Encrypted template: cookbook/encrypted-template.md
+      - Effects poster: cookbook/effects-poster.md
   - Advanced:
       - Extending: advanced/extending.md
       - File format: advanced/file-format.md

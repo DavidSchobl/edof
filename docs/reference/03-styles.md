@@ -53,8 +53,8 @@ To list which fonts edof discovered on the current system:
 
 ```python
 import edof
-from edof.engine.text_engine import discovered_fonts
-print(discovered_fonts())
+from edof.engine.text_engine import list_system_fonts
+print(list_system_fonts())
 ```
 
 ---
@@ -180,7 +180,6 @@ cell.border_top = CellBorder(
     enabled = True,
     color   = (50, 50, 50, 255),
     width   = 0.3,           # mm
-    style   = "solid",       # "solid" | "dashed" | "dotted"
 )
 ```
 
@@ -267,9 +266,8 @@ If you need to convert between mm and pixels (e.g. for direct Pillow operations)
 from edof import mm_to_px, from_mm, to_mm
 
 px = mm_to_px(15.0, dpi=300)   # 15 mm at 300 DPI = 177.165 px
-mm = to_mm(177, dpi=300)       # round-trip back
-
-# from_mm() is alias of mm_to_px
+mm = to_mm(1.5, "cm")          # unit conversion: 1.5 cm -> 15.0 mm
+cm = from_mm(15.0, "cm")       # the other way: 15 mm -> 1.5 cm
 ```
 
 Calculations:
@@ -306,3 +304,18 @@ These are passed through to Pillow at export time. Most users stick with the def
 ## LayerEffect
 
 Photoshop-style layer effects (`drop_shadow`, `long_shadow`, `stroke`, `bevel`, `halftone`, `chromatic_aberration`, ...) live on the object's `effects` list, not inside the style objects above. They have their own reference page: [12 — Layer effects](12-effects.md).
+
+---
+
+## Link & anchor fields on TextRun (v4.4.0)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `link` | `str \| None` | External URL or `#<anchor_id>` |
+| `anchor` | `str \| None` | Stable link-target id |
+| `anchor_name` | `str \| None` | Display name of the target |
+
+A link run renders with `Document.link_style` (blue underlined by default)
+unless its own `color` / `underline` are set explicitly — an explicit run
+value always wins over the document link style. Details in the
+[Hyperlinks reference](13-hyperlinks.md).

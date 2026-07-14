@@ -15,7 +15,9 @@ if TYPE_CHECKING:
 def export_pdf(doc: "Document", path: str,
                vector: bool = True,
                dpi: Optional[int] = None,
-               embed_source: bool = True) -> None:
+               embed_source: bool = True,
+               image_format: Optional[str] = None,
+               image_quality: int = 80) -> None:
     """Export the document to PDF.
 
     vector=True (default): pure-Python vector PDF — searchable, copyable, small.
@@ -23,9 +25,15 @@ def export_pdf(doc: "Document", path: str,
     embed_source=True (default): embed the source .edof as a PDF file attachment
     so the document can be re-opened and edited from the PDF later. Disabled
     automatically when the document's permissions prohibit re-editing.
+    image_format (v4.4.0): None/"png" keeps images lossless (Flate);
+    "jpeg" embeds them as DCT-encoded JPEG at image_quality (1-100), which
+    shrinks photo-heavy files a lot. Transparency survives: an image's alpha
+    channel stays a lossless /SMask on top of the JPEG base.
     """
     if vector:
-        _export_pdf_vector(doc, path, embed_source=embed_source)
+        _export_pdf_vector(doc, path, embed_source=embed_source,
+                           image_format=image_format,
+                           image_quality=image_quality)
     else:
         _export_pdf_raster(doc, path, dpi)
 
@@ -34,7 +42,9 @@ def export_pdf(doc: "Document", path: str,
 #  v4.0  Vector export
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _export_pdf_vector(doc, path: str, embed_source: bool = True) -> None:
+def _export_pdf_vector(doc, path: str, embed_source: bool = True,
+                       image_format: Optional[str] = None,
+                       image_quality: int = 80) -> None:
     from edof.export.pdf_writer import PdfWriter
     from edof.utils.safe_eval import is_visible
 
@@ -44,6 +54,10 @@ def _export_pdf_vector(doc, path: str, embed_source: bool = True) -> None:
         subject = doc.description or "",
         creator = "edof v4.1.17.4",
     )
+
+    # v4.4.0: image compression choice, read by the image emit helpers
+    writer._img_format = (image_format or "").lower() or None
+    writer._img_quality = max(1, min(100, int(image_quality)))
 
     # v4.1.17.4: by default embed a copy of the source document inside the
     # PDF so it can be re-opened and edited by anyone with an EDOF editor.
@@ -129,7 +143,9 @@ def _emit_page_as_raster(pp, page, doc, writer, page_idx: int, dpi: float = 300.
     single full-page PNG XObject. Used when the page contains layer effects /
     blends / fractional opacity that PDF cannot represent natively."""
     from edof.engine.renderer import render_page
-    img = render_page(page, doc.resources, doc.variables, dpi=dpi)
+    from edof.engine.text_engine import suppress_view_marks
+    with suppress_view_marks():
+        img = render_page(page, doc.resources, doc.variables, dpi=dpi)
     # Flatten to RGB (PDF FlateDecode XObject expects RGB without alpha;
     # background was already composited by the renderer).
     if img.mode != 'RGB':
@@ -146,7 +162,9 @@ def _emit_page_as_raster(pp, page, doc, writer, page_idx: int, dpi: float = 300.
         else:
             img = img.convert('RGB')
     image_id = f"page_{page_idx}_raster"
-    writer.add_image(image_id, img.width, img.height, img.tobytes())
+    jd = _maybe_jpeg(writer, img)
+    writer.add_image(image_id, img.width, img.height,
+                     b"" if jd else img.tobytes(), jpeg_data=jd)
     pp.image(image_id, 0, 0, page.width, page.height)
 
 
@@ -184,13 +202,20 @@ def _emit_object(pp, obj, doc, writer):
     # (Complex-effects cases are handled at the page level via full-page
     # rasterization, not here; this function emits native PDF primitives.)
     rotation = float(getattr(obj.transform, 'rotation', 0.0) or 0.0) if hasattr(obj, 'transform') else 0.0
+    shear_x = float(getattr(obj.transform, 'shear_x', 0.0) or 0.0) if hasattr(obj, 'transform') else 0.0
     rotated = abs(rotation) > 0.01
-    if rotated:
+    sheared = abs(shear_x) > 1e-9
+    if rotated or sheared:
         t = obj.transform
         cx = t.x + t.width / 2.0
         cy = t.y + t.height / 2.0
         pp.save_state()
-        pp.rotate_at(rotation, cx, cy)
+        # match the renderer: local -> shear -> rotate, so apply rotation first
+        # in the PDF matrix stack (PDF concatenates, last cm applies first).
+        if rotated:
+            pp.rotate_at(rotation, cx, cy)
+        if sheared:
+            pp.shear_at(shear_x, cx, cy)
     try:
         if isinstance(obj, TextBox):
             _emit_textbox(pp, obj, doc)
@@ -210,7 +235,7 @@ def _emit_object(pp, obj, doc, writer):
         # they will have triggered full-page rasterization via the page
         # checker's _has_complex_effects sweep when relevant.
     finally:
-        if rotated:
+        if rotated or sheared:
             pp.restore_state()
 
 
@@ -234,7 +259,7 @@ def _emit_textbox(pp, obj, doc):
     # Text content
     if obj.runs:
         _emit_runs(pp, obj, t.x + pad, t.y + pad,
-                   t.width - 2 * pad, t.height - 2 * pad)
+                   t.width - 2 * pad, t.height - 2 * pad, doc=doc)
     else:
         text = obj.get_resolved_text(doc.variables)
         if not text: return
@@ -279,9 +304,30 @@ def _emit_textbox(pp, obj, doc):
                                    color=obj.style.color[:3])
 
 
-def _emit_runs(pp, obj, x_mm, y_mm, w_mm, h_mm):
-    """Emit rich-text runs as vector PDF text."""
+def _anchor_page_index(doc, anchor_id):
+    """v4.4.0: 0-based page index of the in-document link target span."""
+    if doc is None or not anchor_id:
+        return None
+    for pi, pg in enumerate(getattr(doc, "pages", None) or []):
+        objs = list(getattr(pg, "objects", None) or [])
+        i = 0
+        while i < len(objs):
+            o = objs[i]; i += 1
+            kids = getattr(o, "children", None)
+            if kids:
+                objs.extend(kids)
+            for r in (getattr(o, "runs", None) or []):
+                if getattr(r, "anchor", None) == anchor_id:
+                    return pi
+    return None
+
+
+def _emit_runs(pp, obj, x_mm, y_mm, w_mm, h_mm, doc=None):
+    """Emit rich-text runs as vector PDF text. v4.4.0: link runs also emit a
+    clickable /Link annotation (URI for external, /Dest for '#anchor'); the
+    rects of adjacent same-link words on a line are merged into one."""
     from edof.export.pdf_writer import measure_text_width, map_to_standard
+    from edof.utils.links import validate_link
 
     parent   = obj.style
     max_w_pt = w_mm / 25.4 * 72
@@ -345,6 +391,23 @@ def _emit_runs(pp, obj, x_mm, y_mm, w_mm, h_mm):
         elif parent.alignment == "right":  cur_x_mm = x_mm + w_mm - line_w_mm
         else:                               cur_x_mm = x_mm
 
+        # v4.4.0: contiguous same-link segment on this line -> ONE annotation
+        _link_seg = {"start": None, "end": None, "link": None}
+
+        def _flush_link():
+            if _link_seg["start"] is not None:
+                _safe = validate_link(_link_seg["link"])
+                if _safe is not None:
+                    _dp = (_anchor_page_index(doc, _safe[1:])
+                           if _safe.startswith("#") else None)
+                    if not _safe.startswith("#") or _dp is not None:
+                        pp.link(_link_seg["start"], cur_y_mm,
+                                _link_seg["end"] - _link_seg["start"], lh_mm,
+                                _safe, dest_page=_dp)
+            _link_seg["start"] = None
+            _link_seg["end"] = None
+            _link_seg["link"] = None
+
         for run, word, w_pt, rs, fs_pt in line:
             bg = rs.get("background")
             if bg and len(bg) >= 4 and bg[3] > 0:
@@ -361,7 +424,17 @@ def _emit_runs(pp, obj, x_mm, y_mm, w_mm, h_mm):
                                    font_family=rs["font_family"],
                                    font_size_pt=fs_pt,
                                    color=color[:3])
+            _lnk = getattr(run, "link", None)
+            if _lnk:
+                if _link_seg["link"] != _lnk:
+                    _flush_link()
+                    _link_seg["start"] = cur_x_mm
+                    _link_seg["link"] = _lnk
+                _link_seg["end"] = cur_x_mm + w_pt / 72 * 25.4
+            elif _link_seg["start"] is not None:
+                _flush_link()
             cur_x_mm += w_pt / 72 * 25.4
+        _flush_link()
         cur_y_mm += lh_mm
 
 
@@ -403,8 +476,10 @@ def _emit_shape(pp, obj):
                    fill=fill, stroke=stroke, width_pt=width_pt)
     elif obj.shape_type == SHAPE_LINE:
         if obj.points and len(obj.points) >= 2:
+            # v4.3.5.48: line points are LOCAL -> add the transform origin
             p1, p2 = obj.points[0], obj.points[1]
-            pp.line(p1[0], p1[1], p2[0], p2[1], color=stroke, width_pt=width_pt)
+            pp.line(p1[0] + t.x, p1[1] + t.y, p2[0] + t.x, p2[1] + t.y,
+                    color=stroke, width_pt=width_pt)
         else:
             pp.line(t.x, t.y, t.x + t.width, t.y + t.height,
                     color=stroke, width_pt=width_pt)
@@ -435,20 +510,73 @@ def _emit_shape(pp, obj):
             pp.path(shifted, fill=fill, stroke=stroke, width_pt=width_pt)
 
 
+def _maybe_jpeg(writer, rgb_img):
+    """v4.4.0: JPEG-encode an RGB PIL image when the export asked for lossy
+    images. Returns bytes or None (= keep lossless Flate)."""
+    if getattr(writer, "_img_format", None) not in ("jpeg", "jpg"):
+        return None
+    buf = io.BytesIO()
+    try:
+        rgb_img.save(buf, "JPEG",
+                     quality=int(getattr(writer, "_img_quality", 80)),
+                     optimize=True)
+    except Exception:
+        return None
+    return buf.getvalue()
+
+
 def _emit_imagebox(pp, obj, doc, writer):
-    if not obj.resource_id or obj.resource_id not in doc.resources: return
-    entry = doc.resources.get(obj.resource_id)
-    if not entry: return
+    # v4.4.0 (BUG #10 regression): resource_id may be a FILE PATH (batch image
+    # columns). The raster renderer resolves paths since 4.3.6.27; the vector
+    # PDF export still required a resource-store key, so batch-filled images
+    # were silently dropped from PDFs.
+    raw = None
+    if obj.resource_id and obj.resource_id in doc.resources:
+        entry = doc.resources.get(obj.resource_id)
+        if not entry: return
+        raw = entry.data
+    else:
+        import os as _os
+        rid = obj.resource_id
+        if rid and isinstance(rid, str) and _os.path.isfile(rid):
+            try:
+                with open(rid, "rb") as _f:
+                    raw = _f.read()
+            except Exception:
+                return
+    if raw is None:
+        return
     image_id = obj.resource_id
     try:
         from PIL import Image
-        img = Image.open(io.BytesIO(entry.data))
+        img = Image.open(io.BytesIO(raw))
         if img.format == "JPEG":
             writer.add_image(image_id, img.width, img.height, b"",
-                              jpeg_data=entry.data)
+                              jpeg_data=raw)
         else:
-            img = img.convert("RGB")
-            writer.add_image(image_id, img.width, img.height, img.tobytes())
+            # v4.4.0: preserve PNG transparency via an /SMask built from the
+            # alpha channel (before, transparent PNGs exported opaque).
+            if img.mode in ("RGBA", "LA", "P"):
+                rgba = img.convert("RGBA")
+                alpha = rgba.split()[3]
+                rgb = rgba.convert("RGB")
+                jd = _maybe_jpeg(writer, rgb)
+                if alpha.getextrema()[0] < 255:      # any real transparency
+                    writer.add_image(image_id, rgba.width, rgba.height,
+                                     b"" if jd else rgb.tobytes(),
+                                     has_alpha=True,
+                                     alpha_mask=alpha.tobytes(),
+                                     jpeg_data=jd)
+                else:
+                    writer.add_image(image_id, rgba.width, rgba.height,
+                                     b"" if jd else rgb.tobytes(),
+                                     jpeg_data=jd)
+            else:
+                img = img.convert("RGB")
+                jd = _maybe_jpeg(writer, img)
+                writer.add_image(image_id, img.width, img.height,
+                                 b"" if jd else img.tobytes(),
+                                 jpeg_data=jd)
     except Exception:
         return
     t = obj.transform
@@ -532,7 +660,7 @@ def _emit_table(pp, obj, doc):
                     def __init__(s, runs, style): s.runs=runs; s.style=style
                 _emit_runs(pp, _Tmp(cell.runs, cell.style),
                            cx + cell.padding, cy + cell.padding,
-                           cw - 2*cell.padding, ch - 2*cell.padding)
+                           cw - 2*cell.padding, ch - 2*cell.padding, doc=doc)
             elif cell_text:
                 font_name = map_to_standard(cell.style.font_family,
                                              cell.style.bold, cell.style.italic)
@@ -611,7 +739,10 @@ def _export_pdf_raster(doc, path: str, dpi: Optional[int] = None) -> None:
     pdf.setAuthor(doc.author or "")
     pdf.setSubject(doc.description or "")
     for page in doc.pages:
-        img = render_page(page, doc.resources, doc.variables, dpi or page.dpi)
+        from edof.engine.text_engine import suppress_view_marks
+        with suppress_view_marks():
+            img = render_page(page, doc.resources, doc.variables,
+                              dpi or page.dpi)
         buf = io.BytesIO(); img.save(buf, format="PNG"); buf.seek(0)
         pdf.setPageSize((page.width * mm, page.height * mm))
         pdf.drawImage(ImageReader(buf), 0, 0,

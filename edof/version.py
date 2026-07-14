@@ -9,10 +9,14 @@ typography values in pt and are migrated on load.
 """
 
 from __future__ import annotations
-__version__ = "4.3.0.4"
+__version__ = "4.4.0"
+# v4.4.0: format 4.3.0 — header/footer as a container of objects
+# (DocumentBody.header_objects / footer_objects), canonical band box ids, and
+# hyperlinks (TextRun.link/anchor/anchor_name + Document.link_style).
+# Old readers ignore the new keys; files without them load unchanged.
 FORMAT_MAJOR        = 4
-FORMAT_MINOR        = 2
-FORMAT_PATCH        = 19
+FORMAT_MINOR        = 3
+FORMAT_PATCH        = 0
 FORMAT_VERSION_STR  = f"{FORMAT_MAJOR}.{FORMAT_MINOR}.{FORMAT_PATCH}"
 
 # Oldest format version this library can read. Files with version

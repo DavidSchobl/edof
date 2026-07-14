@@ -8,12 +8,10 @@ The variable system turns documents into reusable templates. Variables are typed
 doc.define_variable(
     name="recipient",
     type="text",
-    default=None,
+    default="",
     required=True,
-    label="Recipient name",      # human-readable label (used in editor / CLI)
-    help="Person being awarded the certificate",
-    choices=None,                # for "text" type: list of allowed values
-    max_length=None,             # for "text" type: maximum string length
+    description="Person being awarded the certificate",
+    choices=None,                # optional list of allowed values
 )
 ```
 
@@ -162,12 +160,14 @@ doc.set_variable("verify_url", "https://verify.example.com/abc123")
 store = doc.variables
 
 store.names()                  # list of all variable names
-store.exists("score")          # bool
+store.get_def("score") is not None   # defined?
 store.get("score")             # current value (or default if not set)
-store.get_definition("score")  # VariableDef object
+store.get_def("score")         # VariableDef object
 store.set("score", 42)         # same as doc.set_variable
-store.unset("score")           # remove value (falls back to default)
-store.values()                 # dict of all current values
+store.reset_all()              # drop values (fall back to defaults)
+store.all_values()             # dict of all current values
+store.undefine("score")        # remove the definition entirely
+store.missing_required()       # names of required vars without a value
 ```
 
 ### VariableDef
@@ -175,7 +175,7 @@ store.values()                 # dict of all current values
 The metadata about a variable (separate from its current value):
 
 ```python
-defn = doc.variables.get_definition("score")
+defn = doc.variables.get_def("score")
 print(defn.name, defn.type, defn.default, defn.required)
 ```
 
@@ -307,3 +307,53 @@ vip_section.visible_if = "tier == 'gold' or score >= 90"
 ```
 
 See [reference/02-objects.md](02-objects.md#conditional-visibility-visible_if) for the full expression syntax.
+
+---
+
+## Text (run) variables — 3D Batch (v4.3.6+ / v4.4.0)
+
+Besides document-level `{name}` variables, any **span of text** can become a
+batch variable: the span gets a stable `rid` on its runs plus a human
+`var_name`, and a batch column bound to that `rid` fills it per row. The
+`rid` survives editing around the span and page reflow.
+
+**Naming (v4.4.0).** Every variable/column name is unique, always. An
+unnamed column gets a systematic name persisted from the object and
+attribute ("textbox-1.text", "shape-1.fill-color"; an object's own name
+from the Objects panel wins over the type prefix). A custom name that is
+already taken is auto-suffixed ("Name_2") at creation; renaming to a taken
+name is rejected in the table header editor and auto-suffixed in the
+variable rename flows. Uniqueness is case-insensitive and enforced at the
+model level (`BatchConfig.add_column`, `unique_header`, `header_in_use`),
+so the [{Header}] filename tags and CSV header matching are never
+ambiguous.
+
+**Creating:** select text in the editor and use the `{ }` toolbar button,
+**Ctrl+Shift+B**, or the right-click menu. The dialog also offers *Add to an
+existing variable* (the selection becomes another occurrence of it).
+
+**Managing (Objects panel).** Every variable appears as a virtual child of
+its text box (rainbow chip). A plain click focuses and highlights the span;
+the **checkbox** on the row selects it into the shared set — check several
+to edit shared run attributes or to link them. Right-click offers *Rename*,
+*Remove*, *Change range (use editor selection)* — the current editor
+selection becomes the variable's new span while its columns and values
+survive — and the shared attribute toggles.
+
+**Linking variables (v4.4.0).** *Link objects to variable…* can LINK other
+variables to a column: one value then drives every linked span, but each
+variable **keeps its own rid, name and panel entry** (`BatchColumn.
+extra_run_ids`). Unchecking unlinks. Redundant same-attribute columns of
+newly linked variables are dropped so two columns never fight over a span.
+
+**Highlighting.** *View → Show Variables* marks every variable span with a
+rainbow underlay; selecting a batch-table column highlights exactly the
+span that column drives. Both are view-only aids and never export.
+
+**Header/footer.** Variables work inside the header/footer band; the rid is
+persisted to the body template so it survives repagination (see the
+Header & Footer reference).
+
+**Typing at a span boundary** never extends the span: new text typed right
+after a variable (or anchor/link) is plain — the identity does not leak
+into what you type next; typing *inside* the span still belongs to it.

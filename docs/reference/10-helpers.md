@@ -232,36 +232,17 @@ page.add_kv_list(15, 35, 180, [
     ("Account Mgr",   "{manager_name}"),
 ])
 
-# Three metric tiles in a row
-with page.row(y=75, gap=5, height=40) as r:
-    r.add_metric_widget(60, "Revenue", "1,520,000 CZK", "+15%", value_color=(50,130,80))
-    r.add_metric_widget(60, "Orders",  "147",            "+8%",  value_color=(50,130,80))
-    r.add_metric_widget(60, "Active",  "92%",            "−2%",  value_color=(180,80,50))
+# Three metric tiles in a row (page.add_metric with explicit coordinates)
+page.add_metric(15,  75, 58, 40, "Revenue", "1,520,000 CZK", "+15%",
+                value_color=(50, 130, 80, 255))
+page.add_metric(76,  75, 58, 40, "Orders", "147", "+8%",
+                value_color=(50, 130, 80, 255))
+page.add_metric(137, 75, 58, 40, "Active", "92%", "-2%",
+                value_color=(180, 80, 50, 255))
 
-# (Note: row context manager doesn't have add_metric_widget — that's pseudocode for the example.
-#  The actual approach is to add_metric on the page directly with the X positions you want.)
-
-# Detail table
-page.add_table(
-    x=15, y=130, w=180,
-    rows=[["Date", "Description", "Amount"]] + [
-        [r['date'], r['desc'], r['amount']] for r in records
-    ],
-    header=True,
-    alternating=True,
-)
-
-# Footer
-page.add_textbox_auto(
-    x=15, y=270, w=180,
-    text="Prepared by: {manager_name} on {date}",
-    font_size=8,
-    color=(120, 120, 120),
-)
-
-doc.define_variable("customer_name", required=True)
-doc.define_variable("manager_name", required=True)
-doc.define_variable("date", type="date")
-
-doc.save("template.edof")
+# Or let a row context place textboxes left-to-right for you
+with page.row(y=120, gap=5, height=12) as r:
+    r.add_textbox(60, "Column A")
+    r.add_textbox(60, "Column B")
+    r.add_textbox(60, "Column C")
 ```

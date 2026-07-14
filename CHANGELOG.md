@@ -1,3 +1,3582 @@
+## [4.4.0] - 2026-07-02
+
+Two big pieces land here: the header/footer rework (containers of objects,
+batch variables inside) and hyperlinks. File format bumped once, to 4.3.0
+(all new keys additive; old files load unchanged, old readers ignore them).
+
+### Added, header/footer rework
+- **Header/footer as a container of objects.** DocumentBody gained
+  header_objects / footer_objects: template objects of any type (TextBox,
+  ImageBox, Shape, ...). Every page receives a literal clone of each template
+  with the SAME id, so rendering, selection, batch refs and variable rids work
+  per page while the single source of truth stays on the body. Editing any
+  clone writes back to the template and re-syncs every page. Objects panel
+  context menu: "Move to header", "Move to footer", "Detach from
+  header/footer". {page_number} tokens stay a band-text feature; container
+  clones are literal copies so writeback is lossless.
+- **Batch variables in the header/footer.** The band boxes carry a canonical
+  id on every page (hf_header / hf_footer, migrated automatically for older
+  files at pagination), so one batch ObjectRef addresses the band everywhere
+  and a document-scope row fills the header on every page. Making a variable
+  in the header/footer inline editor persists the rid to the body template
+  immediately (survives repagination). The 4.3.6.7 block dialog is gone;
+  run-attribute toggles work in the band too.
+- **Rid ops mirror into header/footer templates.** Remove, rename, merge and
+  change-range of a text variable also update the band template runs and
+  container object runs. The orphan-variable GC counts template rids as
+  present, so toggling the band off does not drop its columns.
+
+### Added, hyperlinks
+- **Link as a run format, like bold/italic.** TextRun gained `link`: either an
+  external target (http/https/mailto URL) or an in-document jump written as
+  "#<anchor_id>". Toolbar button, Ctrl+K and the right-click menu share one
+  dialog (external URL field, or a picker of marked targets). Removing a link
+  is in the same dialog and the context menu.
+- **In-document link targets (anchors).** "Mark as link target (anchor)" names
+  the selected span; the id lives on the runs (like a rid) so it survives
+  editing around it and page reflow. Following the link switches to the
+  target's page, opens the editor there and selects the span.
+- **Document link style with per-link overrides.** Default blue underlined;
+  Document menu: "Link style..." edits colour, underline and hover colour for
+  every link in the document. A link with explicit run formatting keeps it,
+  which is how one link is re-styled individually. Stored as
+  Document.link_style.
+- **Hover + Ctrl+click in the editor.** Hovering a link tints it with the
+  hover colour; holding Ctrl shows the pointing hand and Ctrl+click follows
+  the link (a plain click keeps editing, Word style).
+- **Ctrl+click works directly on the canvas too**, outside any inline editing
+  session, in BASIC mode as well as document mode: clicking a link span on the
+  page follows it (rotated text boxes: follow from the inline editor).
+- **Viewer follows links on plain click.** External links open the browser;
+  in-document links jump to the target page. Panning still works; rotated
+  text boxes are skipped (editor feature).
+
+### Fixed
+- Pagination re-syncs header/footer container clones on every pass; stale
+  clones (template removed, band disabled) are dropped from the pages.
+- Run merge in the inline editor (_normalize_runs) ignored link/anchor
+  attributes, so a freshly made link adjacent to same-formatted text merged
+  back and silently lost the link.
+
+### Fixed, beta review (security + data loss)
+- **SECURITY: DoS in the visible_if evaluator.** safe_eval allowed an
+  unbounded ** so an untrusted .edof with "9**9**9" froze the process. The
+  exponent is capped (|exp| <= 64), integer results are capped at 4096 bits,
+  and string/list repetition and concatenation are capped at 10k elements.
+  Sane expressions are unaffected; anything over the caps evaluates to None
+  (falsy) like any other invalid expression.
+- **Recovery key now unlocks in any typed form.** The recovery slot used to be
+  keyed by the dashed display form, so typing the key without dashes or in
+  lowercase never matched (the normalizing branch was dead code). The slot is
+  now keyed by the normalized form; the raw form is still tried for files
+  written by older builds.
+- **Second save() on one PdfWriter produced a corrupt PDF.** Finalisation
+  objects (page contents, /Pages, /Info, /Catalog) were appended to the
+  object list without a reset, so the second save wrote duplicate catalogs
+  and a wrong /Size. save() now snapshots the object list and restores it,
+  making it idempotent (byte-identical output).
+- **.docx round-trip re-emboldened explicitly non-bold runs.** Import
+  collapsed bold/italic/underline False (explicitly off) to None (inherit).
+  The tri-state is preserved now, and enum underline values from python-docx
+  are coerced sanely.
+- **RTF import: Word files decoded with garbage and wrong underline.**
+  The \uNNNN decoder ignored the \ucN skip count, so cp1252 fallback bytes
+  leaked into the text as duplicates; \ul0 (underline OFF) switched underline
+  ON. Both fixed (the skip count is honoured with group scoping); \par
+  immediately followed by \page no longer creates a phantom empty paragraph.
+  The RTF generator string also stopped claiming edof 4.0.3.
+- **Docs: the permission model is spelled out.** Every password slot wraps the
+  same content key, so levels are honor-system enforcement by the library,
+  not cryptographic isolation; the encryption reference now says so
+  explicitly and documents recovery-key normalization.
+
+### Fixed, beta review round 2 (link export + PDF correctness)
+- **Links now EXPORT.** PDF: every link run emits a /Link annotation (adjacent
+  same-link words on a line merge into one /Rect); external targets via
+  /A /URI, in-document anchors via /Dest [page /Fit] resolved to the target
+  page. SVG: link runs are wrapped in <a href / xlink:href> (new-tab target
+  for external). Before, exports showed blue underlined text that was not
+  clickable.
+- **SECURITY: link targets are validated everywhere.** New shared
+  edof.utils.links.validate_link whitelists http/https/mailto and #anchors
+  (bare domains normalize to https://). Applied when a link is CREATED
+  (editor dialog + set_link_on_selection return False on refuse), when it is
+  FOLLOWED (editor, canvas, viewer; a link stored in an untrusted file cannot
+  smuggle javascript:/file:/data:) and when it is EXPORTED (PDF/SVG never
+  emit an unsafe scheme).
+- **PDF quadratic Bezier segments render correctly.** Q -> C conversion now
+  uses the proper degree elevation (C1 = P0 + 2/3(Q-P0), C2 = P2 + 2/3(Q-P2))
+  with the current point tracked across M/L/C/Q/Z. The old code used the
+  quadratic control point as BOTH cubic control points, so exported curves
+  visibly differed from the PNG renderer.
+- **Transparent PNGs export transparent.** add_image emits a grayscale /SMask
+  XObject built from the alpha channel (the has_alpha/alpha_mask parameters
+  were accepted but ignored before); the imagebox export path feeds it
+  whenever the source has real transparency.
+- **Silent failures now speak.** A decrypted variable value that fails
+  re-validation is logged to doc._error_state instead of vanishing; PDF
+  import table-detection crashes are logged; batch bitmap export closes each
+  page image instead of holding every RGBA buffer until GC.
+- **Cleanup.** Dead engine/textbox_flow.py removed (~1280 lines, replaced by
+  document_paginate since v4.1.23). add_page() defaults only on None, an
+  explicit width=0/dpi=0 is no longer silently replaced. The 4362x render
+  test files use pytest tmp_path instead of hardcoded /tmp paths.
+
+### Fixed, document-mode round (variables, header/footer, exports)
+- **Batch preview values can no longer leak into the document.** While a row
+  is previewed the inline editor shows a MIRRORED, value-substituted copy of
+  the runs; a commit fired in that state (typically by clicking into the
+  batch panel) used to write the preview values into the live object, and for
+  a header/footer into the SHARED TEMPLATE, which repaginated, refreshed the
+  panels, re-mirrored and looped (the "cyclic refresh" with a header
+  variable). Commits now always restore and write the LIVE runs; a cancelled
+  session drops the mirror snapshot.
+- **Folding one variable into another no longer looks like a vanish.** The
+  Objects panel labels a variable whose rid lives on several separate spans
+  with the span count ("name (x2)"); the fold keeps every span's text (that
+  was already correct) and now the panel says so.
+- **Multi-select of variables in the Objects panel works.** Ctrl+clicking a
+  second variable used to collapse back to one item: the currentItemChanged
+  signal re-focused a single variable and the panel refresh re-selected only
+  the primary. The single-select signal is now suppressed during a
+  multi-selection, the canvas remembers the full vid list, and refreshes and
+  _on_sel re-select the WHOLE set.
+- **"Mark as link target" is discoverable.** New anchor toolbar button next
+  to the link button (the right-click menu entry stays), so in-document links
+  can actually be authored without hunting.
+- **Header/footer members are visible in the Objects panel.** Container
+  clones (and their templates) carry a "header"/"footer" badge in the row.
+- **View-only marks never export.** The variable rainbow and the focus
+  highlight are suppressed for every export (bitmap single/all/bytes, raster
+  PDF, print) and restored afterwards; Show Variables ON no longer leaks
+  colours into output. Both modes.
+- **Header/footer editing opens on a SINGLE click** (double-click still
+  works), and the guide band is WHITE with a neutral dashed outline instead
+  of the blue tint.
+- **Bitmap export dialog can export ALL pages at once** (both modes): a
+  checkbox turns the chosen file name into a numbered series
+  (name_p1.png, name_p2.png, ...) at the selected DPI/format.
+
+### Changed, variables round 2 (feedback on the first round)
+- **Linking variables no longer merges identities.** New model: the Link
+  dialog LINKS variables via the column's extra_run_ids: one value drives
+  every linked span, but each variable KEEPS its own rid, name and Objects
+  panel entry (nothing shows "(x2)", nothing vanishes). Unchecking in the
+  dialog unlinks. Redundant same-attribute columns of newly linked variables
+  are dropped so two columns never fight over one span. Serialized
+  (additive key), the old fold path is retired from the dialog.
+- **Variable multi-select via CHECKBOXES.** The vrun rows in the Objects
+  panel now carry a checkbox; checking several forms the shared set (rainbow
+  highlight + shared-attributes targets). The rows are excluded from the Qt
+  selection model entirely, so ctrl+click can no longer repaint rows oddly or
+  touch the canvas object selection; a plain click still focuses the
+  variable's span.
+- **Typing after a span no longer extends it.** New text typed at the END of
+  a variable / anchor / link span is plain (character formatting continues,
+  the identity does not); typing INSIDE a span still belongs to it. This
+  stops the rainbow from swallowing everything typed after a variable.
+- **Link targets (anchors) can be removed** from the anchor toolbar button
+  (it toggles on an existing target) and from the right-click menu
+  ("Remove link target").
+- **Optional link-target highlight.** View menu: "Show Link Targets" marks
+  anchor spans with a translucent red -> blue gradient. Default OFF, and the
+  export suppression covers it like the variable rainbow.
+
+### Fixed, follow-up (header/footer click + undo caret)
+- **Single-click into the header/footer band no longer breaks the editor.**
+  The first implementation consumed the mouse PRESS, bypassing the normal
+  press bookkeeping; the release handler then ran against a broken state
+  (body rendered hidden/yellow, no caret, canvas stuck). The press now goes
+  through the normal handling (commit + selection), the switch happens on
+  RELEASE when the click didn't turn into a drag, deferred one event-loop
+  turn, and the body's sticky re-entry is suppressed for the switch. Entering
+  the band, typing, committing back to the template and re-entering all work.
+- **Undo places the caret at the site of the UNDONE change.** Ctrl+Z used to
+  restore the caret stored with the OLDER snapshot, which could be an
+  unrelated spot far from the change being undone (disorienting jump). The
+  caret now follows the step being left; redo behavior is unchanged; offsets
+  are clamped to the restored text.
+
+### Changed, inline switching REFACTOR (document mode)
+- **One code path for switching text editing between the body, header and
+  footer.** _switch_inline_to is now the single choke point: it commits the
+  open session (restoring live runs when a batch preview mirror is active),
+  suppresses the body's sticky re-entry, neutralises drag/lasso/pan state,
+  starts the target editor, places the caret AT THE CLICK POSITION and keeps
+  the viewport still; re-entrant calls are ignored. A single click on the
+  header/footer band OR on the body switches editing synchronously on the
+  press, and the matching release is swallowed, so no downstream handler ever
+  sees a half-handled click (the previous two attempts each left some state
+  behind). The body remains unselectable as an object; its rect is tested
+  directly for the switch. Covered by a press+release integration test:
+  body -> header -> type -> body -> header.
+
+### Fixed, switching focus (why typing into the header did "nothing")
+- **The switch now takes the keyboard focus.** The synchronous switch consumes
+  the mouse press, so Qt's default focus-on-click for the view never runs;
+  when the keyboard focus sat in a side panel (batch panel field, spinbox...),
+  the freshly opened header editor never received a single keystroke: click
+  appeared to do nothing. _switch_inline_to now activates the window, focuses
+  the VIEW first and re-asserts the proxy/editor focus after opening.
+  Covered by a test that parks the focus in a foreign QLineEdit and verifies
+  the click pulls it into the editor chain.
+- Debug logging along the whole switch path (doc_click_switch.hit /
+  switch_inline.ok / start_failed / exceptions) so any remaining machine
+  -specific refusal shows up in the Help debug log immediately.
+
+### Fixed, header typing round 3 (preview lock + GL viewport focus)
+- **An active batch-row preview no longer silently blocks typing.** The
+  preview locks the template read-only and the editor swallowed every
+  keystroke without a word. Now: clicking into a text box / band drops the
+  preview (editing intent wins), and typing into an already open read-only
+  editor drops it too and processes the key. Recording is untouched.
+- **GL viewport focus.** On the GPU canvas (QOpenGLWidget viewport) the
+  keyboard focus is now set on the VIEWPORT as well as the view, plus a late
+  (60 ms) re-assert after the switch, because the GL surface can finish its
+  activation after the first focus pass.
+- **Key-delivery diagnostics.** The text editor logs every received key
+  (Help -> Debug log) with the read-only flag and the header/footer role, so
+  a machine where typing "does nothing" shows immediately whether keys reach
+  the editor at all.
+
+### Fixed, header typing FOUND IT (band overlay painted over the editor)
+- **The header/footer band decoration hid the editor.** The band is painted
+  in drawForeground, i.e. OVER every scene item -- including the band's own
+  rendered text and the open inline editor. The 4.4.0 "white band" change
+  gave it an OPAQUE white fill, so from that build on the header editor,
+  its caret and everything typed were painted over by a white rectangle:
+  the debug log proved keys arrived, text was inserted and committed, yet
+  nothing was visible. The band now has NO fill (the page is already white,
+  which is the requested look), keeps the neutral dashed outline + hint, and
+  the decoration is skipped entirely while that band is being edited.
+  Pixel-level regression test: the band interior must stay untouched when
+  painted over a red canvas, and nothing may paint while editing.
+
+### Fixed, UI flicker with an enabled header/footer
+- **Endless repagination loop through band-style padding.** Pagination step 1
+  forces padding to 0 on every document box (a body-layout rule) and reports
+  the document changed; step 4 then re-applied the STORED band template style,
+  which could carry a non-zero padding, re-arming the zero -> restore -> zero
+  cycle. Result: every idle repagination reported changed=True while a
+  header/footer was enabled, cascading into cache invalidation, re-render and
+  panel repaints -- the batch panel (and more) flickered at the idle rate.
+  Fixed on both ends: _apply_hf_style zeroes padding after applying the
+  template (heals old documents that already store a padded style), and the
+  band commit never persists padding into the template again. Regression
+  test: a second no-op paginate must report changed=False even with a
+  poisoned stored style.
+
+### Fixed, tester round (BUG #10-#13)
+- **BUG #10, batch image regression closed for good.** The raster renderer
+  kept the 4.3.6.27 path fallback, but the VECTOR exports (PDF, SVG) still
+  required a resource-store key, so batch-filled maps/flags/photos silently
+  vanished from exports ("in one output they were there, in another not").
+  Both exports now load a file-path resource_id from disk, AND
+  apply_row_to_document materialises file_path image columns into the
+  resource store (one resource per distinct path), so the document is
+  self-contained after apply: save, reload and every output see the image.
+- **BUG #11, fonts.** (a) doc.save(embed_fonts=True) / doc.embed_used_fonts()
+  embeds every family+weight the document's text actually uses (pages, runs,
+  tables, header/footer templates and containers) from the system font
+  registry; idempotent, skips families already embedded. (b) Embedded fonts
+  now resolve through a weight-aware registry built from the REAL family
+  name in each font file's name table: "Nunito Sans" matches
+  "NunitoSans-Regular.ttf", bold/italic pick the right file, and rich-text
+  RUNS get embedded fonts too (before, only plain textboxes did, via a
+  brittle filename substring).
+- **BUG #12, zoom drift (WYSIWYG).** Text layout geometry is now always
+  computed at ONE reference DPI (300) and scaled to the render DPI; glyphs
+  still rasterise at the target DPI. Line breaks and positions are identical
+  at every zoom level and every export DPI (test pins 96/150/300/432).
+  Side benefit: the measurement caches stop re-measuring per zoom level.
+- **BUG #13, effect-heavy pages on CPU.** Large-radius Gaussian mattes
+  (drop/inner shadow, glows, bevel soften) now blur on a downscaled matte
+  and upscale back -- a Gaussian is scale-invariant, parity measured at
+  mean |diff| < 0.1/255. Together with the object cache the WYSIWYG editing
+  path on a recipe-profile page (page-wide translucent background, card
+  with 3 drop shadows, mono halftone strip, text) measures: first render
+  0.36 s @150 dpi / 0.84 s @300 dpi, unchanged-page re-render 20/108 ms,
+  TEXT EDIT re-render 29/125 ms (unchanged effect objects come from cache).
+
+### Hardened, PDF output validity
+- Reported "PDFs would not open" could not be reproduced on the current
+  build: every export flavour (links + /Dest anchors, SMask images, effects,
+  source attachment, raster, double export, document mode with header/footer
+  and batch apply, parentheses/diacritics in URLs) passes qpdf --check and a
+  byte-exact xref offset verification. Two guards added anyway: the writer
+  now FAILS LOUDLY if any reserved object placeholder is left unfilled
+  (that class of bug would previously produce a silently corrupt file), and
+  a PDF validity battery (pypdf + xref byte checks) is part of the suite, so
+  any structural regression trips the gate immediately.
+
+### Added, batch export completed
+- **Batch Generate covers the full matrix now.** Scope: current page or ALL
+  pages. Formats: png/jpg (file per page with the [PAGE] token, auto-added
+  as _p[PAGE] when the pattern lacks it), svg, pdf (single-page or
+  multipage), and NEW: edof (single-page document or the whole document per
+  row). The engine lives in edof.batch.generate.export_batch (UI-independent,
+  CLI-ready); the Generate dialog gained the page-scope radios, the edof
+  format and a "+ Page" token button.
+- **Two source modes for the edof format.** "Integrate external sources
+  into the file": one self-contained .edof (file-path images are
+  materialised into resources by apply, used fonts embedded via
+  embed_used_fonts). "Keep sources as files next to the .edof and ZIP": the
+  row's document is written with a sources/ folder holding the referenced
+  files, objects point at the RELATIVE path and the pair ships as
+  <name>.zip -- an editable bundle. Document.load resolves relative
+  resource paths against the .edof location, so an unpacked bundle renders
+  from any working directory.
+- **Filename tag templates apply everywhere.** [ROW_NUMBER[:pad]],
+  [ROW_NAME], [{Header}[:upper|lower]] and the new [PAGE[:pad]] drive every
+  generated name, with collision de-duplication.
+
+### Performance, cookbook profiling (real-world batch document)
+- Profiled on the actual cookbook (15-page batch template, 261 rows x 77
+  columns, photo-heavy pages, halftone + multi-shadow recipe pages, plus the
+  261-page book). Findings and fixes:
+- **Halftone DPI floor was the big one.** The WYSIWYG lattice pin (24 px per
+  halftone cell) forced recipe pages to render at ~470-600 DPI; one CPU
+  render took 4.6 s, paid on first paint and every page-cache invalidation.
+  The lattice is visually converged at 12 px/cell: floor halved and capped
+  at 450. Recipe-page first paint: 4.6 s -> 1.2 s (~4x), cached re-render
+  38 ms; the lattice stays zoom-stable (the floor still fixes its DPI).
+- **Decoded-image cache.** Image sources were PIL-decoded from resource
+  bytes on EVERY render; photo pages paid ~0.5 s per paint in JPEG decodes.
+  Decoded RGBA sources are now a bounded LRU keyed by resource id + size
+  (file-path images keyed by path + mtime). Photo page: 0.21 s -> 0.09 s
+  after first decode; batch generate reuses decodes across rows.
+- Object tile cache capacity 512 -> 768 (a 30-object page x several DPI
+  buckets was near the cap and evictions caused re-renders).
+- File load itself was never the problem: 0.10 s for the batch template,
+  0.50 s for the 261-page book; panel rebuild with 261x79 cells 0.23 s.
+
+### Performance, beta review
+- QR recolouring dropped the per-pixel Python loop (O(w*h) per QR) for a
+  1-bit mask + two flat fills.
+- {variable} substitution in table cells precomputes the replacement map once
+  per table instead of walking every variable for every cell (renderer and
+  SVG export both).
+
+### Format
+- FORMAT_VERSION 4.2.20 -> 4.3.0. New optional keys: DocumentBody's
+  header_objects + footer_objects, TextRun.link + anchor + anchor_name,
+  Document.link_style. compatibility(): older files report "older" and load
+  with automatic band-id migration; nothing else changed shape.
+
+### Added, batch generation (final addition)
+- **Single multipage output.** The Generate dialog (pdf/edof) offers "File
+  per row" vs "Single multipage file": one file with every row's page(s)
+  appended in row order. The single .edof is baked, fixed pages with the
+  values filled in, no document body and no batch config, so it reopens
+  exactly as generated and never re-paginates the rows away. Page ids of
+  appended rows are freshly assigned; resources are merged. The filename UI
+  switches with the mode: tags per row vs one plain filename (tag helpers
+  disabled, preview shows the one name).
+- **Progress + cancel.** Generation runs with a progress dialog (row x of
+  y) and a working Cancel; the UI no longer freezes. Engine side:
+  export_batch(progress=callable) is called between rows, returning False
+  stops cleanly (finished files stay, errors gets a "Cancelled" entry).
+- **File menu entry.** "Generate batch..." sits in the File menu, so
+  generation does not require opening the batch table dock.
+
+### Added, image compression (small files)
+- **Document.recompress_images(format, quality).** Re-encodes embedded image
+  resources: "png" lossless, "jpeg" lossy at 1-100. Images with real
+  transparency always stay lossless PNG (JPEG has no alpha), a resource is
+  only replaced when the re-encoded bytes are SMALLER (never inflates), fonts
+  and other non-image resources untouched. Returns (n, bytes_before,
+  bytes_after). Batch: export_batch(image_format=, image_quality=) applies it
+  to pdf/edof outputs, per row and single-file alike.
+- **PDF export with JPEG images.** export_pdf(image_format="jpeg",
+  image_quality=N) embeds images as DCT streams; alpha channels survive as a
+  lossless /SMask over the JPEG base. Full-page rasterized pages (layer
+  effects) use the same setting. Photo-heavy PDFs shrink by an order of
+  magnitude.
+- **Editor UI.** Export PDF dialog and the batch Generate dialog gained an
+  "Images" choice (Lossless / JPEG 90 / 75 / 60 / 40 %). File menu: "Save
+  optimized copy..." saves a re-encoded copy (deep copy, the open document
+  keeps its originals) and reports MB before/after.
+
+### Fixed
+- **Editor PDF export TypeError.** The Export PDF dialog called
+  doc.export_pdf(embed_source=...) but the Document wrapper did not accept
+  the kwarg, so the export died with a TypeError into the generic error
+  dialog. The wrapper now accepts and forwards embed_source.
+
+### Fixed, release deploy
+- **numpy is now a declared core dependency.** The deploy test gate (fresh
+  venv) exposed that numpy was a silent hard requirement all along: the
+  render engine imports it at runtime for gradients (_render_gradient),
+  16-bit export and the layer effects (bevel, halftone, long shadow,
+  chromatic aberration, EDT, ...), so a clean "pip install edof" crashed on
+  the first gradient render. numpy>=1.24 moved into
+  [project.dependencies]; README and INSTALL updated (core = Pillow +
+  numpy). Five older test modules also gained pytest.importorskip("numpy")
+  as a defensive measure.
+
+### Fixed, unique variable names (major)
+- **Two columns could share a name.** Creating variables could produce
+  identically named columns, which made the batch table ambiguous and broke
+  [{Header}] filename tags and CSV header matching. Names are now unique by
+  construction, case-insensitive, enforced at the model level:
+  BatchConfig.add_column auto-suffixes a taken custom name (Name_2, ...) and
+  gives colliding unnamed columns a generated name; new helpers
+  header_in_use / unique_header / system_header.
+- **Systematic default names are persisted.** An unnamed column now stores
+  its systematic label ("textbox-1.text", "shape-1.fill-color", object's own
+  name wins over the type prefix) as its real name instead of being an
+  empty-name display-only label.
+- **Every naming path checked.** Add text variable dialog auto-suffixes a
+  typed name that is already used (status shows the final name); the table
+  header rename rejects taken names with a warning (blank regenerates a
+  unique name); Rename variable flows auto-suffix against foreign columns;
+  the editor's fallback inlinetextNN counter now also counts run var_names,
+  not only columns.
+
+### Docs, README rework (beta tester feedback)
+- The README (PyPI landing page) now leads with a plain-language pitch:
+  what edof actually does, who it is for, and why to use it instead of
+  Word + export, a PDF editor, or Photoshop (concrete pain points, not
+  feature dumps). Real-world use cases up front: invoices, card decks,
+  certificates, catalogs, posters.
+- 3D Batches promoted to the headline feature with a short runnable
+  example (multiple page templates sharing variables, any parameter as a
+  column, per-row files or one multipage document) and a card-deck
+  walkthrough in words.
+- "What's new in 4.4.0" section: batch export engine, hyperlinks,
+  header/footer containers, image compression, WYSIWYG zoom stability.
+  Status section refreshed to include the 4.4.0 subsystems. The docs
+  landing page opens with the same pitch.
+
+### Docs, final verification pass
+- Every python code block in docs/ (reference, advanced, cookbook,
+  quickstart) is now executed as validation. Fixed the drift that had crept
+  in: discovered_fonts -> list_system_fonts, CellBorder has no style kwarg,
+  to_mm/from_mm are unit converters (not dpi), VariableStore uses get_def /
+  all_values / reset_all / undefine (docs claimed exists/get_definition/
+  values/unset), define_variable takes description= (docs claimed label= /
+  help= / max_length=), export_to_bytes takes page_index= and has no pdf
+  format, render_page takes (page, resources, variables), make_table has no
+  style= presets (use header_bg/alt_bg), encryption signature listings moved
+  to text blocks.
+- page.row() and page.column() are now real context managers (the helpers
+  page showed "with page.row(...)" that did not actually work; the
+  metric-tiles example now uses the real page.add_metric API).
+- New reference page 15-batch.md: the 3D Batch model (ObjectRef,
+  BatchColumn incl. run_id/extra_run_ids, BatchRow, BatchConfig), the
+  attribute registry (describe_object, find_descriptor, apply_value) and
+  pointers to the export engine and filename tags.
+- mkdocs nav completed (12-effects and the effects-poster cookbook were
+  missing entirely; 15-batch added); mkdocs build --strict is clean.
+  Repo-relative links out of docs/ replaced with GitHub URLs.
+
+### Docs
+- Complete documentation pass for 4.4.0. New reference pages: Hyperlinks
+  (13-hyperlinks.md: model, editor and viewer behaviour, document link style,
+  URL validation, PDF/SVG export) and Header & Footer (14-header-footer.md:
+  band text and tokens, canonical band ids, object containers, batch
+  variables in bands, storage keys). Updated: Styles (TextRun link/anchor
+  fields), Variables (text run variables, panel checkboxes, linking via
+  extra_run_ids, change range, boundary typing), Export (export_batch engine,
+  scope and formats, sources modes, filename tags, font embedding), Desktop
+  editor (document mode workflow, single click bands, link UI, undo caret,
+  PNG all pages), file format internals (all 4.3.0 additive keys). API.md
+  regenerated; mkdocs nav and docs index extended.
+
+## [4.3.6.28] - 2026-07-02
+
+### Added
+- **Change range for an existing text variable.** Objects panel, context menu on
+  a variable: "Change range (use editor selection)". The current selection in
+  the inline editor becomes the variable's new span; the rid, every batch column
+  bound to it and all record values are kept. Before, re-spanning meant deleting
+  the variable (losing its columns) and creating it again.
+- **Span highlight for the focused batch column.** Selecting a cell or column in
+  the bottom batch table highlights, on the canvas, the exact text span that
+  column's values drive (rainbow mark), in the normal render AND in the batch
+  row preview, independent of the Show Variables toggle. Clears when the column
+  focus leaves run-bound columns or the selection changes.
+
+### Fixed
+- **Removing or renaming a variable while the inline editor was open got
+  reverted by the next reflow.** Remove/rename only touched the page objects'
+  runs; the open inline editor holds a COPY of them, and the reflow refreshes
+  the page box FROM that copy, resurrecting the old rid/var_name (same class of
+  bug as the 4.3.6.23 merge fix). Both ops now mirror the edit into the open
+  editor's runs and sync.
+- **Dead batch columns after a variable's text was deleted.** The orphan cleanup
+  dropped the columns from the config but never rebuilt the batch panels, so the
+  bottom table (and the template panel) kept showing a column that no longer
+  existed. The cleanup now rebuilds them.
+- **Variable operations now land as exactly ONE labelled undo step.** Remove
+  pushed two snapshots (before and after) plus the coalesced object-edit burst
+  pushed a third, so undoing a remove cost dead Ctrl+Z presses; merge and rename
+  pushed only the pre-state; add-variable and attribute toggles relied on the
+  generic burst ("Edit"). All variable ops (add, merge, rename, remove,
+  attributes, change range) now flush pending edit bursts first and commit one
+  named step.
+- **Gradient stop alpha was ignored on rect/ellipse shapes.** The fill branch
+  replaced the gradient's alpha channel with the shape mask, so stops fading to
+  alpha 0 rendered fully opaque. The mask now multiplies with the gradient's own
+  alpha (matching the path branch) and fill_opacity is applied there too.
+- Headless robustness: the module-level render signals object is recreated when
+  Qt tore it down after a previous QApplication (offscreen test runs crashed
+  every canvas constructed afterwards).
+
+## [4.3.6.27] - 2026-06-16
+
+### Fixed
+- **BUG #7: object opacity distorted halftone (and other effects) instead of
+  scaling them linearly.** Opacity was baked into the dispatch buffer BEFORE the
+  effects ran, and halftone uses the layer alpha to size its dots -- so opacity
+  fell off ~cubically (0.5 opacity gave ~0.1 coverage, 0.25 gave ~0.01) as it
+  shrank the dots AND faded them. The object body + effects now render at full
+  opacity into a separate layer whose alpha is scaled by opacity once, at the
+  end, so opacity is linear (0.5 -> 0.5 coverage) and the dot raster keeps its
+  geometry. Only engages when opacity < 1; the opacity == 1 path is unchanged.
+- **BUG #8: batch could not fill an image from a file path.** The ImageBox batch
+  descriptor set resource_id directly to the CSV value, but that value is a file
+  PATH, not a resource key, so the renderer found nothing. The image render now
+  resolves resource_id as a filesystem path when it is not a known resource key
+  (the descriptor is labelled "Image (file/resource)"), so a batch column of
+  image paths fills photos/backgrounds as expected.
+
+### Validation
+- Four tests: opacity linear with/without effects, image-from-path render, batch
+  descriptor image path. Full suite 525 passed. FORMAT_PATCH 20.
+## [4.3.6.26] - 2026-06-16
+
+### Performance
+- **Gradient fill vectorised (~100x faster).** _render_gradient ran a per-pixel
+  Python loop calling color_at() for every pixel -- ~2.2M calls for an A4 page
+  @150dpi, so a full-page gradient took ~7.6s (35x a solid fill) and scaled
+  ~O(dpi^2). It now builds a 2048-entry colour LUT once (np.interp over the
+  stops), computes the per-pixel parameter with numpy broadcasting, and maps it
+  through the LUT with a single fancy-index. Output is identical to within 1/255
+  per channel. A full-page linear gradient @150dpi drops from ~7.6s to ~40ms;
+  polygon/path gradients (blobs) benefit the same way.
+- **PNG export ~6x faster.** Saving used optimize=True, which runs PIL's
+  exhaustive filter search -- ~1s per page on a many-colour gradient image for a
+  marginal size win (155 vs 265 KB). Now uses compress_level=6 (zlib default).
+- Net effect: an A4 gradient page export drops from ~7.6s to ~0.3s @150dpi
+  (~19.5s to ~1.2s @300dpi); a page with several gradients renders in a fraction
+  of a second, so a large batch runs in minutes rather than tens of minutes.
+
+### Validation
+- Five tests: gradient colours at stops (linear/radial/multi-stop), alpha
+  interpolation, and a speed sanity check. Full suite 521 passed. FORMAT_PATCH 20.
+## [4.3.6.25] - 2026-06-16
+
+### Fixed
+- **auto_shrink STILL overflowed the box width (the .24 fix was not enough).**
+  The fit check (find_fitting_scale/_runs_fit) measured with a private
+  _layout_runs, but the RENDER lays text out with layout_runs. The two tokenise
+  text into segments differently, so their summed line widths disagreed by a few
+  px: the fit said "fits", the render wrapped a hair wider and clipped the last
+  word (laminovaciho -> laminovacih). _runs_fit now measures with the SAME
+  layout_runs the renderer uses, so the chosen scale genuinely fits.
+- **BorderStyle was documented but did not exist (ImportError).** Added the
+  BorderStyle dataclass (enabled, color, width, style, radius) with save/load,
+  exported from the top level, and the TextBox border render now honours enabled
+  (skips when False), radius (rounded corners) and a dashed style. A plain
+  StrokeStyle still works there too.
+- **Shape.from_svg_path with absolute coords rendered nothing.** It left the
+  default 50x30 transform, so an absolutely-placed path fell outside its box and
+  was clipped away. from_svg_path now derives the transform from the path bbox
+  and re-origins the path to local (0,0), so absolute or local coords both work.
+- **edof.new() get_page(0) raised a bare IndexError on the empty document.** It
+  now raises a clear message telling you to call add_page() first; the new()
+  docstring states the document starts empty (0 pages) by design.
+
+### Added
+- **effects_enabled=False now warns instead of being a silent no-op.** When an
+  object has effects but the master switch is off (the default on a brand-new
+  object), the render emits a one-time RuntimeWarning per object.
+
+### Validation
+- Five regression tests (fit==render width, BorderStyle, from_svg_path bbox,
+  empty-doc get_page message, effects-disabled warning). Full suite 516 passed.
+  FORMAT_PATCH 20.
+## [4.3.6.24] - 2026-06-16
+
+### Fixed
+- **auto_shrink overflowed the box width with some fonts.** Line width was
+  measured as getbbox[2]-getbbox[0], which subtracts the first glyph's LEFT
+  side bearing. Rendering starts at the pen, so the rightmost pixel lands at
+  getbbox[2]; for fonts with a noticeable left bearing the line was under-
+  measured and wrap let a line through that then clipped on the right edge.
+  Width is now max(advance, visual-right-edge), so wrap stays inside the box.
+- **long_shadow rendered nothing that extended past the object.** The shadow
+  matte was cropped to the INPUT alpha's bbox, so a shadow thrown beyond the
+  object's own box was clipped away entirely. The alpha is now padded by the
+  throw length (+ blur) on every side and composited at the shifted origin.
+- **halftone ht_color_mode="mono" produced cyan/magenta/black dots.** "mono"
+  was not implemented and fell through to the CMYK branch. It now paints a
+  single ink -- the layer's own colour, so a teal fill gives teal dots -- with
+  dot size tracking darkness on a transparent background, and the dot capped to
+  about one cell so the raster stays visible.
+
+### Notes
+- All three effects require the object's master switch effects_enabled=True
+  (the default for a brand-new object is False). Setting an effect alone does
+  not enable it.
+
+### Validation
+- Three regression tests (bearing width, shadow past bbox, mono ink colour).
+  Full suite 511 passed. FORMAT_PATCH 20.
+## [4.3.6.23] - 2026-06-16
+
+### Fixed
+- **Folding variables together did nothing while the body was being edited.**
+  In document mode the body's runs live as a COPY on the inline editor, and the
+  reflow refreshes the page box FROM that copy. So a merge applied to the page
+  box was immediately overwritten by the stale copy -- the variables never
+  actually folded. The merge is now also applied to the inline editor's runs
+  (and synced) before the reflow, so it sticks. This is why "Link" appeared to
+  do nothing.
+
+### Added
+- **Feedback after folding.** The status bar now confirms how many variables
+  were folded in, since the column list can look unchanged (one column before
+  and after).
+
+### Validation
+- New test reproducing the inline-editor case and asserting the merge sticks.
+  Full suite 508 passed. FORMAT_PATCH 20.
+## [4.3.6.22] - 2026-06-16
+
+You can now make each string its own variable, then link them together in the
+batch editor -- one column drives several strings, like linking normal objects.
+
+### Added
+- **Fold variables together from the Link dialog.** For a run variable the
+  "Link objects to variable" dialog now also lists the OTHER run variables
+  (strings) in the document. Checking one folds it into the current variable:
+  its span takes the current variable's identity (rid + name) and its redundant
+  column is dropped, so a single column drives every folded-in string. This is
+  the in-document counterpart to linking whole objects -- the workflow you asked
+  for: make each string a variable one at a time, then link them on the right.
+  Undoable.
+
+### Validation
+- New tests for folding variables together and for the Link dialog listing other
+  variables + collecting them on accept. Full suite 507 passed. FORMAT_PATCH 20.
+## [4.3.6.21] - 2026-06-16
+
+The same variable can now sit on several spans in ONE object (body, header,
+anything) and one batch value fills every occurrence at once.
+
+### Fixed
+- **A run variable only updated its first occurrence.** When several spans in
+  one object shared a rid, applying a batch value changed only the first run.
+  It now writes to EVERY run carrying that rid, so the same variable on multiple
+  spans all update together (e.g. a restaurant name repeated through the body).
+
+### Added
+- **Add a selection to an existing variable.** The add-variable dialog has a
+  "Variable" dropdown: keep "New variable", or pick "Add to: <name>" to give the
+  selected span an existing variable's rid (no new column). One column then
+  drives all its spans. This is the in-document equivalent of linking -- it
+  targets spans inside the same text object instead of whole other objects.
+
+### Validation
+- New tests for the all-occurrences write and for adding a selection to an
+  existing variable. Full suite 505 passed. FORMAT_PATCH 20.
+## [4.3.6.20] - 2026-06-16
+
+Variable editing polish: fixes a phantom-selection bug near variables, makes
+variable names unique and editable, warns before deleting a variable's last
+character, and makes the Link dialog list real OTHER objects.
+
+### Fixed
+- **Phantom selection after deleting near a variable.** A click leaves the
+  anchor sitting on the cursor; backspace/delete then moved the cursor without
+  clearing the anchor, leaving a one-character phantom selection that the next
+  keystroke would delete (so deleting a space after a span quietly armed the
+  next character for deletion). Delete operations now clear the anchor.
+- **Duplicate variable names.** The default-name counter only looked at batch
+  columns, but a no-attribute variable has no column -- so two of them both got
+  "inlinetext01". It now also counts var_names already on the runs.
+- **Link dialog listed the source object.** For a run variable the dialog
+  offered the very object the variable lives on (in document mode, the body --
+  the only object), which is a no-op. It now excludes the source and lists real
+  OTHER objects; the source stays the implicit primary target and chosen objects
+  become extra targets. Shows a hint when there's nothing else to link.
+
+### Added
+- **Rename variable.** Right-click a variable in the Objects panel ->
+  "Rename variable" updates its name on the runs and on every bound column
+  (keeping the attribute suffix for non-text columns). Undoable.
+- **Warning before deleting a variable's last character.** Backspace/forward-
+  delete of the final character of a variable span now asks for confirmation,
+  since it removes the variable and all its columns.
+
+### Validation
+- New tests for the phantom-selection fix, unique names, rename, the last-char
+  warning helper, and source exclusion in the Link dialog. Updated the two older
+  link-dialog tests for the new source-exclusion behaviour. Full suite 503
+  passed. FORMAT_PATCH 20.
+## [4.3.6.19] - 2026-06-16
+
+Variables are now first-class entities: a named span can exist with no attribute,
+and deleting its text removes the variable and all its columns (undoable).
+
+### Added
+- **Make a variable with no attribute.** The add-text-variable dialog no longer
+  requires ticking an attribute -- you can just name a span as a targetable
+  entity (rid + name) with zero batch columns. Columns can be added later.
+- **Remove variable from the Objects panel.** Right-click a text variable ->
+  "Remove variable" clears its rid from the runs AND drops every batch column
+  bound to it. Undoable.
+
+### Fixed
+- **Deleting a variable's text left the entity (and its columns) behind.** When a
+  variable's text is fully deleted its run -- and rid -- is gone, but the Objects
+  panel still listed it and its batch columns stayed. The editor now detects when
+  the set of variable rids changes and drops orphan columns + refreshes the
+  panel, so the entity and its columns disappear. Verified undo restores both the
+  text and the column.
+
+### Validation
+- New tests for no-attribute creation, entity removal, and the delete-then-undo
+  round trip. Full suite 498 passed. FORMAT_PATCH 20.
+## [4.3.6.18] - 2026-06-16
+
+Fixed several run-variable issues: removing a variable, the link dialog in
+document mode, the font / bold / italic editors, and current-value placeholders.
+
+### Fixed
+- **Removing a variable left its rainbow and its Objects-panel entry behind.**
+  A run variable also lives as rid/var_name ON the runs, which is what drives the
+  highlight and the panel. Removing the column now also strips the rid/var_name
+  from every run that carries it (across all pages), then reflows and refreshes,
+  so the highlight and the panel entry disappear too.
+- **The link dialog was empty in document mode -- not even the variable's own
+  object showed.** The document body has runs but no object-level 'text'
+  descriptor, and the filter required that descriptor. The filter now lists any
+  object that carries runs (including the body) or has a 'text' descriptor, so
+  the source and other text objects appear and can be linked.
+- **A run font variable had no font dropdown.** The font picker was only wired
+  for object-level style.font_family; it now also applies to run.font_family.
+- **A run bold / italic / underline / strikethrough variable couldn't be set.**
+  Those dropdowns were empty because the choices came from an object descriptor
+  that doesn't exist for run attributes. They now use the true/false choices.
+- **Number and colour fields now show the run's current value as greyed
+  placeholder text** when no override is set, so you can see what you'd change.
+
+### Validation
+- New tests for remove, document-mode link, and the run field editors. Full
+  suite 496 passed. FORMAT_PATCH 20.
+## [4.3.6.17] - 2026-06-16
+
+Fixed the first text variable after opening a new document doing nothing.
+
+### Fixed
+- **Right after New / Open, the first text variable made via right-click or the
+  toolbar did nothing: no column, no rainbow, nothing in the Objects panel.** The
+  batch panels only rebound to the document when their tab was opened, so until
+  then the make-variable flow saw a None document (cfg was None) and returned
+  early. The canvas now emits a documentChanged signal on every document swap and
+  the batch panels rebind to it, so the very first variable works -- it appears
+  in the Objects panel, colours, and shows in the batch editor with its column.
+
+### Validation
+- New regression test (full editor, new doc, first variable). Full suite 493
+  passed. FORMAT_PATCH 20.
+## [4.3.6.16] - 2026-06-16
+
+Made "Link to objects" work for run-text variables, so a text-span variable can
+drive other text objects.
+
+### Added
+- **Run-text variables can be linked to other text objects.** Previously the
+  link dialog for a run variable was empty (a run variable binds to a specific
+  rid, which no whole object carries). Now the dialog lists every text object on
+  the page, and linking one makes the variable fill that object's whole text
+  with the value. The source span still resolves through its own rid, so the
+  same value lands in the span and in each linked object at render / generate
+  time. The link button is back for run variables.
+
+### Validation
+- New tests for the run-variable link dialog and multi-target apply. Full suite
+  492 passed. FORMAT_PATCH 20.
+## [4.3.6.15] - 2026-06-16
+
+Fixed right-click / toolbar "make variable" not colouring the text and not
+listing the variable in the Objects panel, and hid the link-to-objects button
+for run variables (where it could never show anything).
+
+### Fixed
+- **Making a variable from a text selection via the right-click menu (or the
+  toolbar/Ctrl+Shift+B) did nothing useful the first time: no rainbow, and
+  nothing in the Objects panel.** The flow handed off to the wrapper batch panel,
+  which has no _add_text_variable, so it fell through to a bare fallback that
+  skipped the textbox sync, the show-variables toggle, and the Objects-panel
+  refresh -- while the panel's own "Add variable" button (on the template panel)
+  worked. The right-click/toolbar flow now hands off to the template panel like
+  the button does, so the variable is synced to the textbox, the rainbow turns
+  on, and it appears under its textbox in the Objects panel right away. The
+  fallback (used only when no panel exists) also got the sync + refresh, as a
+  safety net.
+
+### Changed
+- **The link-to-objects button is hidden for run variables.** A run variable
+  (the text/colour/size of a specific text span) is bound to one run, not to
+  whole objects, so "Link to objects" could never list anything (it needs a
+  run_id the object level does not have) and the dialog came up empty. The
+  button now shows only for object-level variables.
+
+### Validation
+- New regression test for the template-panel hand-off. Full suite 490 passed.
+  FORMAT_PATCH 20.
+## [4.3.6.14] - 2026-06-16
+
+Fixed text variables vanishing in document mode, moved the shared-attribute
+editing into a dialog, and added a toolbar toggle for the variable highlight.
+
+### Fixed
+- **Making a variable from text in the body did nothing visible: no rainbow, and
+  nothing in the Objects panel.** In document mode the body is held in an inline
+  editor whose runs are a COPY; make_variable_from_selection set the rid only on
+  that copy, then the reflow reloaded the editor from the textbox (which still
+  lacked the rid) and the variable was lost instantly. The rid is now pushed back
+  to the textbox before the reflow, so the variable persists, highlights, and
+  shows up under its textbox in the Objects panel.
+
+### Changed
+- **The shared run-attribute editor is now a dialog, not a fixed checklist in the
+  batch panel.** Right-click selected variables in the Objects panel ->
+  "Edit shared attributes…" opens a dialog with one tri-state checkbox per run
+  attribute (checked = variable on all, mixed = left unchanged). This matches the
+  object Add-variable flow. The fixed checklist that used to sit in the batch
+  panel has been removed.
+
+### Added
+- **Toolbar button for the variable highlight.** A rainbow toggle on the main
+  toolbar shows/hides the rainbow underlay on variables, kept in sync with the
+  View > Show Variables menu item.
+
+### Validation
+- Tests updated for the dialog flow. Full suite 490 passed. FORMAT_PATCH 20.
+## [4.3.6.13] - 2026-06-16
+
+The shared run-attribute controls now also appear directly in the batch panel
+when variables are multi-selected (variant 2 of the shared-attribute editing).
+
+### Added
+- **Batch panel shows a "Shared attributes" box when variables are selected in
+  the Objects panel.** It lists every run attribute (Text, Font, Font size,
+  Colour, Highlight, Bold, Italic, Underline, Strikethrough) as a tri-state
+  checkbox: checked = a variable on all selected, partially checked = on some,
+  unchecked = on none. Toggling adds or removes that attribute as a batch
+  variable across every selected variable at once. The box hides when the
+  selection isn't a pure set of variables.
+
+### Validation
+- New test: shared-attribute box shows on variable selection and its checkboxes
+  toggle the attribute across all targets. Full suite 490 passed. FORMAT_PATCH 20.
+## [4.3.6.12] - 2026-06-16
+
+Text-variable objects now behave as real, selectable objects in the Objects
+panel, and a multi-selected set of variables can have their common attributes
+edited in one go.
+
+### Fixed
+- **Variables didn't appear in the Objects panel until something else forced a
+  refresh.** Creating a variable only emitted the batch 'changed' signal, which
+  doesn't rebuild the Objects panel. It now emits objectChanged too, so the new
+  variable shows up under its textbox immediately.
+- **Variables couldn't be selected by clicking them in the panel.** Clicking a
+  variable focused its textbox (via set_sel_id), and the resulting panel refresh
+  re-selected the parent textbox row, so the variable never stayed selected. The
+  panel now keeps the virtual item selected while a variable is the active focus.
+
+### Added
+- **Right-click a selected variable (or several) in the Objects panel for a
+  shared run-attribute menu.** Each attribute (Text, Font, Font size, Colour,
+  Highlight, Bold, Italic, Underline, Strikethrough) is a checkable item;
+  toggling it adds or removes that attribute as a batch variable for EVERY
+  selected variable at once. Mixed states are shown as "(mixed)".
+
+### Notes
+- Surfacing the same shared-attribute controls inside the batch panel after a
+  multi-select is the next step.
+
+### Validation
+- New tests: shared run-attribute toggle across multiple variables; virtual
+  selection sticks across a refresh. Full suite 489 passed. FORMAT_PATCH 20.
+## [4.3.6.11] - 2026-06-16
+
+Multi-select of text-variable objects in the Objects panel now highlights them
+all at once.
+
+### Added
+- **Selecting several variables in the Objects panel rainbow-highlights all of
+  them** (and focuses the first), matching the multi-select principle used for
+  regular objects. Variables in the same textbox light up together. The rainbow
+  marker now takes a set of rids rather than a single one.
+
+### Notes
+- Editing the common run attributes of a multi-selected set of variables in one
+  go is the next step.
+
+### Validation
+- Full suite 487 passed. FORMAT_PATCH still 20.
+## [4.3.6.10] - 2026-06-16
+
+Fixed text selection in the body being wiped instantly whenever a header or
+footer is enabled.
+
+### Fixed
+- **Any selection in the body cleared immediately with a header/footer enabled.**
+  When a header/footer shrinks the body box, the body text overflows, and an
+  overflowing body restarts the idle balance timer with a 0 ms delay -- so the
+  balance pass runs on every render. That pass calls refresh_from_tb to reload
+  the runs, and it was dropping the selection anchor every time, so any selection
+  (drag, Shift+arrow, Ctrl+Shift) vanished the instant it was made. refresh_from_tb
+  now keeps the anchor (clamped to the new length), so selection survives the
+  balance pass. (The 4.3.6.9 sticky-editor restore stays; this was the real
+  cause of "selection doesn't work with a header".)
+
+### Validation
+- New test: refresh_from_tb keeps the selection anchor (and clamps it if the
+  content shrank). Full suite 487 passed. FORMAT_PATCH still 20.
+## [4.3.6.9] - 2026-06-16
+
+Fixed body text selection breaking after a header/footer was edited or toggled.
+
+### Fixed
+- **Text selection (and typing) in the body stopped working once a header or
+  footer was involved.** In document mode the body is held in a sticky inline
+  editor; after editing a header/footer the commit path repaginated and returned
+  early, skipping the re-entry that puts the editor back on the body -- so the
+  body had no active editor and clicks/drags did nothing. The sticky editor is
+  now restored on the body after a header/footer edit, and also after enabling or
+  disabling a header/footer in Page setup.
+
+### Validation
+- Full suite 486 passed. FORMAT_PATCH still 20.
+## [4.3.6.8] - 2026-06-16
+
+First cut of virtual text-variable objects: text variables now appear in the
+Objects panel and can be picked there instead of hunting for the exact run.
+
+### Added
+- **Text variables show in the Objects panel** as virtual children under the
+  textbox that holds them (a rainbow chip + the variable name), one per variable.
+  This is also how you see which variables an object already uses (so you don't
+  duplicate them).
+- **Clicking a variable in the panel focuses its span**: it selects the textbox,
+  enters inline edit, selects the run, scrolls it into view, and rainbow-marks it
+  -- even when Show Variables is off -- so the otherwise hard-to-click span is
+  easy to find. The mark clears when you select something else.
+
+### Changed
+- **Rainbow marker opacity lowered to ~25%** (from 50%), still diagonal at 8mm.
+
+### Notes
+- Multi-selecting variables to edit their common run attributes together (the
+  shared-attributes flow) is the next step; for now a multi-select of variables
+  is ignored rather than clearing the real selection.
+
+### Validation
+- New test: _variable_runs lists variables de-duped by rid. Full suite 486
+  passed. FORMAT_PATCH still 20.
+## [4.3.6.7] - 2026-06-16
+
+Fixed a crash when deleting text caused a repagination, and stopped header/footer
+variables from corrupting the document.
+
+### Fixed
+- **IndexError after deleting text in document mode.** Deleting text can shrink
+  the page count (repagination), but the current page index wasn't clamped, so
+  the next overlay/ghost pass indexed a page that no longer existed and crashed
+  (and selection stopped working afterwards). The page index is now clamped after
+  a render and in the ghost pass.
+- **Making a variable in the header/footer no longer wipes the text / crashes.**
+  Header and footer text isn't a normal page object -- its runs live on
+  doc.body.header_runs and aren't addressable by the batch ref system yet -- so a
+  variable there lost the text. It's now blocked with a clear message in both the
+  right-click / toolbar path and the panel's Add variable, until the header/footer
+  rework lands.
+
+### Validation
+- Full suite 485 passed. FORMAT_PATCH still 20.
+## [4.3.6.6] - 2026-06-16
+
+Fixed an empty batch cell inheriting a previous row's value (a recorded run
+value leaking onto the template), and tuned the rainbow marker.
+
+### Fixed
+- **An empty cell now resets the attribute to the template default**, not to
+  whatever a previous row left. Root cause: stopping a recording restored the
+  template's object attributes and effects but NOT its rich-text runs, so a value
+  recorded into a run (e.g. text colour) stayed on the base template. A later row
+  that left that cell empty then inherited the stale value instead of resetting.
+  Recording restore now restores runs wholesale, so empties reset correctly.
+  (Empty semantics are "set to template default", as intended.)
+
+### Changed
+- **Rainbow variable marker** is now diagonal, one hue cycle per 8mm, at 50%
+  opacity (was 3.5mm horizontal).
+
+### Validation
+- New test: stopping a recording restores rich-text runs to the template (colour
+  and text), so a later empty cell resets. Full suite 485 passed.
+  FORMAT_PATCH still 20.
+## [4.3.6.5] - 2026-06-16
+
+Fixed the real reason inline (document-mode) text didn't change under a batch
+preview, and tuned the rainbow marker.
+
+### Fixed
+- **Batch preview now changes the document-body text.** In document mode the
+  body is shown by the always-on inline editor, which keeps its OWN copy of the
+  runs -- so the batch preview rendered on the canvas underneath was hidden and
+  the body kept showing the un-substituted text (looked like the variable did
+  nothing). The preview now mirrors into the editor: previewing a row loads that
+  row's substituted runs into the body editor, and leaving preview restores the
+  live runs. This is the core "variables don't change inline text" bug.
+
+### Changed
+- **Rainbow marker** is now a diagonal sweep, one full hue cycle per 8mm, at 50%
+  opacity (was 3.5mm horizontal at higher opacity).
+
+### Validation
+- New test: previewing a row mirrors the substituted runs into the inline editor
+  and restores the live runs on exit. Full suite 485 passed / 3 skipped.
+  FORMAT_PATCH still 20.
+## [4.3.6.4] - 2026-06-16
+
+Fixed the "stuck variable" (duplicate columns on one span) and made the marker a
+rainbow gradient.
+
+### Fixed
+- **Duplicate run columns no longer fight each other.** Making a variable twice
+  on the same span created two run.text columns on the same rid; the last one
+  won, so the text was stuck on one value no matter which row was selected. Now
+  the picker reuses the existing column instead of duplicating it, and loading a
+  document drops any leftover duplicates (same run_id + attr_path), keeping the
+  first. This repairs files that already have the duplicate.
+
+### Changed
+- **Variable marker is now a rainbow gradient** drawn under the span — one full
+  hue sweep per 3.5mm, keyed to absolute x so it flows continuously across
+  glyphs and runs — instead of the flat blue tint.
+
+### Validation
+- New test: a loaded doc with duplicate run.text columns on one rid keeps one,
+  and the variable then differs per row. Full suite 484 passed / 3 skipped.
+  FORMAT_PATCH still 20.
+## [4.3.6.3] - 2026-06-16
+
+Fixed the variable-text round trip: right-click now creates a record (so the
+variable actually does something), every entry point uses the same attribute
+picker, more run attributes are offered, the highlight turns on automatically,
+and the editor's right-click menu gained cut/copy/paste.
+
+### Fixed
+- **Right-click / toolbar / shortcut now create the record too.** Previously the
+  right-click path added a column but no record, so there was nothing to edit
+  and changing the value did nothing. All three entry points now hand off to the
+  same flow as the panel's "Add variable" (attribute picker + auto record +
+  value seeding), so making a variable works end to end.
+- **More run attributes** in the picker: added Font, Highlight/marker
+  (background), Underline and Strikethrough alongside Text, Font size, Colour,
+  Bold and Italic.
+- **The variable highlight turns on automatically** when you make a variable, so
+  you immediately see which span it is (and the View-menu "Show Variables" check
+  stays in sync). It's still toggleable (View menu, Ctrl+Shift+H).
+- **Cut / Copy / Paste** added to the text editor's right-click menu (disabled
+  appropriately while the template is read-only under a preview).
+
+### Notes
+- Several variables in one text already work: select another span and make it a
+  variable; each carries its own id. Changing the SPAN of an existing variable
+  (re-ranging) and highlighting exactly which span a row affects during preview
+  are not done yet.
+
+### Validation
+- New test: the extended run attributes (font/background/underline/
+  strikethrough) resolve and write by rid. Full suite 483 passed / 3 skipped.
+  FORMAT_PATCH still 20 (UI/behaviour only).
+## [4.3.6.2] - 2026-06-16
+
+Fixed three problems with making text variables: right-click in document mode,
+the 3D Batch "Add variable" attributes for selected text, and a preview-mode
+template-edit trap.
+
+### Fixed
+- **Right-click on selected text now offers "Make variable from selection"**
+  (and "Remove variable" on an existing one), including in document mode. The
+  canvas's context-menu policy was swallowing the right-click before the text
+  editor saw it, so the option never appeared; the canvas menu now handles it
+  when the click is over the active text editor with a selection.
+- **3D Batch "Add variable" with a text selection now offers the run's
+  attributes** — Text, Font size, Colour, Bold, Italic — instead of the body
+  object's transform. Previously it showed the body's rotation/geometry, which
+  is meaningless for variable text (you don't rotate the whole body per row).
+  Choosing attributes assigns a stable rid to the span and adds one column per
+  attribute, all bound to that rid.
+- **Template is read-only while previewing a batch row (and not recording).**
+  Editing the canvas under a row preview silently changed the BASE template
+  (the preview hid it, so it looked like nothing happened until you left
+  preview). Now text typing/formatting, object move and resize/rotate are
+  blocked during preview; you record (edits captured into the row) or turn off
+  the preview to edit the template. Selection, navigation and copy still work.
+
+### Validation
+- New tests: every run attribute resolves by rid (text/font_size/colour/bold/
+  italic); a read-only editor blocks typing but still navigates. Full suite
+  482 passed / 3 skipped. FORMAT_PATCH still 20 (UI/behaviour only).
+## [4.3.6.1] - 2026-06-16
+
+Made variable text discoverable: right-click menu, a keyboard shortcut, a
+clearer toolbar button, and a Show-Variables highlight. (Follow-up to 4.3.6.0,
+where the only way to make a variable was an obscure "{x}" toolbar button.)
+
+### Added
+- **Right-click "Make variable from selection"** in the text editor. With a
+  selection it creates the variable (prompting for a name); on an existing
+  variable it offers "Remove variable" (keeps the text). This is what the
+  workflow expected; 4.3.6.0 only had the toolbar button.
+- **Ctrl+Shift+B** makes the selection a variable (Ctrl+Shift+V is paste-plain,
+  so B = batch variable).
+- **Show Variables toggle** (View menu, Ctrl+Shift+H): variable spans render with
+  a faint blue tint and a dotted underline so you can see which text is a
+  variable, both on the canvas and while editing. View-only — off for export.
+- The toolbar button is now a clearer bold "{ }" with the shortcut in its tooltip.
+
+### Changed
+- The make/remove-variable logic moved to a single canvas method shared by the
+  toolbar button, the right-click menu and the shortcut, so all three behave
+  identically.
+
+### Validation
+- New test (Show-Variables draws a marker on a variable run and nothing on a
+  plain run); full suite 480 passed / 3 skipped. FORMAT_PATCH still 20 (no
+  schema change — this is UI only).
+## [4.3.6.0] - 2026-06-15
+
+Added variable text: any span of text can become a batch variable. Verified
+halftone pattern batching already works (no change made).
+
+### Added
+- **Variable text (inline batch variables).** A selected span of text in any
+  TextBox (including document header/footer, which are TextBoxes) can be turned
+  into a batch variable. The span becomes a run carrying a stable id (`rid`) and
+  a human `var_name`; a batch column targets `run.text` on that rid, so each row
+  sets that span's text. The run's STYLE fields are batchable too (`run.font_size`,
+  `run.color`, `run.bold`, `run.italic`) -- properties were already per-run, this
+  exposes them as variables. The renderer is unchanged: the value is baked into
+  the run before rendering, like every other batched attribute.
+  - The binding is by stable rid, never by position, so editing the surrounding
+    text (which splits and merges runs) keeps the variable pointed at the same
+    span. A variable run is never merged into an identically-formatted neighbour.
+  - In the text editor toolbar, a "{x}" button turns the selection into a
+    variable (prompting for a name, default `inlinetextNN`) and adds the batch
+    column automatically; pressing it on an existing variable offers to remove it.
+    Creating a variable from a text selection also works as a normal batch column,
+    so it shows up in the 3D Batch table like any other.
+
+### Verified (no change)
+- Halftone pattern batching in the batch editor already works end to end: the
+  pattern FILE PATH is offered in the Add-column dialog (v4.3.5.53) and the batch
+  table cell uses a file picker for file_path attributes, so a custom pattern can
+  be batched by browsing to a file. Nothing was changed here.
+
+### Validation
+- New tests: run rid/var_name serialization round-trip; a batch column replaces
+  just the bound run and keeps TextBox.text in sync; the binding resolves by rid
+  after surrounding text changes; run style fields are batchable; a variable run
+  survives run normalization (not merged) while same-rid runs merge. Full suite
+  479 passed / 3 skipped.
+
+### Format
+- FORMAT_PATCH 19 -> 20: TextRun gains optional `rid`/`var_name` (written only
+  when set) and BatchColumn gains `run_id`. Purely additive and backward
+  compatible -- older builds load newer files (the unknown fields are ignored,
+  with the standard newer-version notice); files without variable text serialize
+  exactly as before.
+## [4.3.5.68] - 2026-06-15
+
+Fixed a sheared child getting clipped (a cut-off corner) inside a rotated group,
+from five uploaded repro files.
+
+### Fixed
+- **A rotated group clipped a child that carried shear.** The rotated-group
+  renderer sizes its buffer to the bounding box of the children, but that box was
+  computed from each child's rotated corners while IGNORING shear -- the same gap
+  fixed in compute_bounds in 4.3.5.66, except _render_group has its own copy. So a
+  child sheared by a previous resize overflowed the too-small buffer and lost a
+  corner (the rect rendered with a flat cut edge instead of a parallelogram tip).
+  Each corner is now sheared about the child center before its rotation when
+  sizing the buffer, matching the renderer and compute_bounds, so the sheared
+  child fits and renders whole.
+
+### Validation
+- New test (a rotated group with a strongly sheared child renders the child's
+  full parallelogram area, no clipping); full suite 475 passed / 3 skipped.
+  FORMAT_PATCH still 19. Verified against the uploaded u4 file: the rect now
+  renders as a complete parallelogram with a sharp corner instead of a cut edge.
+## [4.3.5.67] - 2026-06-15
+
+Fixed a rotated child collapsing when a group's side was dragged back and forth,
+from three uploaded repro files.
+
+### Fixed
+- **Dragging a group's side and back wrecked a rotated child.** The first
+  non-uniform resize shears a rotated child (Photoshop skew); the second resize
+  then ran _shear_decompose from the child's ROTATION ONLY and ignored the shear
+  it already had, so it didn't compose. A back-and-forth drag collapsed the child
+  (shear jumping to ~-1.06) instead of returning it to the start. The child's own
+  map is now taken as R(theta) . Shear(shear_x), so a second resize composes
+  M = diag(sx,sy) . R(theta) . Shear(shear_x) correctly. Resizing a side out and
+  back now restores the child's rotation, size and shear exactly (a true inverse).
+  The shear path also now triggers for a child that has shear but no rotation,
+  which the rotation-only test skipped.
+
+### Validation
+- New test (resize a group's side then back restores a rotated child's rotation,
+  size and shear); the decomposition reproduces M = diag(sx,sy).R(theta).Shear
+  exactly (err 0), and is unchanged for shear=0 (backward compatible). Full suite
+  474 passed / 3 skipped. FORMAT_PATCH still 19. Verified against the three
+  uploaded files: the back-and-forth drag now returns the rect to its original
+  rotation and zero shear.
+## [4.3.5.66] - 2026-06-15
+
+Fixed the group bounding box not fitting (and appearing to jump on) sheared
+children, using two uploaded repro files.
+
+### Fixed
+- **A group box didn't fit its children once they were sheared, and the box
+  jumped after a drag.** compute_bounds built the box from each child's rotated
+  corners but ignored the child's shear. A non-uniform resize of a group with
+  ROTATED children shears them (rotated rects become parallelograms), so the real
+  extent differed from the computed box: the selection box overshot/undershot the
+  shapes, and because the drag set a fitting box while the old compute_bounds
+  recomputed a non-fitting one on release, the box "jumped". Each corner is now
+  sheared about the child center before rotation, matching the renderer, so the
+  box fits the sheared children and the drag/release boxes agree (no jump). An
+  ellipse with no rotation has no shear, which is why it looked fine.
+- **Old files showed a wrong group box until edited.** Group boxes are now
+  recomputed on load, so files saved before the shear-aware compute_bounds get a
+  fitting box immediately (idempotent for already-correct files).
+
+### Validation
+- New test (a group box fits a sheared rotated child and contains its sheared
+  corners); full suite 473 passed / 3 skipped. FORMAT_PATCH still 19. Verified
+  against both uploaded repro files: the box now fits the content within ~0.5 mm
+  (was off by ~7.6 mm).
+## [4.3.5.65] - 2026-06-15
+
+Reworked the rotated-group renderer to drop the square intermediate buffer that
+4.3.5.64 introduced, which showed as square padding / clipping while dragging a
+group's side handles.
+
+### Fixed
+- **Resizing a rotated group's side clipped/padded the content to a square.**
+  4.3.5.64 fixed the child "dancing" by rotating the group about its BOX center,
+  but did so by embedding the children buffer in a 2*rad x 2*rad SQUARE and
+  rotating that about its center. The square wasted memory on long groups and
+  surfaced as square padding / edge clipping during a side-handle drag (most
+  visible on rect and image children, which paint to the box edge; ellipse, path
+  and text paint inside, so they hid it). The renderer now rotates the children
+  buffer TIGHTLY (expand=True) about the box center and computes where the pivot
+  lands, so there's no square intermediate, no padding, and no clipping. For an
+  un-edited group this is pixel-identical to the pre-4.3.5.64 output; the child
+  "dancing" fix (rotation about the box center) is preserved.
+
+### Validation
+- New test (a rotated group's child renders at full area, no clipping); the
+  rotated-group child-edit test (others stay still) still passes; full suite
+  472 passed / 3 skipped. FORMAT_PATCH still 19. Verified: an un-edited rotated
+  group renders pixel-identical to the tight expand=True reference.
+## [4.3.5.64] - 2026-06-15
+
+Fixed four bugs from RTX batch testing: rotated-group child "dancing", negative
+shear collapsing to a triangle, and nested-group children vanishing from the
+Objects panel. (The rotated-group cursor report now works as a side effect of the
+4.3.5.62 group overlay.)
+
+### Fixed
+- **Editing one child of a ROTATED group made the OTHERS dance.** The renderer
+  rotated the group about the bbox center of its children, which shifts whenever a
+  child is edited, so the other children swung about a moving center. The renderer
+  now rotates about the group BOX center (obj.transform), which is stable during
+  per-child edits (compute_bounds isn't called per child). The selection overlay
+  rotates the box about the same center, so they stay aligned. A Group also gained
+  an optional rotation_pivot (serialized only when set, no format bump) as an
+  override for future use.
+- **Enlarging a rotated object along its axis collapsed it into a TRIANGLE.** Pure
+  sign error in the shear renderer: the PIL AFFINE offset for shear_x < 0 was
+  +abs(shear_x)*h, but must be shear_x*h (negative). The wrong sign double-shifted
+  the skew and crushed a strongly negative shear to a triangle. Now a +s and -s
+  shear render mirror parallelograms of equal area. This affected every negative
+  shear, including SVG/PDF export.
+- **A group nested inside a group hid its own children in the Objects panel.** The
+  panel listed only a group's DIRECT children; a child that was itself a group
+  showed up, but its children vanished below depth 1. The panel now recurses, each
+  nesting level indented one step further.
+
+### Notes
+- The rotated-group resize-cursor report could not be reproduced in the current
+  build: object and group handle cursors are identical at every rotation. The
+  4.3.5.62 rotated group overlay is what fixed it (before that a group had no
+  rotated box for cursors to follow).
+
+### Validation
+- New tests (a -s shear renders equal area to +s, i.e. a parallelogram not a
+  triangle; editing one child of a rotated group leaves the others' visual centers
+  fixed; a doubly-nested group lists all its leaves in the panel); full suite
+  471 passed / 3 skipped. FORMAT_PATCH still 19.
+## [4.3.5.63] - 2026-06-15
+
+Fixed rotated-group resize scattering children; clarified the "apply to all" button.
+
+### Fixed
+- **Resizing a rotated group threw its children out of the box.** Children scaled
+  in the group's ROTATED world axes (4.3.5.52), but children actually live in the
+  group's LOCAL, un-rotated space (the renderer rotates the whole group buffer
+  about the box center). So a resize drifted child positions, sheared the
+  perpendicular axis, and pushed everything off-center -- exactly the "stretches
+  too much, shrinks the other way, slides off center" report. Children now scale
+  AXIS-ALIGNED in local space, mapped from the baseline box to the new box by
+  (sx, sy), so they stay aligned and fill the rotated box as a rigid unit. The
+  group box itself (anchor fixed in world) was already correct; only the child
+  placement changed. Pre-rotated children (shear decomposition) and the QR
+  exception still apply.
+- **The "apply layer effects to all selected" button showed for a single
+  selection.** It copies the primary object's effects onto the OTHER selected
+  objects, so it only makes sense with 2+ selected. It's now hidden unless a
+  multi-selection is active (it was puzzling on a single object or a group), and
+  its tooltip explains it.
+
+### Validation
+- New tests (a rotated group resized along its local axis keeps children aligned,
+  heights unchanged, widths scaled; the apply-to-all button is hidden for a single
+  selection and shown for a multi-selection); full suite 468 passed / 3 skipped.
+  FORMAT_PATCH untouched.
+
+### Notes
+- This supersedes the 4.3.5.52 approach. Verified visually: a rotated group
+  resized along its axis stretches its children along that axis, staying inside
+  the rotated box.
+## [4.3.5.62] - 2026-06-15
+
+Group fixes: child selection box in a rotated group, and a Layer Effects panel
+for groups.
+
+### Fixed
+- **A selected child of a rotated group had its selection box in the wrong place.**
+  The overlay drew the box from the child's own transform only, ignoring the
+  group's rotation, so for a rotated group the box sat off to the side, unrotated.
+  The overlay now carries the box (and line endpoints) up through every parent
+  group's rotation about that group's center, so it lands exactly where the child
+  is rendered. Verified the box corners match the rendered child to < 1 mm.
+- **Selecting a group showed the empty properties panel.** Groups had no panel in
+  the type dispatch, so there was no way to reach Layer Effects (copy/paste/delete
+  effect) for a group even though groups render effects on their combined
+  silhouette. Groups now get their own panel with the Layer Effects entry point
+  and the same effect actions as other object types.
+
+### Not a bug (clarified)
+- Resizing a rotated group projects the drag into the group's local (rotated)
+  axes -- so dragging a corner "horizontally" on screen changes both width and
+  height. This is the standard rotated-resize behavior (the dragged corner follows
+  the mouse, the opposite corner stays fixed) and is identical for a single
+  rotated object; it does not drift across a multi-step drag. Left as-is.
+
+### Validation
+- New tests (a rotated group's child overlay matches the rendered child; selecting
+  a group shows the group panel, not the empty one); full suite 466 passed / 3
+  skipped. FORMAT_PATCH untouched.
+## [4.3.5.61] - 2026-06-15
+
+Consolidation step 3 (final): the old CSV-batch and Variables dialogs are retired.
+
+### Changed
+- **The standalone Variables dialog is retired.** It defined document variables,
+  which no longer exist as a separate concept; it now shows a short note and opens
+  the 3D Batch (where each varied value is a column).
+- **The old CSV-batch is retired.** It mapped CSV columns to document variables
+  and exported per row. The 3D Batch does all of this natively (add columns,
+  Import CSV with autodetected encoding + meta, Generate to files with a filename
+  pattern), so the menu entry now redirects there.
+- **The toolbar "CSV" button was removed.** CSV batch is reached through the 3D
+  Batch panel; the File menu keeps a redirecting entry for discoverability.
+- New helper `_open_batch_tab()` brings the 3D Batch panel forward.
+
+### Validation
+- New test (both retired dialogs redirect to the 3D Batch, define no document
+  variables, and no longer contain their old dialog bodies); full suite 464 passed
+  / 3 skipped. FORMAT_PATCH untouched.
+
+### Notes
+- This completes the variables -> 3D Batch consolidation (migrate on load ->
+  remove the properties-panel binding UI -> retire the old dialogs). There is now
+  a single batch system. The legacy variable data model still loads (for old
+  files) but has no UI surface; it's migrated to batch columns on open.
+## [4.3.5.60] - 2026-06-15
+
+Consolidation step 2: the variable-binding UI is removed from the properties panel.
+
+### Changed
+- **The "Variable" field and Bind button are gone from the properties panel.**
+  Variable bindings are consolidated into the 3D Batch (an object bound to a
+  variable is now a batch column targeting its text), so a separate binding field
+  in object properties no longer makes sense. The "[variable]" tag in the object
+  header card was removed too.
+- `_bind_var` is now a no-op, and the underlying le_var line edit is kept but
+  hidden, so existing panel code that references it keeps working without showing
+  a binding control.
+
+### Validation
+- New test (the properties panel no longer shows a variable field; _bind_var
+  doesn't bind; loading an object that still has a legacy variable doesn't crash);
+  full suite 463 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Last consolidation step remaining: retire/redirect the old CSV-batch dialog and
+  the standalone Variables dialog (both predate the 3D Batch).
+## [4.3.5.59] - 2026-06-15
+
+Consolidation step 1: legacy variables migrate into the 3D Batch.
+
+### Changed
+- **The old document-variable system is being folded into the 3D Batch.** An
+  object bound to a document variable (obj.variable) was really just batching that
+  object's text, so on load each such binding is converted into a 3D Batch column
+  (target = that object, attr = text, header = the variable name) and obj.variable
+  is cleared. The variables' current values become a single "migrated" row, so
+  nothing changes visually. This runs automatically in Document.from_dict, so old
+  files migrate transparently on open; new files have nothing to migrate.
+
+### Migration details
+- Idempotent: an object already migrated (no obj.variable) is skipped, and a
+  column for the same target+attribute isn't duplicated.
+- Safe for batch-less files: if nothing is bound, migration returns early WITHOUT
+  creating a BatchConfig (a pre-3D-batch file still loads with _batch is None).
+- Backwards compatibility is preserved (old files load and migrate), though it
+  isn't critical since the variable system wasn't widely used.
+
+### Validation
+- New tests (a binding migrates to a column + row; migration is idempotent;
+  save+load migrates transparently; a file with no bindings doesn't get a batch
+  created); full suite 462 passed / 3 skipped. Old CSV batch and FORMAT_PATCH
+  untouched.
+
+### Notes
+- Next consolidation steps: remove the variable binding UI from the properties
+  panel (it no longer makes sense next to the 3D Batch), and retire/redirect the
+  old CSV-batch dialog and the Variables dialog.
+## [4.3.5.58] - 2026-06-15
+
+3D Batch: Generate to files, with a filename-pattern builder.
+
+### Added
+- **Generate… button in the 3D Batch toolbar.** Renders every row to a file
+  (PNG/JPG/PDF/SVG), applying each row to a copy of the document first. Names come
+  from a pattern you build; identical names are de-duplicated automatically.
+- **Filename-pattern dialog** that does exactly what was asked:
+  - Type any pattern; each column can go into the name.
+  - **Live preview** of the resulting filename.
+  - **Step through rows** at the preview (‹ / ›) to see how the name changes per
+    row before generating.
+  - **Click-to-insert** buttons: + Row number, + Row name, and a column picker
+    (pick a column from the list, click + Add column, it inserts [{Column}]).
+  - **Built-in help** explaining the tokens ([ROW_NUMBER], [ROW_NUMBER:04],
+    [ROW_NAME], [{Column}], [{Column:upper}]) and that anything else is plain text
+    and the extension is added automatically.
+  - Output folder picker and format selector (the extension follows the format).
+
+### Validation
+- New tests (the Generate button exists; the dialog preview updates and steps
+  through rows with wrap-around; the column picker inserts [{Column}] and the
+  preview reflects it; changing the format changes the extension); full suite 458
+  passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- This completes the batch export/import phase (CSV in/out + filename templates +
+  generate to files). Remaining roadmap before 4.4.0: consolidate the old CSV
+  batch into 3D Batch; document-mode header/footer batching.
+## [4.3.5.57] - 2026-06-15
+
+Export filename token templates for batch output (model layer).
+
+### Added
+- **render_filename()** builds a batch output filename from a token template:
+  - `[ROW_NUMBER]` / `[ROW_NUMBER:04]` -- the 1-based row number, optionally
+    zero-padded to a width.
+  - `[ROW_NAME]` -- the row's name (blank falls back to "row").
+  - `[{Header}]` -- the value of the column with that header.
+  - `[{Header:upper}]` / `[{Header:lower}]` -- that value, case-folded.
+  Unknown tokens keep their text (brackets dropped). The result is sanitized for
+  the filesystem (no / \\ : * ? " < > |) and an extension is appended when the
+  template didn't include one. Empty template -> a padded row number.
+
+### Validation
+- New tests (basic tokens; padding + extension; case modifiers; path-char
+  sanitize; blank name and unknown token; default on empty template); full suite
+  454 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Model layer. Next: a filename-pattern field in the batch export dialog using
+  these tokens.
+- Roadmap updated with the post-4.4.0 web plan: a JS render core running in the
+  browser (the chosen path for a standalone WordPress plugin), built as a separate
+  library testable against the Python renders, with a per-layer vector/raster
+  output boundary. Second, independent dev track.
+## [4.3.5.56] - 2026-06-15
+
+3D Batch CSV export/import wired into the panel (clean csv + meta side file).
+
+### Added
+- **Export CSV / Import CSV buttons in the 3D Batch toolbar.**
+  - Export writes the clean CSV (rows) plus a meta side file next to it
+    (foo.csv -> foo.meta.csv), both UTF-8 with BOM so Excel on Windows shows
+    Czech text correctly. Honours the "include demo rows" toggle.
+  - Import replaces the rows from a chosen CSV, auto-loading the meta side file
+    if it sits next to it (lossless re-bind); without meta, columns match by
+    header. Encoding is autodetected. The status line reports how many rows came
+    in and whether meta was used.
+- Import fills rows only (it doesn't create columns); a guard tells the user to
+  add columns first if the batch has none.
+
+### Validation
+- New tests (the panel exposes the two buttons and the meta path helper; a clean
+  + meta file pair round-trips the rows through the panel); full suite 448 passed
+  / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Next in this phase: export filename token templates
+  ([ROW_NUMBER]_[ROW_NAME]-[{COLUMN}]) for the batch output files.
+## [4.3.5.55] - 2026-06-15
+
+3D Batch CSV export/import (model layer): a clean CSV plus a meta CSV.
+
+### Added
+- **BatchConfig.to_csv()** writes the CLEAN csv: first column the row name, then
+  one column per batched attribute (its header), then the values. No meta line,
+  nothing extra -- opens cleanly in Excel/Sheets and is what a person edits.
+- **BatchConfig.to_meta_csv()** writes the META side csv (header, column_id,
+  attr_path, kind) so an import can re-bind each clean column to the exact batch
+  column even after headers are renamed or duplicated.
+- **BatchConfig.update_rows_from_csv(clean, meta=None)** replaces the production
+  rows from the clean csv. With the meta csv the mapping is lossless; without it,
+  columns match by header. Encoding is autodetected (UTF-8 BOM, UTF-8, cp1250 for
+  Czech Windows exports, latin-1 fallback). Unknown headers are ignored, missing
+  ones left blank; it does not create columns (the batch's columns are the schema).
+
+### Validation
+- New tests (clean csv has no meta line; meta csv maps headers to column_ids;
+  round-trip with meta; import-by-header without meta; cp1250 autodetect; BOM
+  strip; unknown columns ignored); full suite 446 passed / 3 skipped. Old CSV
+  batch and FORMAT_PATCH untouched.
+
+### Notes
+- This is the model layer. Next: wire Export CSV / Import CSV buttons into the 3D
+  Batch panel (clean + meta file pair), then the export filename token templates
+  ([ROW_NUMBER]_[ROW_NAME]-[{COLUMN}]).
+## [4.3.5.54] - 2026-06-15
+
+SVG/PDF export now applies rotation and shear (closing the 4.3.5.51 limitation).
+
+### Fixed
+- **SVG export ignored rotation entirely.** A rotated shape/text/image/QR was
+  exported axis-aligned. Export now wraps each object in a `<g transform=...>`
+  that rotates (and shears) about the object's center, so rotated objects export
+  in the right orientation. Rotation parity with the on-canvas render verified.
+- **SVG/PDF export now emits shear.** A sheared object exports as a parallelogram:
+  SVG via a `matrix(1,0,shear_x,1,0,0)` transform, PDF via a new `shear_at` on the
+  page writer (concatenated after the rotation, matching the renderer's
+  local -> shear -> rotate order). A rotated group wraps its children in the
+  group rotation on export too.
+
+### Validation
+- New tests (SVG emits a rotation transform; SVG emits the shear matrix; a plain
+  object has no transform wrapper; the PDF page writer exposes shear_at); full
+  suite 439 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- The shear pivot differs from the renderer by a small offset (the renderer
+  re-centers the sheared buffer); the export is visually a correct parallelogram
+  and rotation matches exactly. PDF native-primitive vs full-page-raster choice
+  is unchanged; both now carry rotation + shear.
+## [4.3.5.53] - 2026-06-15
+
+Halftone pattern file path is now in the batch tree, so a custom pattern can be
+batched by path.
+
+### Fixed
+- **The halftone pattern's file path was missing from the batch attribute tree.**
+  The batchable `ht_pattern_path` descriptor existed and worked, but the
+  add-column tree only listed the static halftone fields (dot, angle, shape, ...),
+  not the pattern path -- so there was no way to add it as a column from the UI.
+  The tree now shows "Pattern file" under a halftone effect (one slot in
+  shape/single mode, per-channel slots otherwise), wired to the real descriptor.
+
+### How it works
+- The pattern's file path is the source of truth: setting it (per batch row)
+  loads that image into the effect's pattern cache at apply time, so each row can
+  use a different custom pattern. The batch cell uses a file picker (file_path
+  kind), like other path attributes.
+
+### Validation
+- New tests (the pattern file path appears in the add-column tree and is wired to
+  effects.halftone.ht_pattern_path; setting the path per value loads a different
+  pattern); full suite 435 passed / 3 skipped. Old CSV batch and FORMAT_PATCH
+  untouched.
+## [4.3.5.52] - 2026-06-15
+
+Fixed a rotated group scattering its children when resized.
+
+### Fixed
+- **Resizing a rotated group scattered its children.** Child positions were
+  scaled in world (axis-aligned) axes while the group's size was measured in its
+  rotated axes, so once a group had any rotation, resizing flung the children
+  apart and broke their spacing (the "weird crop"). Positions now scale in the
+  group's local rotated frame (project to local about the anchor, scale by the
+  local factors, project back), so a rotated group resizes as a rigid unit:
+  spacing scales proportionally and the layout stays compact. Pre-rotated-child
+  shear (4.3.5.51) and the QR exception still apply on top of this.
+
+### Validation
+- New test (a rotated group resized uniformly keeps even, proportional child
+  spacing); full suite 433 passed / 3 skipped. Old CSV batch and FORMAT_PATCH
+  untouched.
+
+### Notes
+- This only fixes future edits. A file already saved with scattered children
+  (from the old bug) stays as saved -- the scatter was destructive.
+- Still pending: SVG/PDF export of shear; custom pattern picker in batch.
+## [4.3.5.51] - 2026-06-14
+
+Pre-rotated objects now deform in the group/selection axes when the group is
+resized non-uniformly -- Photoshop-style shear. QR codes are kept square.
+
+### Added
+- **Shear (skew) in the transform model.** `Transform` gains `shear_x` (default
+  0, only serialized when non-zero): a local point (x, y) maps to
+  (x + shear_x*y, y) before rotation. The renderer applies it uniformly for every
+  object type (render upright, then shear + rotate the buffer), so a skewed object
+  draws as a parallelogram.
+- **Pre-rotated children shear with the group/selection.** When a group or a
+  multi-selection is resized non-uniformly, a rotated child now deforms in the
+  group's axes instead of its own. The new rotation / width / height / shear are
+  derived by RQ-decomposing diag(sx,sy)*R(theta), so the result matches the
+  group's scale applied to the rotated box exactly (verified on the corners).
+- The selection box follows the skew (handles sit on the parallelogram).
+
+### Excepted
+- **QR codes never shear.** A pre-rotated QR in a resized group scales uniformly
+  (by the larger factor) and keeps its rotation, so it stays square and scannable.
+
+### Validation
+- New tests (shear serialization; the RQ decomposition matches the matrix on all
+  four corners; a sheared rect renders wider; a group resize shears a rotated rect
+  but keeps a rotated QR square); full suite 432 passed / 3 skipped. Old CSV batch
+  and FORMAT_PATCH untouched.
+
+### Known limitation
+- SVG / PDF export does not yet emit the shear (the on-canvas render and editing
+  are correct); export of skewed objects will be added next.
+## [4.3.5.50] - 2026-06-14
+
+Effects can now be applied to a group as a whole, finishing the group work.
+
+### Added
+- **Layer effects on a group apply to the whole group.** A drop shadow / glow /
+  stroke on a group treats the combined silhouette of its children as one shape
+  (Photoshop-style), riding the buffer render added in 4.3.5.49. Works with a
+  rotated group and with nested groups.
+- **A child's own effects still render inside a group.** Group children now draw
+  through the effect-aware path, so a shadow on a single child shows even when
+  the child sits inside a group.
+
+### Validation
+- New tests (effect on the whole group; a child's own effect inside a group;
+  effects through nested groups); full suite 427 passed / 3 skipped. Old CSV
+  batch and FORMAT_PATCH untouched.
+
+### Notes
+- Next: optional Photoshop-style shear for a pre-rotated child when a group /
+  selection is resized non-uniformly (QR codes excepted -- they must stay
+  square). This needs a shear/affine term in the transform model.
+## [4.3.5.49] - 2026-06-14
+
+A group now rotates as a single unit: its box is bound to the group and shows
+rotated, and resizing a rotated group works in its own (rotated) space.
+
+### Changed
+- **A group rotates as one unit via its own transform rotation.** Before, the
+  group rotated its children and kept its own box axis-aligned -- so after a 90-deg
+  rotation, resizing deformed along the wrong (screen) axis. Now the group carries
+  the rotation on its own transform and the renderer rotates the whole group
+  (children render into a buffer that is rotated and pasted). The children stay in
+  the group's local, un-rotated space.
+- The selection box is now bound to the group like any other object: rotate the
+  group and the box shows rotated, and resize happens in the group's local axes
+  (so dragging a handle stretches the direction you expect).
+- `compute_bounds` keeps the group's rotation (it only recomputes x/y/w/h from
+  the local children) instead of resetting it.
+
+### Notes
+- The buffer render path added here is also the basis for the remaining piece:
+  effects applied to a group as a whole.
+
+### Validation
+- Updated the group-rotate tests to the new model (rotation lives on the group,
+  children stay unrotated) and added new ones (a rotated group renders as a unit
+  with width/height swapped; rotation survives compute_bounds); full suite 424
+  passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+## [4.3.5.48] - 2026-06-14
+
+Lines rebuilt on the same model as curves: their points are now LOCAL (relative
+to the transform), so a line behaves like every other object across the whole
+app -- box, move, resize, rotate, group, batch, save/load, export.
+
+### Changed (systemic fix)
+- **A line's points are now LOCAL (relative to transform.x/y), like a path's
+  path_data.** Previously they were absolute, which made the line a hybrid that
+  fought the transform and broke repeatedly. Now the transform IS the line's
+  bounding box and the renderer adds the transform origin, so the same
+  transform-based logic that works for every other object works for lines too.
+- A new `normalize_line()` keeps the invariant (transform = points' bbox, points
+  re-based to 0) after the endpoints change.
+
+### Fixed (all flow from the model change)
+- **Move** a line: only the transform changes (no more absolute-point juggling).
+- **Resize** a line: scales the local points about the origin, like a curve.
+- **Endpoint edit (P1/P2):** edits in world coords, then re-normalizes the box.
+- **Group:** a line resizes/moves correctly as part of a group.
+- **Batch:** x/y move only the transform; width/height scale the local points.
+- **Properties panel:** endpoint fields show world coords and write back through
+  the local model.
+- **SVG / PDF / legacy export:** add the transform origin to local points.
+
+### Migration
+- Files saved before this stored absolute points (no "_local_points" flag). On
+  load they're converted to local once (subtract the transform origin) so they
+  render in the same place; saving adds the flag so it never double-migrates.
+
+### Validation
+- Updated the old line tests to the local-point model and added new ones
+  (absolute->local migration, the flag prevents re-migration, normalize_line
+  re-bases the box, the renderer adds the transform so a line moves with it);
+  full suite 422 passed / 3 skipped. Verified end-to-end: real save/load keeps
+  points local, and SVG export emits correct world coords. Old CSV batch and
+  FORMAT_PATCH untouched.
+## [4.3.5.47] - 2026-06-14
+
+Lines now have a proper transform box and resize/rotate like other objects,
+including inside a group.
+
+### Fixed
+- **A line had no bounding box and couldn't be transformed.** The selection
+  overlay only drew the P1/P2 endpoints, so a line had no resize/rotate handles.
+  A selected line now shows a full transform box (8 resize handles + rotate)
+  alongside its P1/P2 endpoints. Clicking an endpoint still edits that endpoint
+  (it takes priority over the box corners).
+- **Resizing a line did nothing.** A line's points are absolute, so the resize
+  left them unchanged while the box grew. Resizing now scales the endpoints about
+  the anchor, so the line actually resizes.
+- **A line transformed badly inside a group.** Group resize now scales a child
+  line's endpoints (its baseline points are captured), so a line scales correctly
+  as part of a group.
+
+### Validation
+- New tests (a line overlay has both the box handles and endpoints; an endpoint
+  click wins over the box corner; resizing scales the endpoints about the anchor;
+  a line inside a group scales with it); full suite 418 passed / 3 skipped. Old
+  CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Line rotation already worked in the renderer (it routes through a rotated
+  buffer); now it's reachable via the box's rotate handle.
+- Still to do: effects on a group as a whole, document-mode header/footer
+  batching, halftone picker, and exports.
+## [4.3.5.46] - 2026-06-14
+
+Group phase 2a: a group resizes and rotates as a single unit.
+
+### Added
+- **Resize a group as a unit.** Dragging a selected group's resize handle scales
+  every child about the opposite anchor (position and size together), like
+  Photoshop. Child geometry follows -- absolute line points and local path data
+  scale, and text glyph scale stretches with the group.
+- **Rotate a group as a unit.** Dragging the rotate handle rotates every child
+  about the group center and adds the same spin to each child's own rotation. The
+  group's own box stays axis-aligned (the rotation lives on the children), and is
+  recomputed from the children on release.
+
+### Validation
+- New tests (group resize scales children about the anchor; group rotate turns
+  children about the center and moves their centers; compute_bounds resets the
+  group's own rotation); full suite 414 passed / 3 skipped. Old CSV batch and
+  FORMAT_PATCH untouched.
+
+### Notes
+- Phase 2b next: effects applied to the group as a whole (render the children
+  together into a buffer, then apply the effect). Plus document-mode header/footer
+  batching, halftone picker, and exports.
+## [4.3.5.45] - 2026-06-14
+
+UI polish: the whole multi-selection is highlighted in the Objects panel, and
+menu items no longer clip their labels.
+
+### Fixed
+- **A multi-selection only highlighted one row in the Objects panel.** The list
+  set just the primary as the current row, so a multi-selection looked like a
+  single highlight. Every selected object's row is now highlighted, with the
+  primary as the current item.
+- **Some menu items were too narrow to read fully.** Menu items now have
+  horizontal padding and a minimum width, plus styled separators, so labels and
+  their shortcuts aren't clipped together.
+
+### Validation
+- New tests (select-many highlights all selected rows and not others; the menu
+  style carries item padding + min width); full suite 411 passed / 3 skipped. Old
+  CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- This clears the UI items from that report. Remaining: group phase 2 (resize/
+  rotate a group, effects on the group as a whole), document-mode header/footer
+  batching, halftone picker, and exports.
+## [4.3.5.44] - 2026-06-14
+
+Group naming dialog, and a batch variable on a group now targets only the group.
+
+### Added
+- **Name a group when creating it.** Grouping a selection now asks for a name;
+  leaving it blank uses an auto "GroupNNN" (the next free number on the page,
+  filling gaps). The name shows in the Objects panel.
+
+### Fixed
+- **A batch variable on a group wrongly expanded to all its children.** Selecting
+  the group still counted leftover child ids from the multi-selection, so adding a
+  variable linked every child. A single selection now clears any prior
+  multi-selection, so a variable on a group targets just the group (which is
+  clearly the whole group anyway) -- no confusing per-child expansion.
+
+### Validation
+- New tests (selecting one object clears a prior multi-selection; the auto group
+  name fills gaps and starts at Group001); full suite 409 passed / 3 skipped. Old
+  CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Next (UI polish from the same report): some menu items are too narrow to read
+  fully, and a multi-selection in the Objects panel only highlights one row.
+- Then group phase 2 (resize/rotate a group, effects on the group), document-mode
+  header/footer batching, halftone picker, and exports.
+## [4.3.5.43] - 2026-06-14
+
+Yes -- batch now works with groups: a batch column can target a group or any
+object inside it.
+
+### Added
+- **Batch targets objects inside a group.** The object reference walks into
+  groups, so a batch column can drive a child that lives inside a group (and the
+  group itself, for its own transform). The batch panel's target lists now
+  include group children, and a child inside a group can be selected on the canvas
+  (so you can add a variable from it).
+
+### Fixed
+- **Selecting a group's child resolved to nothing.** Object lookup now searches
+  inside groups, so a child can be selected / targeted / batched instead of
+  silently failing.
+
+### Validation
+- New tests (a reference into a group is multi-level and resolves back; a batch
+  row reaches a child inside a group; target lists include group children; object
+  lookup resolves a group child); full suite 407 passed / 3 skipped. The batch
+  resolve/build already walked the tree; this wires the UI and selection to it.
+  Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Group phase 2 still to come: resize/rotate a group as a unit, and effects on the
+  group as a whole. Plus document-mode header/footer batching, halftone picker,
+  and exports.
+## [4.3.5.42] - 2026-06-14
+
+Grouping: a multi-selection can be grouped into a single unit, shown with its
+children in the Objects panel, moved as a whole, and ungrouped.
+
+### Added
+- **Group / ungroup a selection.** Edit menu (Ctrl+Shift+G to group, Ctrl+Shift+U
+  to ungroup) turns a multi-selection into a Group and back. Grouping keeps the
+  page stacking order; ungrouping dissolves the group's children back to the top
+  level and selects them.
+- **Groups show their children in the Objects panel**, indented under the group
+  with a connector glyph, so the grouping is visible (like Photoshop).
+- **Moving a group moves its contents.** A group's children are absolute, so
+  dragging the group (or nudging it) translates every child by the same delta.
+- **Group bounding box.** A group computes its box from its children (accounting
+  for child rotation), so it selects and reads correctly.
+
+### Validation
+- New tests (group/ungroup round-trips and needs 2+ objects, the group box spans
+  the children, moving the group translates children, the panel lists children
+  under the group); full suite 403 passed / 3 skipped. The Group data model and
+  rendering already existed; this adds the UI and group transform. Old CSV batch
+  and FORMAT_PATCH untouched.
+
+### Notes
+- Phase 2 (next): resize/rotate a group as a unit, and effects applied to the
+  group as a whole (rendered together, then the effect). Plus document-mode
+  header/footer batching, halftone picker, and exports.
+## [4.3.5.41] - 2026-06-14
+
+Non-uniform resize of a multi-selection now squashes/stretches text too, not
+just its box.
+
+### Fixed
+- **Text didn't squash on a non-uniform multi-selection resize.** Scaling the
+  selection changed a text box's dimensions but left the letters unchanged. The
+  multi-transform now multiplies the text's glyph scale (glyph_scale_x/y) by the
+  per-axis factors, so the renderer stretches/squashes the letters non-uniformly
+  -- true letter deformation, matching the single-object Shift-resize behavior.
+  Lines and paths already followed; this brings text in line.
+
+### Validation
+- New tests (a width-only multi-resize doubles a text box's glyph_scale_x and
+  leaves glyph_scale_y at 1; glyph_scale_x actually widens the rendered text);
+  full suite 399 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Last item from that report: grouping a selection (a group object shown and
+  ungroupable in the Objects panel, with effects on the group). Plus document-mode
+  header/footer batching, halftone picker, and exports.
+## [4.3.5.40] - 2026-06-14
+
+Multi-selection polish: only the union box shows now (no leftover handle box on
+the first/last object), and rotating the selection repaints more smoothly.
+
+### Fixed
+- **A stray transform box lingered on the primary object during a
+  multi-selection.** The union box and the primary object's single overlay were
+  both drawn. With 2+ objects selected the single overlay is now hidden, so only
+  the union box (the selection UI) shows.
+- **Rotating a multi-selection looked jumpy.** Each mouse-move kicked off a
+  separate async render, so objects appeared to rotate slightly out of sync. The
+  drag now uses the interactive live-preview render path, so the whole selection
+  repaints together and responsively.
+
+### Validation
+- New test (a multi-selection hides the single overlay while keeping the union
+  box); full suite 397 passed / 3 skipped. Old CSV batch and FORMAT_PATCH
+  untouched.
+
+### Notes
+- Still to do from the same report: non-uniform scaling should squash text
+  non-uniformly, and grouping a selection (a group object shown/ungroupable in the
+  Objects panel, with effects on the group). Plus document-mode header/footer
+  batching, halftone picker, and exports.
+## [4.3.5.39] - 2026-06-14
+
+Hotfix: making a multi-selection by rubber-band raised a repeating error.
+
+### Fixed
+- **Multi-selection raised AttributeError ('EdofCanvas' has no '_view_zoom').**
+  The 4.3.5.37 union-box handle code called self._view_zoom(), which only exists
+  on the SelectionOverlay, not on EdofCanvas. Hovering or hit-testing the
+  multi-selection box (in _update_cursor / mouseMove) raised repeatedly. It now
+  uses the canvas's own zoom (the _zoom attribute). Affected 4.3.5.37 and
+  4.3.5.38.
+
+### Validation
+- New regression test (hit-testing and cursor updates over the multi-selection
+  box don't raise); full suite 396 passed / 3 skipped. Old CSV batch and
+  FORMAT_PATCH untouched.
+## [4.3.5.38] - 2026-06-14
+
+Normal mode: editing a property in the panel now applies to the whole
+multi-selection, and one button applies a layer effect to all selected objects.
+
+### Added
+- **Properties panel edits the whole multi-selection.** With several objects
+  selected, changing width / height / rotation in the panel applies the same
+  value to each; changing X / Y moves the whole selection by the same delta;
+  changing opacity applies to all. Lines/paths follow via the same geometry rules
+  as batch. A single selection behaves exactly as before.
+- **Apply layer effects to all selected.** A new button in the Layer Effects
+  action row copies the primary object's layer style (effects + blending + the
+  master flag) onto every other selected object in one click, so a multi-selection
+  gets the same effects at once.
+
+### Fixed
+- **Copy/paste layer effects now carries the master flag.** Pasting a layer style
+  (here and via the existing copy/paste buttons) also copies the "All effects"
+  master, so pasted effects actually render instead of sitting under an off
+  master.
+
+### Validation
+- New tests (panel width/opacity apply to all, X/Y apply as a delta, effects-to-
+  selection copies effects + master + opacity, single selection stays isolated);
+  full suite 395 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- This completes the multi-selection request: transform the selection (4.3.5.37),
+  effects to all, and edit shared properties from the panel.
+- Still to do from before: document-mode header/footer batching, halftone
+  pattern-file picker UI, and exports/import.
+## [4.3.5.37] - 2026-06-14
+
+Normal mode: the multi-selection box can now transform the whole selection --
+resize (uniform and non-uniform) and rotate together, like Photoshop.
+
+### Added
+- **Transform the whole multi-selection.** The selection box now has resize
+  handles (8) and a rotate handle. Dragging a corner/edge scales every selected
+  object about the opposite anchor (Shift on a corner = uniform); dragging the
+  rotate handle rotates them all about the selection center (Shift = 15-degree
+  snaps). Each object's position and size scale together, and lines/paths follow
+  their boxes (absolute line points translate + scale; local path data scale).
+  Cursors reflect the handle under the pointer.
+
+### Validation
+- New tests (union bbox + handle set, corner resize scales every object about the
+  anchor, rotate turns them about the center and moves their centers); full suite
+  391 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Still to come from the same request: a layer effect applied to all selected
+  objects at once, and editing shared properties from the properties panel. Plus
+  document-mode header/footer batching, halftone picker, and exports.
+## [4.3.5.36] - 2026-06-14
+
+Fixed curve vanishing on height change and line not moving, and added absolute
+vs incremental X/Y to batch.
+
+### Fixed
+- **Changing a curve's height made it vanish.** 4.3.5.34 scaled path data about
+  (transform.x, transform.y), but path data are LOCAL (the renderer adds the
+  transform), so that pushed the curve far off-canvas. It now scales about the
+  local origin (0,0), like the interactive resize -- the curve squashes/stretches
+  in place.
+- **Moving a line did nothing.** Line points are absolute (the renderer does NOT
+  add the transform), so changing x/y left the line where it was -- both in batch
+  and when dragging it in the editor. Setting x/y (and dragging) now translates
+  the line's points by the same delta, so the line actually moves. Multi-drag
+  moves lines too.
+- **Scaling a line's width/height now moves its endpoints** about the box origin,
+  so a batched size change reshapes the line instead of being ignored.
+
+### Added
+- **Absolute and incremental X/Y in batch.** transform.x / transform.y set the
+  position absolutely (as before); new transform.x_offset / transform.y_offset
+  ADD to the current position (negative values move the other way). So one
+  variable can place objects exactly, another can nudge them relative to where
+  they are.
+
+### Validation
+- New tests (height keeps a curve on-canvas, x/y translate a line's absolute
+  points, incremental offsets add/subtract incl. negatives on line and rect, the
+  offset descriptors are in the tree); updated the 4.3.5.34 path tests for local
+  coords. Full suite 388 passed / 3 skipped. Old CSV batch and FORMAT_PATCH
+  untouched.
+
+### Notes
+- This clears the rest of that report. Still open from before: document-mode
+  header/footer batching, halftone pattern-file picker UI, and exports/import.
+## [4.3.5.35] - 2026-06-14
+
+3D Batch: a multi-selection now shows one bounding box around all selected
+objects (like Photoshop), and during a batch preview the box uses the projected
+geometry instead of the template.
+
+### Changed
+- **One bounding box around all multi-selected objects.** Instead of a separate
+  frame per object, a multi-selection now draws a single dashed box spanning all
+  of them with corner marks, like Photoshop. Rotated objects expand the box to
+  their rotated extent.
+
+### Fixed
+- **Selection boxes showed the template during a batch preview.** The
+  multi-selection box is now computed from the PROJECTED objects (the previewed
+  row applied), so it matches what's rendered -- e.g. a batched size change moves
+  the box, not the original template geometry.
+
+### Validation
+- New tests (the projected-selection helper returns all selected objects; during
+  a preview the box reflects the projected width, not the template); full suite
+  382 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Still to do from the same report: absolute vs incremental X/Y (next). Plus
+  document-mode header/footer batching, halftone pattern-file picker UI, exports.
+## [4.3.5.34] - 2026-06-14
+
+Objects panel: Ctrl/Shift multi-selection now works and rows are taller. Batch:
+resizing a line/curve squashes it instead of cropping, and QR opacity is honored.
+
+### Fixed
+- **Ctrl/Shift multi-selection didn't work in the Objects panel.** The custom row
+  widget ate the click, so Ctrl-click never reached the list's selection. The row
+  now passes clicks through to the list (its toggle buttons stay clickable), so
+  Ctrl-click toggles and Shift-click selects a range, mirrored to the canvas.
+- **Resizing a curve cropped it; a line ignored height entirely.** Setting a
+  shape's width/height (via batch or the panel) now scales its local geometry
+  (path data / line endpoints) proportionally about the transform origin, like
+  the interactive resize -- so the curve squashes/stretches and the line follows
+  its box. Rects and other objects without local geometry are unchanged.
+- **QR opacity was ignored.** The QR renderer never applied the object's opacity,
+  so a batched opacity did nothing on a QR code; it now scales the QR alpha. The
+  QR also centers in a non-square box instead of silently ignoring one side.
+
+### Changed
+- **Taller Objects-panel rows (40px).** The selection highlight no longer crowds
+  the icon and name.
+
+### Validation
+- New tests (dimension setters scale line points and path data about the origin
+  while leaving rects alone, QR opacity scales the alpha, rows are >=40px tall and
+  pass mouse through while buttons stay clickable); full suite 380 passed / 3
+  skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Opacity/width/height now apply correctly across textbox, rect, line, path/curve
+  and QR (the data layer already did; this fixes the rendering and geometry).
+- Still to do (reported together): a single bounding box around all multi-selected
+  objects and projected-geometry outlines during batch preview, and absolute vs
+  incremental X/Y. Plus document-mode header/footer batching, halftone picker,
+  and exports.
+## [4.3.5.33] - 2026-06-14
+
+3D Batch: fixed number/text variables being uneditable in the right panel, and
+the table filter now matches an object's name/type (e.g. "rectangle").
+
+### Fixed
+- **Number and plain-text variables had no editable field in the right panel.**
+  The template panel's value editor lost its fallthrough case in 4.3.5.29 (the
+  default QLineEdit was created but never wired up or returned), so variables
+  like transform.height, width, x, y, rotation and plain text showed no editor --
+  the bug David hit with a height variable. The default editor is restored and
+  wired up; all 27 descriptor kinds now produce a usable widget.
+
+### Added
+- **Filter by object name/type.** The table filter now also matches the target
+  object of a column by its name, object type, and a human word for its shape
+  (e.g. typing "rectangle" matches columns targeting a rect shape, even though
+  the table never prints the object name). A name/type match is column-level, so
+  it shows all rows, like a variable-name match.
+
+### Validation
+- New tests (every descriptor yields an editor, a height variable is editable via
+  keyboard, filter matches an object by "rectangle"); full suite 373 passed / 3
+  skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Still to do: document-mode header/footer batching, halftone pattern-file picker
+  UI, and exports/import.
+## [4.3.5.32] - 2026-06-14
+
+3D Batch: multi-selection now works in the Objects list and on the canvas
+(Ctrl/Shift + rubber-band rectangle), and the table has a text filter.
+
+### Added
+- **Multi-selection in the Objects list.** The list is now extended-selection:
+  Ctrl-click toggles, Shift-click selects a range, and the selection mirrors to
+  the canvas so the batch panel sees all selected objects.
+- **Rubber-band (rectangle) selection on the canvas.** Drag from empty space to
+  draw a selection box; objects whose bounding box falls inside are selected.
+  Ctrl/Shift adds to the current selection instead of replacing it. Ctrl-click
+  and Shift-click on objects continue to work as before.
+- **Multi-selected objects are outlined on the canvas** (blue frames) so a
+  multi-selection is visible, alongside the primary object's transform overlay.
+- **Table text filter.** A filter box above the batch table hides rows that
+  don't match: type a value (e.g. "Hello", "99") to show only rows containing it,
+  or a variable name to match its whole column. Case-insensitive; clearing shows
+  all. The page filter (all / active-page rows) is unchanged.
+
+### Validation
+- New tests (object list is extended-selection with the multi signal, canvas
+  set_multi_selection, rectangle bbox intersection, table filter by value and by
+  column name); full suite 370 passed / 3 skipped. Old CSV batch and
+  FORMAT_PATCH untouched.
+
+### Notes
+- "edof tabs" (a nicer custom table component to replace the Qt table in the
+  batch UI) is already tracked in the roadmap's TBD section.
+- Still to do: document-mode header/footer batching, halftone pattern-file picker
+  UI, and exports/import.
+## [4.3.5.31] - 2026-06-14
+
+3D Batch: selecting several objects and adding a variable now shows only the
+attributes they all share, and each variable drives every selected object.
+
+### Added
+- **Multi-selection common-attribute tree.** With several objects selected
+  (Ctrl/Shift-click on the canvas or object list), the Add-variable dialog now
+  filters the tree to the attributes COMMON to all of them -- so you only batch
+  what they share (e.g. geometry and shared style, but not text if one isn't a
+  text box). The title shows "(N objects)", empty bands are dropped, and each
+  variable you add is linked to every selected object (multi-target). Single
+  selection is unchanged (full tree).
+
+### Validation
+- New tests (multi-select tree shows only shared attributes with the count in
+  the title, empty bands dropped, single selection stays unfiltered); full suite
+  366 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- This completes the multi-target flow: link/unlink an existing variable
+  (4.3.5.23), apply to all linked objects incl. effects (4.3.5.27), and now
+  create from a multi-selection with a shared-attribute tree.
+- Still to do: document-mode header/footer batching, halftone pattern-file picker
+  UI, and exports/import.
+## [4.3.5.30] - 2026-06-14
+
+3D Batch: the effects master is now truly explicit -- Path A no longer enables
+it either, so an effect batched onto a second object stays hidden until a master
+variable enables it (matching the warning).
+
+### Fixed
+- **An effect batched onto an object that had none secretly enabled the master.**
+  When a column targeted an effect the object didn't have, Path A created the
+  effect and (for the first effect) turned the object's master "All effects" flag
+  on -- so the effect showed even with no master variable, contradicting the red
+  warning. Path A no longer touches the master. The master is now explicit
+  everywhere: an effects.all_enabled variable set true, or the master already on.
+  So a shadow linked to a second object without a master variable stays hidden,
+  consistent with the warning the panel shows.
+
+### Validation
+- New tests (Path A creates the effect but leaves the master off; with an
+  all_enabled variable set true the effect renders); full suite 363 passed / 3
+  skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- The rule is now uniform: effects render only when the master is explicitly on
+  (a master variable, or turned on by hand). The panel's red warning flags any
+  object with an effect variable but no master variable.
+- Still to do: a multi-selection tree filtered to common attributes,
+  document-mode header/footer batching, halftone pattern-file picker UI, exports.
+## [4.3.5.29] - 2026-06-14
+
+3D Batch: effects need an explicit master variable (with a red warning when it's
+missing), plus a font-family dropdown and a justify-mode dropdown.
+
+### Changed
+- **Effects no longer work without an explicit master variable.** Adding an
+  effect in the dialog no longer silently turns the object's master "All
+  effects" flag on (that was a state change outside the batch's control). Per
+  request, effects need an explicit "effects enabled" (all_enabled) variable, or
+  the master already on.
+
+### Added
+- **Red warning when the master variable is missing.** The template panel shows a
+  red banner when an object has an effect variable but no master variable (and
+  the master isn't already on): effects won't render until an "All effects"
+  variable is added and set true.
+- **Font-family dropdown.** The value editor for a style.font_family variable is
+  now a real font picker (QFontComboBox) instead of a free-text field.
+- **Justify-mode in batch, as a dropdown.** style.justify_mode (space / full --
+  how justified text spreads) was missing from batch; it's now available and, as
+  an enum, edits via a dropdown. (Alignment justify was already there.)
+
+### Validation
+- New tests (add-instance leaves the master alone, the red warning shows without
+  a master variable and hides once one is added, justify_mode is in the registry
+  with the right choices) plus updated prior test; full suite 361 passed / 3
+  skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Still to do: a multi-selection tree filtered to common attributes,
+  document-mode header/footer batching, halftone pattern-file picker UI, exports.
+## [4.3.5.28] - 2026-06-14
+
+3D Batch: the effects master flag is explicit again -- enabling an effect no
+longer secretly forces it on, so removing a master variable hides the effect as
+expected.
+
+### Fixed
+- **Removing a master variable didn't hide the effect.** Enabling an effect used
+  to auto-turn-on the object's master "All effects" flag (added in 4.3.5.26 for a
+  multi-object symptom that was really the effect-id bug, fixed properly in
+  4.3.5.27). That auto-toggle surprised the user: after unlinking the master
+  variable from an object, the shadow stayed visible because enabling it forced
+  the master back on. The auto-toggle is removed -- the master is controlled
+  explicitly only (an effects.all_enabled variable, or the master already on).
+
+### Changed
+- **Adding an effect in the dialog turns the master on.** So a freshly added
+  effect can still render (the master gates all effects), matching the
+  layer-effects dialog. The batch then drives the per-effect enabled, and the
+  master stays explicit (no hidden toggling on apply).
+
+### Validation
+- New tests (enabling an effect leaves the master alone, adding an effect turns
+  the master on, removing the master variable hides the effect) plus updated
+  prior master tests; full suite 359 passed / 3 skipped. Old CSV batch and
+  FORMAT_PATCH untouched.
+
+### Notes
+- Multi-object effects still work: link a master (all_enabled) variable to the
+  objects alongside the per-effect variables, or have the master on. The
+  per-effect enabled is applied to every linked object (4.3.5.27).
+- Still to do: a multi-selection tree filtered to common attributes,
+  document-mode header/footer batching, halftone pattern-file picker UI, exports.
+## [4.3.5.27] - 2026-06-14
+
+3D Batch: effects now apply to ALL linked objects (not just the first), text
+justify works, and a multi-selection batches the shared attribute on every
+selected object.
+
+### Fixed
+- **Effects applied only to the first of several linked objects.** A variable on
+  an effect stored the primary object's effect id (eid), which is unique per
+  object, so on other linked objects the eid didn't match and nothing applied.
+  The apply now uses the eid only where it matches (the primary, keeping its
+  reorder-safety) and falls back to the positional descriptor on the other
+  objects -- so the effect applies to all of them.
+- **Text justify did nothing.** Like plain text, run-level alignment wins in the
+  layout engine, so setting only style.alignment was invisible. Alignment now
+  pushes onto every run and clears the per-paragraph override, so justify (and
+  the others) actually show. (justify was already in the choices.)
+
+### Added
+- **Multi-selection batches all selected objects.** Select several objects
+  (Ctrl-click / Shift-click on the canvas or the object list), then Add variable:
+  each new variable is linked to every selected object the attribute applies to
+  (multi-target), so one row value drives them all. Incompatible objects are
+  skipped per attribute.
+
+### Validation
+- New tests (eid-bound column falls back for other targets so all get the effect,
+  justify applies to runs, multi-select returns primary-first, multi-select add
+  links all and applies to all); full suite 357 passed / 3 skipped. Old CSV batch
+  and FORMAT_PATCH untouched.
+
+### Notes
+- Per-span rich-text formatting in a batched text cell (bring in formatted text
+  via richer tables) is deferred to after 4.4.0, per request.
+- Still to do: a multi-selection tree filtered to the common attributes (header
+  "Text (N objects)"), document-mode header/footer batching, halftone
+  pattern-file picker UI, and exports/import.
+## [4.3.5.26] - 2026-06-14
+
+3D Batch: text variables now actually change the text, enabling an effect turns
+on the master so it renders, added effects use sensible defaults, and the
+Add-variable dialog gets a left-hand effect column with remove.
+
+### Fixed
+- **Batch text on a textbox did nothing.** A textbox stores plain `text` plus
+  rich-text `runs`, and the renderer draws the runs -- so setting `text` alone
+  was invisible. Setting text now rewrites the runs too, preserving the first
+  run's formatting (font / size / bold / colour ...), and splits paragraphs into
+  runs. So a batched text keeps the look it had; type plain text into the cell
+  and the formatting is kept.
+- **Enabling an effect on the second object showed nothing.** Turning an effect
+  on (enabled=true) now also turns on the object's master "All effects" flag,
+  which gates all effects -- otherwise the enabled effect still wouldn't render.
+  An explicit effects.all_enabled in the same row still wins (it applies last).
+- **Added effects didn't use sensible defaults.** "+ Add effect instance" now
+  builds the effect with the same defaults the 'add effect' UI uses (e.g. drop
+  shadow direction 315, not the bare dataclass 135), via make_default_effect.
+
+### Added
+- **Effect column moved left, with remove.** In the Add-variable dialog the
+  effect reorder list is now a left-hand column (dialog widened to fit), and has
+  a "Remove selected effect" button to drop an effect added by mistake (its
+  eid-bound columns are dropped with it).
+
+### Validation
+- New tests (text set updates runs + preserves formatting + splits paragraphs,
+  enabling an effect turns on the master, disabling leaves it, all_enabled still
+  wins, add-instance uses sensible defaults, remove selected effect) plus updated
+  prior tests; full suite 353 passed / 3 skipped. Old CSV batch and FORMAT_PATCH
+  untouched.
+
+### Notes
+- For a textbox with several differently-formatted spans, a batched text
+  collapses them to one run with the first span's look (a reasonable rule for a
+  single cell); rich per-span editing stays in the inline editor.
+- Still to do: creating a variable from a multi-selection with a common-attribute
+  tree, document-mode header/footer batching, halftone pattern-file picker UI,
+  and exports/import.
+## [4.3.5.25] - 2026-06-14
+
+3D Batch: Add-variable dialog now lists only the object's effects (add more
+dynamically), the reorder list covers all effect types and refills live, and
+linking objects refreshes the preview immediately.
+
+### Fixed
+- **Add-variable tree no longer floods with every effect type.** It used to
+  pre-list a slot for all 13 effect types even when the object had none. Now it
+  shows only the effects the object actually has; you add others dynamically with
+  "+ Add effect instance".
+- **"+ Add effect instance" now really adds the effect to the object** (disabled),
+  like the layer-effects dialog. So it appears as an instance, can be reordered,
+  and a variable on it binds by effect id.
+- **Effect reorder list wasn't visible / didn't cover added effects.** The
+  drag-to-reorder list now refills live whenever effects change (including ones
+  just added), and lists all effect types (not only identical instances), exactly
+  like the layer-effects dialog. It shows whenever the object has 2+ effects.
+- **Linking a variable to more objects didn't update the canvas right away.** The
+  link/unlink dialog (both template and table tabs) now re-projects the current
+  row on accept, so newly linked objects reflect the row's value immediately.
+
+### Validation
+- New tests (tree starts with no effect slots, add-instance adds a real disabled
+  effect, reorder lists all types, linking refreshes the preview) plus updated
+  prior tests for the new dynamic behavior; full suite 347 passed / 3 skipped.
+  Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Still to do: creating a variable from a multi-selection with a tree filtered to
+  the selection's common attributes, document-mode header/footer batching,
+  halftone pattern-file picker UI, and exports/import.
+## [4.3.5.24] - 2026-06-14
+
+3D Batch: effects can be drag-reordered inside the Add-variable dialog, kept in
+sync with the object (and so the layer-effects dialog).
+
+### Added
+- **Drag-reorder effects in the Add-variable dialog.** When the object has two
+  or more effects, the dialog shows a small drag-to-reorder list of them above
+  the attribute tree. Dragging rewrites the effect order ON THE OBJECT (the same
+  order the layer-effects dialog uses, so the two stay in sync), and the
+  attribute tree's instance ordinals (#1, #2, ...) update to match. This is the
+  second of the two ways to reorder effects you asked for (the layer-effects
+  dialog being the first).
+
+### Robustness
+- Reordering here is safe because of stable effect ids (v4.3.5.21): a variable
+  bound to a specific effect by its id keeps driving THAT effect across the
+  reorder, even though its positional ordinal changes. The reorder is applied
+  live, so it's reflected on the canvas even if the dialog is cancelled.
+
+### Validation
+- New tests (reorder list shown only with 2+ effects, dragging writes the new
+  order to the object, an eid-bound variable still drives the same effect after a
+  dialog reorder); full suite 343 passed / 3 skipped. Old CSV batch and
+  FORMAT_PATCH untouched.
+
+### Notes
+- Still to do: creating a variable from a multi-selection with a tree filtered
+  to the selection's common attributes, document-mode header/footer batching,
+  halftone pattern-file picker UI, and exports/import.
+## [4.3.5.23] - 2026-06-14
+
+3D Batch: a variable can now drive several objects via a link/unlink dialog
+(one variable, many objects).
+
+### Added
+- **Link/unlink objects dialog.** A variable (column) can be linked to more than
+  one object so a single row value drives them all (e.g. the same text on three
+  text boxes, or one shadow toggle across several shapes). In the template tab,
+  each variable has a link button (next to remove); in the table tab, right-click
+  a column header -> "Link objects". The dialog lists every object across the
+  document that the variable's attribute can apply to (incompatible objects are
+  hidden), with the current targets pre-checked. The data layer for this
+  (extra_targets) shipped earlier; this is the UI to manage it.
+- **Object count shown.** When a variable drives more than one object, its data
+  name shows "(N objects)".
+
+### Validation
+- New tests (dialog lists only compatible objects with current targets
+  pre-checked, accept writes primary + extra targets, end-to-end multi-target
+  apply sets the same value on all linked objects, empty selection is rejected);
+  full suite 340 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Creating a variable from a multi-selection with a tree filtered to the
+  selection's COMMON attributes (header "Text (2 objects)") is the related
+  follow-up; this release covers linking objects to an existing variable.
+- Still to do: drag-reorder of effects in the Add-variable tree (identity is in),
+  the common-attribute multi-selection tree, document-mode header/footer
+  batching, halftone pattern-file picker UI, and exports/import.
+## [4.3.5.22] - 2026-06-14
+
+3D Batch: page numbers are now 1-based in the UI, and page 0 means "cross-page".
+
+### Changed
+- **Page targeting is 1-based, with 0 = cross-page.** The per-row Page field
+  used to show the internal 0-based index (page 1 displayed as "0"), which was
+  confusing. It now shows the natural page number (page 1 is "1", page 2 is "2").
+  Entering **0** (or "crosspage" / blank) makes the row CROSS-PAGE: it applies to
+  every page instead of one. A cross-page row shows on every page in the table's
+  page filter. Internally page_target stays 0-based for a concrete page and is
+  None for cross-page; the UI layer does the 1-based translation.
+
+### Validation
+- New tests (page display/parse helpers map 0<->cross-page and N<->N-1, a
+  cross-page row applies to all targeted pages, a concrete page row applies only
+  to that page); full suite 336 passed / 3 skipped. Old CSV batch and
+  FORMAT_PATCH untouched.
+
+### Notes
+- A cross-page row applies each column wherever its target object resolves; with
+  multi-target columns that's several pages. (A single object lives on one page,
+  so a cross-page row on it still only changes that page -- as expected.)
+- Still to do: drag-reorder of effects in the Add-variable tree (identity is in),
+  link/unlink-objects dialog, variable tree filtered to a multi-selection's
+  common attributes, document-mode header/footer batching, halftone pattern-file
+  picker UI, and exports/import.
+## [4.3.5.21] - 2026-06-14
+
+3D Batch: stable effect identity, so a variable stays bound to a specific effect
+across reordering (foundation for robust multi-effect batching).
+
+### Added
+- **Effects have a stable id (`eid`).** Each layer effect now carries a stable
+  per-effect id, generated on creation and serialized. This is the foundation
+  for binding a batch variable to a SPECIFIC effect instead of its position.
+- **Batch columns can bind to an effect by id.** A column gained an
+  ``effect_id`` field. When set, it targets that exact effect instance,
+  overriding the positional ordinal in the path -- so reordering effects on the
+  layer doesn't re-point the variable to a different instance. Adding a variable
+  for an effect that's already on the object now records its eid automatically,
+  so it's reorder-safe from the start. Serialized; empty = positional (backwards
+  compatible).
+
+### Validation
+- New tests (effects get unique eids, eid survives serialization,
+  effect_id_for_path resolves the right instance, an eid-bound column survives a
+  reorder while a positional one wouldn't, column effect_id serializes); full
+  suite 333 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Drag-reorder of effects inside the Add-variable tree (kept in sync with the
+  layer-effects dialog) is the next step; the identity it relies on is now in,
+  so reordering can be made safe.
+- Still to do: link/unlink-objects dialog, variable tree filtered to a
+  multi-selection's common attributes, page numbering 1-based (0 = cross-page),
+  document-mode header/footer batching, halftone pattern-file picker UI, and
+  exports/import.
+## [4.3.5.20] - 2026-06-14
+
+3D Batch: selection-box now tracks batched/recorded geometry, and halftone
+patterns are batched by file path instead of a raw base64 cache.
+
+### Fixed
+- **Selection box ignored batched size changes.** While a batch row is
+  projected, the canvas renders the row applied to a deep copy, but the live
+  object still had the old geometry, so the bounding box (and its handles) stayed
+  at the old size. The overlay is now driven by the PROJECTED object, so it
+  matches what's drawn (e.g. a batched width/height).
+- **Recording didn't show live edits.** If a row was being projected when you
+  started recording, the canvas kept rendering that projection on a deep copy,
+  so live edits during recording (size changes, the selection box) didn't show.
+  Starting a record now drops the active projection, so the canvas shows your
+  live edits.
+
+### Changed
+- **Halftone patterns are batched by file path.** The old ``ht_patterns``
+  (base64 image cache) was offered as a batchable text field, which was
+  meaningless and tied a row to an internal backup. It's removed from batch;
+  instead a halftone effect now exposes a pattern FILE PATH (``ht_pattern_path``,
+  plus per-channel ``#2``..``#4`` when the colour mode uses channels). Setting it
+  loads the PNG from the path at apply time (downscaled like the UI), so the path
+  is the source of truth -- exactly what an imported file needs. The pattern mode
+  remains batchable as ``ht_pattern_mode``. Paths are serialized
+  (``ht_pattern_paths``).
+
+### Validation
+- New tests (overlay reflects projected geometry, start-recording clears the
+  projection, halftone pattern path loads a file / rejects a bad one / is
+  serialized, raw base64 patterns no longer batchable); full suite 328 passed /
+  3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- A UI to pick halftone pattern files (open-file with preview) outside the
+  effect dialog is a follow-up; the data layer (path = source of truth) is in.
+- Ordinal effect paths are still positional (#1 = first on the layer). Making
+  variables stick to a specific effect across a reorder (stable effect identity)
+  and drag-reorder inside the Add-variable tree are the next big item, per the
+  discussion.
+- Still to do: link/unlink-objects dialog, variable tree filtered to a
+  multi-selection's common attributes, page numbering 1-based (0 = cross-page),
+  document-mode header/footer batching, exports/import.
+## [4.3.5.19] - 2026-06-14
+
+3D Batch: unique column-header validation and a tidier (collapsed) Add-variable
+tree.
+
+### Added
+- **Column headers are kept unique.** Variable names must be unique (export/
+  import identifies columns by header), so the UI now prevents duplicates: in
+  the value editor a name that clashes with another column is rejected and the
+  field flagged red with a tooltip; in the Add-variable dialog, accepting with a
+  duplicate (or repeated) name flags the offending fields and shows a warning
+  instead of accepting. Row names are left free (they're data, not headers).
+
+### Changed
+- **Add-variable tree starts collapsed where it's deep.** The Layer Effects
+  group and its per-instance subgroups now start collapsed (they can get long,
+  especially with several instances); Content / Geometry / Style stay expanded
+  since they're short flat lists. Adding an instance expands Layer Effects and
+  the new subgroup so it's visible.
+
+### Validation
+- New tests (header-uniqueness helper incl. case-insensitive and self-exclude,
+  dialog rejects a duplicate name then accepts a fresh one, effects collapsed by
+  default); full suite 322 passed / 3 skipped. Old CSV batch and FORMAT_PATCH
+  untouched.
+
+### Notes
+- Reordering effects already exists in the layer-effects dialog (drag-and-drop),
+  and the Add-variable tree already reflects the template's existing effects as
+  "(on object)" instances in layer order; ordinal batch paths (#1, #2, ...)
+  follow that order. If variables should "stick" to a specific effect across a
+  reorder, that's a follow-up to discuss.
+- Still to do: the link/unlink-objects dialog (one variable, several objects),
+  the variable tree filtered to a multi-selection's common attributes, page
+  numbering 1-based (0 = cross-page), document-mode header/footer batching, and
+  exports/import.
+## [4.3.5.18] - 2026-06-14
+
+3D Batch: nicer Add-variable dialog -- inline name fields and manual
+multi-instance effects.
+
+### Changed
+- **Variable names are now inline text fields.** The Add-variable tree had a
+  double-click-to-edit cell for the variable name, which was awkward. Each
+  checkable attribute now has a real text field next to it you can click and
+  type into directly (with a "variable name (optional)" placeholder).
+
+### Added
+- **Add several instances of the same effect manually.** The dialog gained a
+  "+ Add effect instance" button (pick the effect type from its menu). Each
+  click adds another instance subgroup to the tree (drop_shadow #2, #3, ...),
+  so you can batch multiple same-type effects (e.g. several drop shadows on one
+  object) without recording them first. Checks and typed names are preserved
+  when the tree rebuilds after adding an instance.
+
+### Validation
+- New tests (line-edit names returned on accept, add-effect-instance adds the
+  ordinal subgroup and returns it with its name, checks/names survive an
+  instance-add rebuild); existing tree-dialog test updated for the line-edit
+  names; full suite 319 passed / 3 skipped. Old CSV batch and FORMAT_PATCH
+  untouched.
+
+### Notes
+- Still to do: the link/unlink-objects dialog (one variable, several objects),
+  the variable tree filtered to a multi-selection's common attributes, page
+  numbering 1-based (0 = cross-page), document-mode header/footer batching, and
+  exports/import.
+## [4.3.5.17] - 2026-06-14
+
+3D Batch: several effects of the same type now fully work (record, projection,
+and the variable tree), plus a master-switch precedence fix.
+
+### Fixed
+- **Master "All effects" off now wins.** With ``all_enabled=false`` and an
+  effect's ``enabled=true`` in the same row, the shadow used to appear: creating
+  the effect via Path A turned the master on as a side effect, overriding the
+  explicit master-off. Path A now only flips the master on when the object had
+  NO effects at all (the genuine first-effect case); an explicit
+  ``effects.all_enabled`` in the row applies last (lowest priority) and stays
+  authoritative, so master-off reliably hides every effect.
+- **The 2nd effect of a type could be turned off but not on.** After recording
+  two drop shadows, projection rebuilt the object from a template with no
+  shadows, and the ``#2`` path couldn't create the second instance (Path A was
+  first-instance only), so it never appeared. Path A now pads instances up to
+  the requested ordinal (you can't have a 2nd without a 1st), so a recorded or
+  hand-made ``drop_shadow#2`` projects correctly and toggles both ways.
+
+### Added
+- **Add-variable tree handles duplicate effects.** For an effect already on the
+  object, the tree shows one expandable subgroup per existing instance
+  ("drop_shadow", "drop_shadow #2", ... marked "on object"), plus one extra
+  "#N (new)" subgroup to batch the next instance even though the object doesn't
+  have it yet. So you can add a variable for a second same-type effect directly,
+  instead of being blocked because the first is already checked.
+- **More batch logging** around the master switch and Path-A effect creation
+  (``registry.all_enabled_set``, ``registry.pathA_create_effect`` with whether
+  it set the master), to trace effect/master interactions from the debug log.
+
+### Validation
+- New tests (master-off overrides Path-A enable, Path A leaves the master alone
+  when the object already has effects, plus the ordinal/seed/duplicate coverage
+  from 4.3.5.16); full suite 317 passed / 3 skipped. Old CSV batch and
+  FORMAT_PATCH untouched.
+
+### Notes
+- Effect dialog and Properties already read the live object, so in record mode
+  they reflect the current state (incl. effects added while recording); moving a
+  field there captures it into the record via the normal edit hook.
+- Still to do: the link/unlink-objects dialog (one variable, several objects),
+  the variable tree filtered to a multi-selection's common attributes, page
+  numbering 1-based (0 = cross-page), document-mode header/footer batching, and
+  exports/import.
+## [4.3.5.16] - 2026-06-13
+
+3D Batch: seed-value fix for effect toggles, and support for several effects of
+the same type on one layer.
+
+### Fixed
+- **Seeded effect-toggle cells were misleading.** Adding a variable for an
+  effect's ``enabled`` flag on an object that doesn't have the effect produced
+  an empty cell that visually showed the first choice ("true") without actually
+  storing it, so projection did nothing until you toggled it. The ``enabled``
+  reader now returns a concrete value: "false" when the object has no such
+  effect, or the real state when it does. So a seeded cell is "false" (per the
+  template) and you flip it to "true" -- one extra click, but no phantom value.
+
+### Added
+- **Several effects of the same type per layer are now batchable
+  independently.** Paths gained an ordinal index: ``effects.drop_shadow.enabled``
+  targets the first drop shadow (unchanged, backwards compatible), while
+  ``effects.drop_shadow#2.enabled``, ``#3`` and so on target the later instances
+  in layer order. ``describe_object`` emits these for objects that have
+  duplicates, ``find_descriptor`` resolves them, and recording captures a newly
+  added 2nd/3rd instance under its ordinal path (the first, unchanged, instance
+  is left alone). Path-A creation (an effect the template doesn't have) still
+  applies to the first instance only -- you can't fabricate an arbitrary Nth
+  instance out of nothing, but once the instances exist (e.g. by recording) each
+  is independently addressable.
+
+### Validation
+- 7 new tests (enabled-reader false/true per template, ordinal paths emitted,
+  ordinal descriptor targets the right instance, ordinal batch applies
+  independently, Path-A only for the first instance, recording captures the 2nd
+  same-type effect); full suite 315 passed / 3 skipped. Old CSV batch and
+  FORMAT_PATCH untouched.
+
+### Notes
+- Still to do: the link/unlink-objects dialog (one variable, several objects),
+  the variable tree filtered to a multi-selection's common attributes, page
+  numbering 1-based (0 = cross-page), document-mode header/footer batching, edit/
+  remove icons (pending PNGs), record-navigation niceties, and exports/import.
+## [4.3.5.15] - 2026-06-12
+
+3D Batch: five fixes found from the debug log, around record mode and effects.
+
+### Fixed
+- **Edits during recording leaked onto the template.** An effect added while
+  recording stayed on the base object after stop. Restore now replaces the whole
+  effects list and the master flag from the baseline snapshot, so a
+  newly-added effect is removed from the template (it belongs to the record).
+- **Recording captured every effect field.** Adding a default effect recorded
+  all ~7 of its fields. New-effect fields are now compared against the effect's
+  default, so only the fields that actually differ are captured (plus
+  ``enabled``). Adding a default drop shadow records just ``enabled=true``.
+- **Adding a variable did nothing.** There was no record yet, and the new
+  column's cells were empty, so projection had nothing to apply. Adding a
+  variable now ensures at least one record exists and pre-fills the new column
+  in every record with the object's current value.
+- **The Add-variable tree didn't show existing variables.** Attributes already
+  used as variables for the object are now shown pre-checked, disabled, and
+  marked "already a variable", so adding more variables for the same object
+  doesn't hide or duplicate the existing ones.
+
+### Changed
+- **Effects are off by default.** A new object's master "All effects" switch
+  (``effects_enabled``) now defaults to off -- an object with no effects has
+  nothing to show. Adding an effect (via the dialog or via a batch column /
+  Path A) turns it on automatically; the user can switch it off to hide effects.
+  Backwards compatible: an older file with effects but no saved flag loads with
+  the master on. (This also fixed the "shadow does nothing" case: a Path-A
+  effect now turns the master on, so it actually renders.)
+
+### Validation
+- 6 new tests (record effect doesn't leak to template, record captures only
+  changed effect fields, default effects_enabled is false, add-variable seeds a
+  record and value, add dialog shows existing variables); 9 existing tests
+  updated for the off-by-default master and the seeded record; full suite 308
+  passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Still to do: the link/unlink-objects dialog (one variable, several objects),
+  the variable tree filtered to a multi-selection's common attributes, page
+  numbering 1-based (0 = cross-page), document-mode header/footer batching, edit/
+  remove icons (pending PNGs), record-navigation niceties, and exports/import.
+## [4.3.5.14] - 2026-06-12
+
+3D Batch: detailed logging so the "effect doesn't show" issue can be traced.
+
+### Added
+- **3D Batch logging.** The existing debug log (Help -> "Debug log (curves /
+  keys / batch)") now also records the batch flow: toggling Batch edit, adding a
+  variable, filling a value, projecting a record to the canvas, record
+  start/stop/capture, Path-A effect creation, and every cell applied by a row
+  (with the object id, how many effects it has, and its master effects_enabled
+  after the apply). This makes it possible to see exactly what happens on each
+  click and why an effect may or may not appear.
+
+### How to use
+- Help menu -> enable "Debug log (curves / keys / batch)"; it shows the log file
+  path. Reproduce the issue (add the variable, toggle Batch edit, fill the
+  value), close the editor, and send the file. The relevant lines are tagged
+  ``editor.batch_edit_toggle``, ``tpl.add_variable``, ``tpl._set_val``,
+  ``tpl._project_to_canvas`` (incl. a SKIP line when projection is off because
+  recording), ``apply_row.cell``, ``registry.pathA_create_effect``, and
+  ``render.batch_preview applied``.
+
+### Validation
+- Full suite 302 passed / 3 skipped (logging is a no-op when disabled). Old CSV
+  batch and FORMAT_PATCH untouched.
+
+### Notes
+- The instrumented build is to pin down the "All effects + shadow enabled does
+  nothing" report, which couldn't be reproduced in tests. Still to do: link/
+  unlink-objects dialog, variable tree filtered to a multi-selection's common
+  attributes, page numbering 1-based (0 = cross-page), icons, record-navigation
+  niceties, exports/import.
+## [4.3.5.13] - 2026-06-12
+
+3D Batch: a column can now drive several objects (data layer), and the text-box
+attribute set is much more complete.
+
+### Added
+- **One variable, multiple objects (data layer).** A batch column can now carry
+  extra targets besides its primary one, and the row's value is applied to every
+  target that resolves (with the same attribute). So one variable can set the
+  same text on two text boxes, or toggle a shadow on two shapes. Serialized
+  (``extra_targets``); backwards compatible (empty = single target). The UI to
+  link/unlink objects to a variable is coming next.
+- **Many missing text-box attributes are now batchable.** Added bold, italic,
+  underline, strikethrough, line height, letter spacing, auto-shrink, auto-fill,
+  min/max font size, wrap, and padding (previously only text, colour, font
+  size/family, and alignment were exposed).
+
+### Validation
+- 5 new tests (text-box autofit/style attributes offered and applied, multi
+  target applies to all objects, multi-target serialization); full suite 302
+  passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Still to do: the link/unlink-objects dialog for a variable, the variable tree
+  filtered to attributes common to a multi-selection, page numbering shown
+  1-based (with 0 = cross-page), edit/remove buttons as icons (pending PNGs),
+  record-navigation niceties, and the exports/import phase.
+## [4.3.5.12] - 2026-06-12
+
+Layer effects: effects are no longer dropped when disabled (so they survive for
+batching), and a master "All effects" switch is now a batchable variable.
+
+### Fixed
+- **Disabled effects were dropped from the object.** The effect dialog only
+  stored effects whose own checkbox was on, so an effect you added but left off
+  simply vanished -- and in batch/record mode there was nothing to capture or to
+  toggle via ``effects.<type>.enabled``. The dialog now keeps ALL effects on the
+  object (each with its own enabled flag); the renderer still skips disabled
+  ones, so the picture is unchanged, but the effect persists and is batchable.
+  This also fixes "I don't see my changes in record mode" (the effect wasn't
+  being stored, so nothing rendered and nothing was captured).
+
+### Added
+- **Master "All effects" switch (``effects.all_enabled``).** The effect dialog's
+  master checkbox (renamed "All effects") now drives a real per-object flag
+  ``effects_enabled`` instead of a derived "any effect enabled". When off, no
+  effect renders even if individual effects are on -- but the effects stay on the
+  object, so nothing is lost. It is exposed as a batchable enum variable
+  ``effects.all_enabled`` (offered in the Add-variable tree even when the object
+  has no effects yet), so a record can switch every effect on/off at once.
+- ``effects_enabled`` is serialized (round-trips; defaults to True on load and
+  for new objects).
+
+### Validation
+- 11 new tests (master renders on/off while effects stay, serialization
+  round-trip + default, effects.all_enabled batchable and offered without
+  effects, disabled effect stays but doesn't render, master in the tree dialog,
+  master batched through a row); 2 existing tree/registry tests updated for the
+  added master entry; full suite 298 passed / 3 skipped. Old CSV batch and
+  FORMAT_PATCH untouched.
+
+### Notes
+- Still to do: edit/remove buttons as icons (pending PNGs), record-navigation
+  niceties (new-from-base / from-current / reset to defaults), row locking from
+  the canvas, and the exports/import phase.
+## [4.3.5.11] - 2026-06-12
+
+3D Batch: batch-edit mode behaviour fixes, a Path-A effect-default fix, big
+performance fix, standard colour picker, and undo for removing a variable.
+
+### Changed
+- **Batch edit = recording.** The toolbar "◆ Batch edit" toggle now starts and
+  stops recording into the selected record. You can't edit in batch mode
+  without recording (that would change the template), so the two are one action.
+  The panel's "● Record edits" button and the toolbar toggle stay in sync.
+- **Structural edits blocked in batch edit.** Inserting, deleting, or
+  duplicating objects is refused while in batch edit (it would change the
+  template for every record), with a short message. Previously you could e.g.
+  draw an ellipse mid-record.
+- **No lingering banner.** Switching to Properties when not recording leaves
+  batch edit and clears the BATCH EDIT banner. While recording it stays, and
+  Properties edits then feed the record (not the template).
+
+### Fixed
+- **Path-A effect defaults.** An effect created by a batch column (one the
+  object didn't have) used the dataclass defaults, so e.g. a drop shadow pointed
+  the opposite way (direction 135 vs the UI's 315). Effect creation now uses the
+  same defaults as the "add effect" UI via a shared ``make_default_effect()``,
+  so Path-A effects match hand-added ones. The UI uses the same helper, so they
+  can't drift.
+- **Performance: switching row sets / opening the table editor was very slow.**
+  The table and template panels cross-refreshed each other and ping-ponged, so
+  one rebuild fired hundreds of times. Guarded the cross-link; switching to the
+  demo set dropped from ~390 ms to ~45 ms, binding from costly to ~1 ms. Rebuild
+  also no longer triggers a canvas re-render (that happens only on row-selection
+  / value edits).
+- **Standard colour picker.** Colour cells and the template colour fields now
+  open EDOF's own colour dialog (SV square + hue/alpha), not Qt's.
+
+### Added
+- **Undo for removing a variable.** Deleting a variable now records an undo
+  step (the whole document, which includes the batch config, is snapshotted), so
+  Ctrl+Z restores the column and its data. The confirmation says so. Undo/redo
+  rebinds the batch panels to the restored config.
+- **"Show selected on canvas" shows its state.** The button is green when
+  projecting, plain when off, and is disabled (showing "Editing live") while
+  recording, since recording edits live rather than projecting.
+
+### Validation
+- 11 new tests (batch-edit toggle records, insert blocked in batch edit,
+  Properties edits record into the row, Path-A uses UI defaults, make_default
+  for all types, undo restores a removed variable, show-on-canvas visual state
+  and recording-disable, colour-picker helper); full suite 292 passed / 3
+  skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Still to do: edit/remove buttons as icons (pending PNGs), record-navigation
+  niceties (new-from-base / from-current / reset to defaults), row locking from
+  the canvas, and the exports/import phase.
+## [4.3.5.10] - 2026-06-11
+
+3D Batch: record mode -- a classic/batch edit toggle with an in-canvas banner,
+and recording canvas edits into a record (columns created automatically).
+
+### Added
+- **Classic / batch edit toggle** in the toolbar ("◆ Batch edit"). Independent
+  of the right-hand tab: the toggle controls WHAT canvas edits affect (the base
+  document vs a batch record), the tab controls what you look at. Turning it on
+  shows the 3D Batch tab.
+- **In-canvas BATCH EDIT banner.** While in batch edit mode the canvas paints a
+  screen-fixed banner so it's unmistakable; it turns red with "● REC" while a
+  record is being recorded.
+- **Record canvas edits into a record.** The template panel has a "● Record
+  edits" button. While recording, every edit you make on the canvas is diffed
+  against a baseline snapshot and the changed attributes are written into the
+  selected record -- creating columns automatically from whatever you change
+  (text, position, colour, size, effects, ...). Stopping recording restores the
+  live document to the baseline (the edits belong to the record, not the base)
+  and the record is shown via the non-destructive canvas projection.
+- **Locked records can't be recorded into.** Starting a recording on a locked
+  record is refused.
+
+### Canvas API
+- ``set_edit_mode('classic'|'batch')`` and ``set_batch_recording(bool)`` drive
+  the banner; ``EdofEditor._on_chg`` feeds edits to the recorder (re-entry
+  guarded).
+
+### Validation
+- 4 new tests (edit-mode banner state, recording creates columns from canvas
+  edits, stop restores the base document while the record keeps its values,
+  locked record can't record); full suite 283 passed / 3 skipped. Old CSV batch
+  and FORMAT_PATCH untouched.
+
+### Notes
+- Next: record navigation niceties (new-from-base / from-current / reset to
+  defaults), row locking from the canvas, and the exports/import phase.
+## [4.3.5.9] - 2026-06-11
+
+3D Batch: one shared preview on the main canvas (per-panel previews removed).
+This is the start of record mode.
+
+### Changed
+- **Single preview on the main canvas.** Both batch editors used to carry their
+  own small row preview, so opening both showed two previews. Those are gone.
+  Selecting a record now projects it NON-DESTRUCTIVELY onto the main canvas
+  instead: the canvas renders a deep copy of the document with that row applied,
+  and the live document is never touched (selection and editing still act on the
+  base). The table editor's grid now fills its dock; the template panel ends
+  with a "Show selected on canvas" toggle.
+- **Page follow.** Projecting a page-scope record switches the canvas to that
+  record's target page.
+
+### Added
+- Canvas API: ``set_batch_preview_row(row, page_idx=None)`` and
+  ``clear_batch_preview()``. Leaving the batch tab (or closing the table dock)
+  clears the projection unless the other batch editor is still open and wants
+  it.
+
+### Validation
+- Tests rewritten for projection (row projects to canvas without mutating the
+  doc, page-scope projection switches page, document-scope projection, toggle
+  clears, projection survives table changes, non-destructive canvas preview);
+  full suite 279 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Next: the rest of record mode -- record/stop recording, the classic/batch
+  edit toggle (toolbar + in-canvas "BATCH EDIT" indication), automatic column
+  creation from what you change on the canvas, and row locking from the canvas.
+## [4.3.5.8] - 2026-06-11
+
+Renderer: fixed the ellipse stroke being clipped on the right/bottom edge.
+
+### Fixed
+- **Ellipse stroke clipped on the right (and bottom).** The shape buffer was
+  exactly the object's size (w×h px), so the outer half of a wide stroke --
+  which PIL centres on the path edge and extends ~half the stroke width beyond
+  it -- was cut off at the buffer's right/bottom edge. The buffer is now padded
+  by half the stroke width on every side and all shape drawing is offset into
+  it (paste shifted back), so the stroke is symmetric on all four sides. This
+  also covers rect outlines, lines, and polygons drawn through the same path.
+
+### Validation
+- 5 new tests (ellipse stroke symmetric at two widths, ellipse fill still
+  drawn, rect stroke symmetric, rotated ellipse renders); full suite 278 passed
+  / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+## [4.3.5.7] - 2026-06-11
+
+3D Batch: removing a variable now asks for confirmation.
+
+### Changed
+- **Deleting a variable is no longer one click.** The "✕" next to a variable in
+  the Template panel now pops a confirmation that names the variable and how
+  many records hold a value in it, so it can't be wiped by an accidental click.
+  Answering No keeps it; Yes removes the column and its data.
+
+### Validation
+- 1 new test (No keeps the variable, Yes removes it); full suite 273 passed / 3
+  skipped. Old CSV batch and FORMAT_PATCH untouched.
+## [4.3.5.6] - 2026-06-11
+
+3D Batch: a tree-based "add variables" dialog with in-dialog naming, and
+Path-A effect creation (batch effects an object doesn't have yet).
+
+### Added
+- **Tree "Add variables" dialog.** Replaces the flat list. Attributes are
+  grouped (Content / Geometry / Style / Layer Effects). Each leaf has a checkbox
+  and an inline editable variable-name field, so you check several at once and
+  name them right there. Layer Effects is collapsed by default and expands to
+  all 13 effect types, each expanding to its fields; effects already on the
+  object are marked "(on object)".
+- **Path A: batch effects the object doesn't have.** The tree offers every
+  effect type even when the object has none, and applying a value for such a
+  field now creates the effect on demand -- disabled by default
+  (``enabled=False``) with constructor defaults -- then sets the field. So a row
+  can add a drop shadow the base template lacks: empty value means no effect,
+  and the effect only shows once a row enables it. ``find_descriptor`` resolves
+  effect paths even when the effect is absent.
+
+### Registry helpers
+- ``all_effect_descriptors()``, ``effect_types()``, ``effect_fields(type)`` for
+  building the tree and (later) the generated reference manual.
+
+### Validation
+- New tests (tree returns checked leaves with names, tree offers effects not on
+  the object, Path-A creates a disabled effect, descriptor synthesis, all
+  effect types covered); the old multi-select test became a tree test; full
+  suite 272 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Next: unify the preview into the main canvas (non-destructive row projection,
+  removing the per-panel previews), then the rest of record mode (recording,
+  classic/batch edit toggle with in-canvas indication, row locking from the
+  canvas).
+## [4.3.5.5] - 2026-06-11
+
+3D Batch UI split, fixing the previous bad layout: the Table editor goes back
+to the bottom dock; the Template editor is a vertical panel in the right tab.
+
+### Changed
+- **Two separate batch editors, each where it fits.**
+  - **Table editor** -> bottom dock again (grid + side preview, where there is
+    width). View ▸ "3D Batch (Table editor)" toggles it. This is the full table
+    with scope, row filter, demo set, smart cells, duplicate/copy/paste/sort,
+    and row index numbers.
+  - **Template editor** -> a vertical panel in the right-side tab beside
+    Properties (about the Properties width). No table here. View ▸ "3D Batch
+    (Template panel)" switches to it.
+- The previous build wrongly moved the whole table+preview into the narrow
+  right tab, which broke the layout. Reverted that.
+
+### Added (Template panel)
+- **Vertical authoring layout**: Mode + Rows (production/demo) selectors, a
+  record list, record navigation (‹ Prev / Next ›, Duplicate, New, Delete), a
+  scrollable value list, and a preview at the bottom.
+- **Per-variable value blocks**: each variable shows an editable variable name
+  (what goes to CSV when set), a non-editable data name underneath
+  (``<type>-<N>.<attr>``, the auto path), the type-aware value editor, and a
+  "✕" to remove that variable. An "Add variable…" button at the bottom adds a
+  column (same flow as the table's Add column).
+- **Row lock groundwork**: ``BatchRow.locked`` (persisted). A locked record
+  shows a 🔒 and its value editors are disabled, so its values can't be edited
+  in the template panel. (The full canvas batch-edit mode that sets/locks rows
+  is the next step.)
+- Both editors read/write the same live ``doc.batch`` and are cross-linked, so
+  an edit in one refreshes the other; both follow the active page.
+
+### Validation
+- Template tests rewritten for the standalone panel (record list, form fields
+  match columns, edit writes to model, add/duplicate record, locked record not
+  editable, demo rows); full suite 268 passed / 3 skipped. Old CSV batch and
+  FORMAT_PATCH untouched.
+## [4.3.5.4] - 2026-06-11
+
+3D Batch: the batch editor moved into a tab beside Properties, with an
+optimized preview resize.
+
+### Changed
+- **Batch editor is now a right-side tab, not a bottom dock.** The right panel
+  is a tab group: "Properties" and "3D Batch". You switch between them in
+  place; View ▸ "3D Batch panel" jumps to the batch tab. The old bottom dock is
+  gone. Switching to the batch tab (or changing pages) rebinds it to the live
+  document.
+
+### Added
+- **Optimized preview resize.** Resizing the panel rescales the cached preview
+  image immediately (cheap) and then re-renders crisply at the new size after a
+  short debounce, so dragging the panel edge stays smooth instead of
+  re-rendering on every pixel. The preview now renders at a DPI scaled to the
+  panel width (clamped), so a wider panel yields a sharper image.
+
+### Validation
+- 2 new tests (resize caches the pixmap and survives a resize, resize timer is
+  debounced); the editor dock test became a tab test; full suite 268 passed / 3
+  skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Next: the big batch-edit mode -- a classic/batch edit toggle (toolbar + an
+  in-canvas "BATCH EDIT" indication), template-vs-row canvas editing, concurrent
+  record + preview, row lock, record navigation, and the value list with
+  rename/clear/add-variable. Then the larger tree-based "add columns" dialog
+  (checkboxes, collapsible effect trees, in-dialog variable naming, and
+  Path-A effect creation), and the exports/import phase.
+## [4.3.5.3] - 2026-06-11
+
+3D Batch table: row duplication, row index numbers, row copy/paste, and column
+sorting.
+
+### Added
+- **Duplicate row.** A "Duplicate row" button (and Ctrl+D) clones the selected
+  row -- a deep copy of its values inserted right after it, named "<name>
+  copy".
+- **Row index numbers.** The table's vertical header now shows each row's
+  1-based model index, so rows are identifiable at a glance (the number follows
+  the row even under the active-page filter).
+- **Copy / paste rows.** Ctrl+C copies the selected rows into an internal
+  clipboard (deep copies); Ctrl+V pastes them as new rows after the selection.
+- **Sort by column.** Clicking a column header sorts the active row set by that
+  column, toggling ascending/descending on repeat clicks. Number columns sort
+  numerically; the Name and Page lead columns sort too. Sorting reorders the
+  underlying rows.
+
+### Implementation notes
+- All of these act on the active row set (production or demo) via
+  ``_rows_list()`` and translate through the visible-rows mapping, so they
+  behave correctly under the active-page filter and in either row set.
+
+### Validation
+- 5 new tests (duplicate row, row index labels, copy/paste rows, sort by a
+  number column ascending/descending, sort by name); full suite 266 passed / 3
+  skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Next: move the batch editor into a tab next to Properties (off the bottom
+  dock) with an optimized preview resize, then the big batch-edit mode (canvas
+  template-vs-row editing, concurrent record + preview, row lock, record
+  navigation).
+## [4.3.5.2] - 2026-06-11
+
+3D Batch: layer effects are now batchable; the "Layer Effects" button label is
+unified; and chromatic aberration is fixed on black objects.
+
+### Added
+- **Layer effects in the attribute registry.** When an object carries a layer
+  effect, that effect's fields become batchable, addressed as
+  ``effects.<type>.<field>`` (e.g. ``effects.drop_shadow.distance``,
+  ``effects.halftone.ht_dot``). Covered for all 13 effect types (drop/inner
+  shadow, outer/inner glow, stroke, long shadow, chromatic aberration,
+  halftone including its pattern list, colour/gradient overlay, bevel, light
+  sweep, texture overlay) with the right editor per field -- colour pickers,
+  enums with the real value sets, numbers, and the halftone pattern list.
+  Each effect's ``enabled`` is batchable too, so one row can switch an effect
+  on and another off. Batch tweaks an existing effect; it does not create one.
+- **`visible` is batchable; `locked` is not.** A row can hide/show an object;
+  ``locked`` is deliberately excluded (no per-row meaning), per the batch-edit
+  rules.
+
+### Fixed
+- **Chromatic aberration on black objects.** The effect tinted each R/G/B
+  channel by its own brightness, so a pure-black (or fully-saturated
+  single-colour) object -- whose channels are near zero -- produced black on
+  every layer and summed to a flat black blob with no colour split. Both the
+  CPU and GPU paths now use ``max(channel, silhouette)`` as the per-channel
+  source, so a solid object carries its tint and the offset layers separate
+  into real colour fringes, while photographic content keeps its channel
+  detail wherever the channel exceeds the silhouette.
+- **Unified "Layer Effects" button label.** The one button reading "✨ Layer
+  Effects… (blend mode, effects)" now matches the short "✨ Layer Effects…"
+  used everywhere else.
+
+### Validation
+- 6 new tests (effects offered only when present, apply effect field, halftone
+  pattern field, visible batchable / locked not, CA black-object fringes); full
+  suite 261 passed / 3 skipped. Verified an effect's enabled toggle reaches the
+  renderer (shadow appears/disappears). Old CSV batch and FORMAT_PATCH
+  untouched.
+
+### Notes
+- Roadmap (not implemented): 4D batch -- targeting objects *inside* a
+  sub-document (needs unpack/repack of the embedded doc); and growing the
+  registry into a generated object/effect reference manual.
+## [4.3.5.1] - 2026-06-11
+
+3D Batch: the demo (template) row set now has a UI.
+
+### Added
+- **Demo rows + "Export demo".** A "Rows: Production / Demo (template)"
+  selector switches the table (and the template view) between the production
+  rows and a separate demo set used for building and previewing the template.
+  The two sets are edited identically -- add/delete/edit, table or template,
+  with the same preview -- but stay completely independent. An "Export demo"
+  checkbox sets the config's flag so a later export/generate can include the
+  demo rows when wanted (off by default). Demo rows and the flag persist with
+  the document (model support was added in 4.3.2.0).
+
+### Implementation notes
+- All row operations now go through one ``_rows_list()`` accessor returning the
+  active set, so the visible-rows mapping, the table handlers, the template
+  view, the preview, and the status line all act on whichever set is selected.
+
+### Validation
+- 4 new tests (demo separate from production, export-demo checkbox sets the
+  model, demo rows in the template view, demo + flag round-trip); full suite
+  255 passed / 3 skipped. Old CSV batch and FORMAT_PATCH untouched.
+
+### Notes
+- Still ahead: the exports/import phase -- four+two batch-file exports,
+  encoding/CSV-dialect auto-detection, the result-export matrix, and filename
+  token templates. The "Export demo" flag and [ROW_NAME] are the hooks for it.
+## [4.3.5.0] - 2026-06-11
+
+3D Batch: the Template authoring view -- a second way to edit the same batch,
+alongside the table.
+
+### Added
+- **Template edit view** (View ▸ Table edit / Template edit). The left side is
+  a row list with Add/Delete; the right side is a value list for the selected
+  row -- one labelled field per column, with the same type-aware editors as the
+  table (enum dropdown, colour field with a swatch + picker button, file-path
+  field with a "…" button, plain editors for number/text), plus Name and (when
+  relevant) Page fields. It is a pure alternate view over the same live
+  config: edits in either view show up in the other and in the preview, which
+  updates live here too.
+
+### Implementation notes
+- Both views render from one model and go through the panel's single rebuild
+  path, so the row list, the table, the value form, and the preview stay in
+  sync. Row indices are translated through the same visible-rows mapping used
+  by the table, so the active-page filter applies in the template view as well.
+
+### Validation
+- 5 new tests (view switch + row list, form fields match columns, template edit
+  writes to the model without mutating the document, add row from template,
+  table/template share the model); full suite 251 passed / 3 skipped. Old CSV
+  batch and FORMAT_PATCH untouched.
+
+### Notes
+- Still ahead: the demo table UI (model support exists) and the exports/import
+  phase (four+two batch-file exports, encoding/dialect auto-detection, the
+  result-export matrix and filename token templates).
+## [4.3.4.6] - 2026-06-11
+
+3D Batch: the preview now refreshes on every table change, not just cell edits.
+
+### Fixed
+- **Any table change refreshes the preview.** Adding or deleting a row,
+  adding or deleting a column, switching scope, or changing the row filter now
+  re-renders the preview for the selected row. Previously only a direct cell
+  edit (4.3.4.5) updated it, so structural changes left the preview stale. The
+  refresh hangs off the single rebuild path, so every code path that touches
+  the table is covered.
+
+### Validation
+- 1 new test (preview survives and refreshes across row add and column delete);
+  full suite 246 passed / 3 skipped. Renders run on a deep copy; the live
+  document is never mutated. Old CSV batch and FORMAT_PATCH untouched.
+## [4.3.4.5] - 2026-06-11
+
+3D Batch preview fixes: live updates on edit, correct page selection, working
+page stepping.
+
+### Fixed
+- **Preview now updates live on edit.** Editing a cell (value, colour, name, or
+  page target) re-renders the row preview immediately; previously the preview
+  only refreshed when you changed rows, so edits weren't reflected.
+- **Preview shows the right page.** In page scope the preview shows the row's
+  target page. In document scope it shows the page currently active in the
+  editor canvas (and follows it when you switch pages there), instead of being
+  stuck on page 1.
+- **Page stepping (‹ ›) works.** In document scope the buttons step through the
+  pages and enable/disable correctly at the ends. In page scope a row owns a
+  single page, so stepping is intentionally disabled (the buttons reflect
+  that). The previous code changed the sticky page but the renderer discarded
+  it, so the buttons appeared dead.
+
+### Validation
+- 3 new tests (live preview on edit, page-scope shows target page with no
+  stepping, document-scope stepping enables/disables at the ends); full suite
+  245 passed / 3 skipped. Renders run on a deep copy, so the live document is
+  never mutated. Old CSV batch and FORMAT_PATCH untouched.
+## [4.3.4.4] - 2026-06-11
+
+3D Batch: a row filter for multi-page documents (show all rows vs only the
+active page's rows). The single-page Page-column fix shipped in 4.3.4.3.
+
+### Added
+- **Row filter (page scope, 2+ pages): "Show all rows" / "Active page rows
+  only".** With many pages you can now narrow the table to just the rows whose
+  target is the page currently shown in the editor, and it follows the canvas:
+  switching pages re-filters live. The filter is hidden when it cannot do
+  anything (single page or document scope).
+  - All row-index handling (cell edit, delete, preview) goes through one
+    table-row -> model-row translation, so editing or deleting a filtered row
+    hits the correct underlying record and leaves the hidden rows untouched.
+
+### Validation
+- 6 new tests (show-all lists every row, active-page subset, filter follows the
+  active page, a filtered edit maps to the right model row, filter inert on a
+  single page); full suite 242 passed / 3 skipped. Old CSV batch, rendering,
+  and FORMAT_PATCH untouched.
+## [4.3.4.3] - 2026-06-11
+
+3D Batch fix: the Page column no longer shows for a single-page document.
+
+### Fixed
+- **Page column hidden until there are 2+ pages.** In page-per-row scope a
+  single-page document has nowhere else for a row to go, so the leading "Page"
+  column was redundant. It now appears only when the document has more than one
+  page (matching the "extra page -> 3D" idea). The single source of truth
+  (`_show_page_col`) drives the header, the cells, and cell-edit routing
+  together, so column indices stay aligned in both cases.
+
+### Validation
+- 2 new tests (Page hidden for single page, Page appears with a second page);
+  existing panel tests updated for the single-page layout; full suite 235
+  passed / 3 skipped. Old CSV batch, rendering, and FORMAT_PATCH untouched.
+## [4.3.4.2] - 2026-06-11
+
+3D Batch fixes from feedback: colour swatches now actually appear, and rows
+have a Name column.
+
+### Fixed
+- **Colour cells now paint on edit.** The swatch + contrasting hex was only
+  applied during a full table rebuild, so entering a colour (by hand or via the
+  colour dialog) left the cell un-tinted until the next refresh. Editing a
+  colour cell now repaints it immediately; the rebuild path shares the same
+  painter.
+
+### Added
+- **Row name column.** Every row has an optional "Name" (the first table
+  column, before "Page"). It persists with the document and is the basis for
+  the filename token templates in the upcoming export phase ([ROW_NAME]).
+  Leading-column indexing was centralized so the Name + Page columns can't
+  drift out of sync with the data columns.
+
+### Validation
+- 3 new tests (row name present/editable, row name round-trips, colour cell
+  paints immediately on edit); existing panel tests updated for the new column
+  layout; full suite 235 passed / 3 skipped. Old CSV batch, rendering, and
+  FORMAT_PATCH untouched.
+
+### Notes
+- Per-row preview already updates on row change (4.3.4.0). Still ahead: the
+  template (right-hand value list) authoring mode and the demo table UI (model
+  support exists), then the exports/import phase. Confirmed open from feedback.
+## [4.3.4.1] - 2026-06-11
+
+3D Batch polish from feedback: multi-attribute add, renamable variables,
+disambiguated auto-headers, and a readable colour swatch.
+
+### Added
+- **Multi-select in "Add column…"**: pick several attributes of one object at
+  once and get one column per attribute in a single step. (A typed variable
+  name applies only when exactly one attribute is selected; multi-selections
+  take their auto headers, renamable afterwards.)
+- **Rename a variable**: double-click a column header to set/clear its variable
+  name. Object name and variable name are independent — the variable name is
+  what shows in the header and travels to the exported batch file.
+- **Disambiguated auto-headers**: a column with no variable name now shows
+  ``<object>-<N>.<attr>`` (e.g. ``textbox-2.text``, ``shape-1.fill-color``) so
+  two same-type objects never collide. ``<object>`` is the object's name when
+  set, else its type; ``<N>`` is the 1-based index among same-type objects on
+  the page; dotted attribute paths are flattened with dashes. Duplicate-name
+  highlighting and the red orphan header now key off the shown label.
+
+### Changed
+- **Colour cells stay readable.** The fill/stroke/colour cell is painted with
+  the colour and the hex text is drawn black or white by the background's
+  luminance (so mid-grey, which cannot be inverted, still reads clearly)
+  instead of a plain inverse.
+
+### Validation
+- 6 new tests (type-ordinal headers, dotted-path flattening, named override,
+  multi-select dialog, contrasting colour text, header rename); full suite 232
+  passed / 3 skipped. Old CSV batch, rendering, and FORMAT_PATCH untouched.
+
+### Notes
+- Roadmap additions (not implemented): custom named document presets
+  (size + DPI) in settings; and the template (right-hand value list) editing
+  mode as the second authoring approach alongside the table.
+## [4.3.4.0] - 2026-06-11
+
+3D Batch step 4: smart cells + row preview, all presentation over the existing
+model. Plus a registry fix. Nothing that already works is touched.
+
+### Added
+- **Type-aware batch cells.** Each cell now edits according to its column's
+  value kind: colour opens a colour dialog and the cell is painted with the
+  chosen colour (with contrasting text); enum offers a dropdown of the
+  attribute's allowed values; file_path opens an open-file dialog; numbers and
+  text use a plain editor. This is pure UI over the 4.3.1.0/4.3.2.0 model --
+  the value still flows through the same registry coercion.
+- **Per-row preview.** Selecting a row renders the document with that row's
+  values applied and shows it beside the table. The render runs on a deep copy,
+  so the live document is never mutated. Multipage documents get ‹ › page
+  buttons and the shown page is sticky across row changes (it does not snap
+  back to page 1). In page scope the row's target page is shown.
+
+### Fixed
+- **Ellipse no longer offers "corner radius".** The renderer only honours
+  corner_radius for rectangles, but the shape attribute table exposed it for
+  every shape. The registry now includes corner_radius only for rect (live
+  objects filter by shape_type; the type-only export still lists it).
+
+### Validation
+- 6 new tests (cell kind roles, colour swatch, enum choices, preview renders
+  without mutating the document, colour parser; plus the ellipse/rect
+  corner-radius split); full suite 226 passed / 3 skipped. Old CSV batch,
+  rendering, and FORMAT_PATCH untouched.
+
+### Notes
+- Next (4.3.5.0): the four+two batch-file exports and the import with encoding
+  / CSV-dialect auto-detection. The whole-document generation path and the
+  result-export matrix (single files vs one multipage PDF/EDOF, filename token
+  templates) follow per the roadmap.
+## [4.3.3.0] - 2026-06-11
+
+3D Batch step 3: the first visible piece -- a dockable batch panel in the
+editor, built on the 4.3.2.0 model. Everything that already works is untouched;
+the panel is hidden until you turn it on.
+
+### Added
+- **3D Batch dock** (View ▸ "3D Batch panel"). A bottom dock holding a table
+  whose columns are batched object attributes and whose rows are value sets:
+  - **Add column…**: select an object on the canvas, then pick one of its
+    attributes from the registry (content first, then geometry, then style) and
+    an optional human header name. The column targets the object through its
+    stable hierarchical ref, so it survives renames and reaches objects nested
+    in groups.
+  - **Add row / Delete row**, and a **Mode** selector (Page per row / Whole
+    document per row). Page scope shows a first "Page" column (per-row target);
+    document scope hides it.
+  - Editing a cell writes straight back to the model. Duplicate header names
+    are tinted amber with a "×N" count; a column whose target no longer
+    resolves gets a red header.
+- **Deletion integrity**: deleting an object in the editor prunes any batch
+  columns that targeted it (the surviving columns and their data are kept).
+- **Persistence**: the panel edits the live `doc.batch`, so the batch saves and
+  loads with the document (added in 4.3.2.0); reopening shows the same table.
+
+### Implementation notes
+- The panel (`edof._apps.batch_panel.EdofBatchPanel`) is a pure view over the
+  model -- it owns no batch data and is headless-constructible, so its logic is
+  unit-tested under the offscreen platform. Cells are plain text for now; the
+  model already supports every value kind, so the smart cell editors (colour
+  swatch, file dialog, enum dropdown) land in 4.3.4.0 as presentation only.
+- Uses the available Qt table (QTableWidget). When the custom "edof tabs"
+  component exists it replaces this table behind the same panel API (roadmap
+  TBD).
+
+### Validation
+- 8 new panel tests (add column/row, scope switch, duplicate highlight, prune
+  on delete, changed signal, editor dock toggle); full suite 220 passed / 3
+  skipped. Old CSV batch, rendering, and FORMAT_PATCH untouched.
+
+### Notes
+- Next (4.3.4.0): smart cell editors (colour/number/enum/file path) over this
+  same model, plus the per-row preview and the whole-document generation path.
+## [4.3.2.0] - 2026-06-11
+
+3D Batch step 2: the data model + .edof persistence. Still backend only, no UI,
+fully additive -- documents without a batch are byte-for-byte unchanged and
+older readers ignore the new section.
+
+### Added
+- **`edof.batch.model`: the batch configuration.** Sits alongside a document
+  (lazy `Document.batch` property) and holds everything the 3D Batch needs:
+  - **ObjectRef** -- a STABLE hierarchical id path (top level down through
+    groups), so a column can target an object nested in a group, not just a
+    top-level one. `build_ref` / `resolve_ref` / `find_ref_on_pages` create and
+    walk these paths.
+  - **BatchColumn** -- one batched attribute: stable column_id, ObjectRef +
+    registry attribute path, optional human header name (falls back to the
+    attribute path), and cached value kind. Columns address attributes through
+    the 4.3.1.0 registry, so every value type works from the start.
+  - **BatchRow** -- one record: optional page_target (used only in page scope)
+    and a {column_id: raw_value} map.
+  - **BatchConfig** -- row_scope ('page' | 'document'), the columns, the data
+    rows, and a SEPARATE demo-row table (template building / preview, excluded
+    from production export unless export_demo is set).
+- **Row application** (`apply_row_to_document`): page scope fills only the
+  page named by page_target (a column whose object lives on another page is
+  skipped); document scope fills every page where the target resolves. Conflicts
+  between two columns on the same attribute resolve by the registry's priority
+  band (lower wins) -- descriptive of EDOF's existing precedence, renderer
+  untouched. Empty cells never overwrite; a bad cell never raises.
+- **Integrity helpers**: `prune_dead_columns` (drops columns whose target was
+  deleted -- the editor calls this after a deletion) and `orphan_columns`
+  (flags unresolved targets for red-header display without removing them);
+  `duplicate_name_counts` backs the "same name ×N" highlight.
+- **.edof persistence**: `Document.to_dict` emits a `batch` section only when
+  non-empty; `Document.from_dict` restores it. Format bumped additively;
+  pre-4.3.2.0 files load unchanged (no `batch` key -> empty config).
+
+### Validation
+- 18 new model tests; full suite 212 passed / 3 skipped. Verified: refs build
+  into and resolve through groups; page-scope skips off-page targets while
+  document-scope fills all; pruning removes dead columns and orphans are kept
+  but flagged; full .edof save/load round-trip preserves columns/rows and refs
+  still resolve on the loaded document; an empty batch is never serialized; a
+  document stripped of its batch key loads cleanly. FORMAT_PATCH and GPU paths
+  untouched; the old CSV batch is untouched.
+
+### Notes
+- Next (4.3.3.0): the batch mode in the UI -- a dockable table, the
+  object→attribute→value column picker, and the page-per-row preview, all on
+  top of this model with the available Qt table (custom "edof tabs" component
+  is a later TBD).
+## [4.3.1.0] - 2026-06-11
+
+First step toward the 3D Batch mode (target 4.4.0): the attribute registry.
+Pure backend, no UI, no behaviour change to anything that exists.
+
+### Added
+- **`edof.batch` attribute registry.** A single introspection layer that, for
+  any object, returns its batchable attributes as uniform descriptors (dotted
+  path, human label, value kind, allowed enum values, EDOF-matching priority,
+  and bound get/set). `set()` owns value coercion, so a consumer always calls
+  `descriptor.set(obj, cell)` regardless of whether the attribute is text, a
+  number, a colour, an enum, or a file path -- the groundwork that lets the
+  later UI add smart cell editors as a pure presentation layer over a complete
+  model. Public API: `describe_object`, `describe_type`, `find_descriptor`,
+  `apply_value`. Covered types: textbox, imagebox, shape, qrcode,
+  subdocument, plus transform/opacity on everything.
+  - Empty cell = "leave as-is" (never overwrites). Unknown path or failed
+    coercion returns False and never raises (a bad batch cell must not crash a
+    render). Numbers accept comma decimals; colours accept #rrggbb, #rrggbbaa,
+    and r,g,b[,a]; enums match case-insensitively against the allowed set.
+  - Priority bands mirror how EDOF already resolves precedence (content <
+    geometry < style < effect); the renderer is untouched -- the batch layer
+    will use the band only to pick which of two conflicting columns to apply.
+
+### Validation
+- 15 new registry tests; full suite 194 passed / 3 skipped. Verified set()
+  reaches the renderer (shape fill change shows in pixels). Object ids confirmed
+  stable across .edof save/load (UUID strings) and multipage PDF export
+  confirmed working -- the two prerequisites for the batch model. FORMAT_PATCH
+  19 and GPU paths untouched.
+
+### Notes
+- This release only describes and applies attributes on an object instance the
+  caller resolved; object targeting by id / hierarchical path (groups,
+  sub-documents) and .edof persistence come in 4.3.2.0.
 ## [4.3.0.4] - 2026-06-11
 
 Dragging large objects: parts hanging off the page no longer vanish, and the

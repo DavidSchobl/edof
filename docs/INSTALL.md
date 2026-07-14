@@ -6,7 +6,7 @@
 pip install edof
 ```
 
-This installs the core library, which includes all features that depend only on Pillow (rendering, vector PDF export, all object types, variables, plain `.edof` save/load). Pillow is installed automatically.
+This installs the core library: rendering (including gradients and layer effects), vector PDF export, all object types, variables and plain `.edof` save/load. Pillow and numpy are installed automatically (v4.4.0: numpy became a core dependency, the render engine uses it for gradients, 16-bit export and the layer effects).
 
 ## Optional extras
 
@@ -102,6 +102,7 @@ Each version's venv is independent. Removing a version is just deleting its fold
 - **Python:** 3.9 or newer
 - **Operating systems:** Windows, Linux, macOS — all features work cross-platform
 - **Pillow:** any version >= 9.0
+- **numpy:** any version >= 1.24 (core since 4.4.0)
 - **Cryptography:** any version >= 42 (when using the `[crypto]` extra)
 - **PyQt6:** any version >= 6.6 (when using the `[pyqt6]` extra)
 

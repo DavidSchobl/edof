@@ -262,6 +262,7 @@ def _table_to_group(table) -> list:
                 if not side.enabled: continue
                 ln = Shape(shape_type=SHAPE_LINE)
                 ln.points = [[x1, y1], [x2, y2]]
+                ln.normalize_line()   # v4.3.5.48: local points + bbox transform
                 ln.stroke.color = side.color
                 ln.stroke.width = side.width / 25.4 * 72   # mm → pt
                 children.append(ln)

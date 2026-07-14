@@ -81,4 +81,4 @@ export_pdf(doc, "poster.pdf")
 - **Soft neon:** add `LayerEffect(type="outer_glow", size=2.5, color=(255, 80, 180, 200))` under the headline.
 - **GPU:** with `moderngl` installed, the ray field, the variable blur, halftone, and chromatic aberration all run on the GPU; check `from edof.engine.gpu import gpu_status; print(gpu_status())`.
 
-The complete runnable script (three shadow styles side by side) is [examples/04_layer_effects.py](../../examples/04_layer_effects.py); the full field reference is [reference/12-effects.md](../reference/12-effects.md).
+The complete runnable script (three shadow styles side by side) is [examples/04_layer_effects.py](https://github.com/DavidSchobl/edof/tree/main/examples/04_layer_effects.py); the full field reference is [reference/12-effects.md](../reference/12-effects.md).

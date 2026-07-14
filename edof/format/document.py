@@ -618,10 +618,33 @@ class Document:
         self.margins:  Optional[tuple] = None
         # v4.1.0: document mode — "empty" (default) or "document" (word-style flow)
         self.mode: str = "empty"
+        # v4.3.2.0: lazily-populated 3D Batch configuration (None until used or
+        # restored from a file). Access via the `batch` property.
+        self._batch = None
         # v4.1.19: when mode == "document", body holds the flow data structures.
         # When mode != "document", body is None and pages[] holds free-form objects.
         from edof.format.document_body import DocumentBody
         self.body: Optional[DocumentBody] = None
+        # v4.4.1: document-level hyperlink style: {"color": rgba,
+        # "underline": bool, "hover_color": rgba}. None = library default
+        # (blue, underlined). Editing it re-styles every link that has no
+        # explicit per-run override.
+        self.link_style: Optional[dict] = None
+
+    # ── Link style (v4.4.1) ───────────────────────────────────────────────────
+
+    def _link_style_to_dict(self):
+        """Serializable form of link_style (hex colours), or None."""
+        if not getattr(self, "link_style", None):
+            return None
+        from edof.format.styles import _rgba_to_hex
+        out = {}
+        for k, v in self.link_style.items():
+            if k in ("color", "hover_color") and isinstance(v, (list, tuple)):
+                out[k] = _rgba_to_hex(tuple(v))
+            else:
+                out[k] = v
+        return out
 
     # ── Error state ───────────────────────────────────────────────────────────
 
@@ -646,19 +669,27 @@ class Document:
         bit_depth:    Optional[int]   = None,
         background:   tuple           = (255, 255, 255),
     ) -> Page:
+        # v4.4.0: default only on None; the old `or` defaulting silently
+        # replaced explicit 0 values (width=0, dpi=0) with the defaults
+        # instead of failing validation downstream.
         page = Page(
             index       = len(self.pages),
-            width       = width       or self.default_width,
-            height      = height      or self.default_height,
-            dpi         = dpi         or self.default_dpi,
-            color_space = color_space or self.default_color_space,
-            bit_depth   = bit_depth   or self.default_bit_depth,
+            width       = width       if width       is not None else self.default_width,
+            height      = height      if height      is not None else self.default_height,
+            dpi         = dpi         if dpi         is not None else self.default_dpi,
+            color_space = color_space if color_space is not None else self.default_color_space,
+            bit_depth   = bit_depth   if bit_depth   is not None else self.default_bit_depth,
             background  = background,
         )
         self.pages.append(page)
         return page
 
     def get_page(self, index: int) -> Page:
+        if not self.pages:
+            raise IndexError(
+                "This document has no pages yet. edof.new() returns an EMPTY "
+                "document (0 pages) by design; call doc.add_page(...) before "
+                "accessing or rendering pages.")
         return self.pages[index]
 
     def remove_page(self, index: int) -> None:
@@ -702,17 +733,193 @@ class Document:
 
     # ── Save / Load ───────────────────────────────────────────────────────────
 
-    def save(self, path: str) -> None:
+    def save(self, path: str, embed_fonts: bool = False) -> None:
+        """Save the document. v4.4.0: embed_fonts=True embeds every font
+        family the document's text actually uses (resolved from the system
+        font registry, weight variants included) into the resources, so the
+        file renders identically on a machine without those fonts."""
+        if embed_fonts:
+            try:
+                self.embed_used_fonts()
+            except Exception:
+                pass
         from edof.format.serializer import EdofSerializer
         EdofSerializer.save(self, path)
         self.modified = datetime.now(timezone.utc).isoformat()
+
+    def recompress_images(self, image_format: str = "jpeg",
+                          quality: int = 75) -> tuple:
+        """v4.4.0: re-encode embedded image resources to shrink the file.
+
+        image_format "png": lossless PNG re-encode (optimize=True).
+        image_format "jpeg": lossy JPEG at the given quality (1-100) for
+        images WITHOUT real transparency; images with an alpha channel in
+        use are kept lossless (PNG), because JPEG cannot store alpha.
+
+        A resource is only replaced when the re-encoded bytes are SMALLER,
+        so the call never inflates a file. Non-image resources (fonts, ...)
+        are untouched. Returns (n_changed, bytes_before, bytes_after) where
+        the byte counts cover every image resource looked at.
+        """
+        import io as _io
+        from PIL import Image as _Img
+        fmt = (image_format or "jpeg").lower()
+        if fmt not in ("png", "jpeg", "jpg"):
+            raise ValueError("image_format must be png or jpeg")
+        q = max(1, min(100, int(quality)))
+        n = 0
+        before = after = 0
+        for entry in list(self.resources.all_entries()):
+            mt = (entry.mime_type or "").lower()
+            if mt and not mt.startswith("image/"):
+                continue
+            try:
+                img = _Img.open(_io.BytesIO(entry.data))
+                img.load()
+            except Exception:
+                continue                      # not an image, leave alone
+            src = len(entry.data)
+            before += src
+            buf = _io.BytesIO()
+            try:
+                has_alpha = False
+                if img.mode in ("RGBA", "LA", "P"):
+                    a = img.convert("RGBA").split()[3]
+                    has_alpha = a.getextrema()[0] < 255
+                if fmt in ("jpeg", "jpg") and not has_alpha:
+                    img.convert("RGB").save(buf, "JPEG", quality=q,
+                                            optimize=True)
+                    new_mt, new_ext = "image/jpeg", ".jpg"
+                else:
+                    img.save(buf, "PNG", optimize=True)
+                    new_mt, new_ext = "image/png", ".png"
+            except Exception:
+                after += src
+                continue
+            data = buf.getvalue()
+            if len(data) < src:
+                entry.data = data
+                entry.mime_type = new_mt
+                stem, _dot, _e = (entry.filename or "image").rpartition(".")
+                entry.filename = (stem or entry.filename or "image") + new_ext
+                n += 1
+                after += len(data)
+            else:
+                after += src
+        return n, before, after
+
+    def embed_used_fonts(self) -> int:
+        """v4.4.0 (BUG #11a): embed the font files for every family+weight
+        combination used by this document's text into the resources. Returns
+        the number of files added. Families that already have an embedded
+        match, and families that don't resolve to a file on this system, are
+        skipped."""
+        import os as _os
+        from edof.engine.text_engine import (get_font_path,
+                                             register_resource_fonts,
+                                             embedded_font_bytes)
+        used = set()      # (family, bold, italic)
+
+        def _note(fam, bold, italic):
+            if fam:
+                used.add((str(fam), bool(bold), bool(italic)))
+
+        def _walk_obj(o):
+            st = getattr(o, "style", None)
+            if st is not None and getattr(st, "font_family", None):
+                _note(st.font_family, getattr(st, "bold", False),
+                      getattr(st, "italic", False))
+            base_fam = getattr(st, "font_family", None) if st else None
+            for r in (getattr(o, "runs", None) or []):
+                fam = getattr(r, "font_family", None) or base_fam
+                b = getattr(r, "bold", None)
+                i = getattr(r, "italic", None)
+                _note(fam,
+                      b if b is not None else getattr(st, "bold", False) if st else False,
+                      i if i is not None else getattr(st, "italic", False) if st else False)
+            for ch in (getattr(o, "children", None) or []):
+                _walk_obj(ch)
+            for row in (getattr(o, "cells", None) or []):
+                for cell in row:
+                    cst = getattr(cell, "style", None)
+                    if cst is not None and getattr(cst, "font_family", None):
+                        _note(cst.font_family, getattr(cst, "bold", False),
+                              getattr(cst, "italic", False))
+
+        for pg in (self.pages or []):
+            for o in (getattr(pg, "objects", None) or []):
+                _walk_obj(o)
+        body = getattr(self, "body", None)
+        if body is not None:
+            for attr in ("header_runs", "footer_runs",
+                         "header_runs_even", "footer_runs_even"):
+                for r in (getattr(body, attr, None) or []):
+                    if getattr(r, "font_family", None):
+                        _note(r.font_family, getattr(r, "bold", None),
+                              getattr(r, "italic", None))
+            for attr in ("header_objects", "footer_objects"):
+                for o in (getattr(body, attr, None) or []):
+                    _walk_obj(o)
+
+        register_resource_fonts(self.resources)
+        added = 0
+        seen_paths = set()
+        for fam, bold, italic in sorted(used):
+            if embedded_font_bytes(fam, bold, italic) is not None:
+                continue                    # already embedded
+            fpath = get_font_path(fam, bold, italic)
+            if not fpath or not _os.path.isfile(fpath) or fpath in seen_paths:
+                continue
+            seen_paths.add(fpath)
+            try:
+                with open(fpath, "rb") as fh:
+                    data = fh.read()
+                ext = _os.path.splitext(fpath)[1].lower()
+                mime = "font/otf" if ext == ".otf" else "font/ttf"
+                self.resources.add(data, _os.path.basename(fpath), mime)
+                added += 1
+            except Exception:
+                continue
+        if added:
+            register_resource_fonts(None)   # force re-register next render
+            register_resource_fonts(self.resources)
+        return added
 
     @classmethod
     def load(cls, path: str, password: str = None,
               recovery_key: str = None) -> "Document":
         from edof.format.serializer import EdofSerializer
-        return EdofSerializer.load(path, password=password,
-                                    recovery_key=recovery_key)
+        doc = EdofSerializer.load(path, password=password,
+                                  recovery_key=recovery_key)
+        # v4.4.0: an external-sources bundle references files RELATIVELY
+        # ("sources/flag.png"). Resolve such paths against the .edof file's
+        # own folder so the bundle renders no matter what the process CWD is.
+        try:
+            import os as _os
+            base = _os.path.dirname(_os.path.abspath(path))
+
+            def _fix(o):
+                rid = getattr(o, "resource_id", None)
+                if (rid and isinstance(rid, str)
+                        and rid not in doc.resources
+                        and not _os.path.isabs(rid)):
+                    cand = _os.path.join(base, rid)
+                    if _os.path.isfile(cand):
+                        o.resource_id = cand
+                for ch in (getattr(o, "children", None) or []):
+                    _fix(ch)
+
+            for pg in (doc.pages or []):
+                for o in (getattr(pg, "objects", None) or []):
+                    _fix(o)
+            body = getattr(doc, "body", None)
+            if body is not None:
+                for attr in ("header_objects", "footer_objects"):
+                    for o in (getattr(body, attr, None) or []):
+                        _fix(o)
+        except Exception:
+            pass
+        return doc
 
     # ── Export helpers ─────────────────────────────────────────────────────────
 
@@ -751,7 +958,10 @@ class Document:
                             format=format, jpeg_quality=jpeg_quality)
 
     def export_pdf(self, path: str, vector: bool = True,
-                    dpi: Optional[int] = None) -> None:
+                    dpi: Optional[int] = None,
+                    embed_source: bool = True,
+                    image_format: Optional[str] = None,
+                    image_quality: int = 80) -> None:
         """v4.0: Export to PDF.
 
         vector=True (default) uses the built-in pure-Python vector PDF writer
@@ -759,7 +969,9 @@ class Document:
         vector=False falls back to raster mode via reportlab.
         """
         from edof.export.pdf import export_pdf
-        export_pdf(self, path, vector=vector, dpi=dpi)
+        export_pdf(self, path, vector=vector, dpi=dpi,
+                   embed_source=embed_source,
+                   image_format=image_format, image_quality=image_quality)
 
     def export_svg(self, path: str, page: int = 0) -> None:
         """v4.0: Export a single page as SVG."""
@@ -978,6 +1190,16 @@ class Document:
 
     # ── Serialization ─────────────────────────────────────────────────────────
 
+    @property
+    def batch(self):
+        """The document's 3D Batch configuration, created on first access.
+        Empty configs are not serialized (see to_dict), so merely touching
+        this property does not bloat saved files."""
+        if self._batch is None:
+            from edof.batch.model import BatchConfig
+            self._batch = BatchConfig()
+        return self._batch
+
     def to_dict(self) -> dict:
         from edof.version import FORMAT_VERSION_STR, __version__
         return {
@@ -1003,6 +1225,13 @@ class Document:
             "mode":      self.mode,
             # v4.1.19: document-mode body (only present when mode == "document")
             "body":      self.body.to_dict() if self.body else None,
+            # v4.3.2.0: 3D Batch configuration (only present when non-empty);
+            # older readers ignore this unknown key, so it is fully additive.
+            "batch":     (self._batch.to_dict()
+                          if getattr(self, "_batch", None)
+                          and not self._batch.is_empty() else None),
+            # v4.4.1: document link style (additive key, older readers skip it)
+            "link_style": self._link_style_to_dict(),
         }
 
     @classmethod
@@ -1039,6 +1268,61 @@ class Document:
         if body_dict and doc.mode == "document":
             from edof.format.document_body import DocumentBody
             doc.body = DocumentBody.from_dict(body_dict)
+        # v4.4.1: document link style (absent in older files -> default)
+        ls = d.get("link_style")
+        if ls:
+            doc.link_style = dict(ls)
+            for key in ("color", "hover_color"):
+                v = doc.link_style.get(key)
+                if isinstance(v, str):
+                    from edof.format.styles import _hex_to_rgba
+                    doc.link_style[key] = _hex_to_rgba(v)
+                elif isinstance(v, list):
+                    doc.link_style[key] = tuple(v)
+        # v4.3.2.0: restore 3D Batch configuration (absent in older files)
+        batch_dict = d.get("batch")
+        if batch_dict:
+            from edof.batch.model import BatchConfig
+            doc._batch = BatchConfig.from_dict(batch_dict)
+            # v4.3.6.4: drop duplicate run-targeted columns (same run_id + same
+            # attr_path). Two run.text columns on one span fight each other (last
+            # write wins, so the variable looks stuck); keep the first.
+            try:
+                _seen = set()
+                _keep = []
+                for c in doc._batch.columns:
+                    rid = getattr(c, "run_id", "")
+                    key = (rid, c.attr_path) if rid else None
+                    if key is not None and key in _seen:
+                        continue
+                    if key is not None:
+                        _seen.add(key)
+                    _keep.append(c)
+                if len(_keep) != len(doc._batch.columns):
+                    doc._batch.columns = _keep
+            except Exception:
+                pass
+        # v4.3.5.59: consolidate the legacy variable system into the 3D Batch.
+        # Any object still bound to a document variable becomes a batch column
+        # (target = that object, attr = text); obj.variable is cleared. Old files
+        # load and migrate transparently; new files have nothing to migrate.
+        try:
+            from edof.batch.model import migrate_variables_to_batch
+            migrate_variables_to_batch(doc)
+        except Exception:
+            pass
+        # v4.3.5.66: recompute group boxes on load. Files saved before the
+        # shear-aware compute_bounds stored a group box that ignored child shear,
+        # so the selection box didn't fit sheared children. Recomputing fixes
+        # stale boxes; it's idempotent for files that were already correct.
+        try:
+            from edof.format.objects import Group as _Grp
+            for _pg in doc.pages:
+                for _o in getattr(_pg, "objects", []):
+                    if isinstance(_o, _Grp):
+                        _o.compute_bounds()
+        except Exception:
+            pass
         return doc
 
     def __repr__(self) -> str:
@@ -1054,7 +1338,17 @@ class Document:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class _RowContext:
-    """Auto-positions objects left-to-right on a horizontal row."""
+    """Auto-positions objects left-to-right on a horizontal row.
+
+    v4.4.0: usable as a context manager (``with page.row(...) as r:``) --
+    purely syntactic, enter returns self and exit does nothing.
+    """
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
     def __init__(self, page: Page, start_x: float, y: float,
                  gap: float, default_height: float):
@@ -1099,7 +1393,16 @@ class _RowContext:
 
 
 class _ColumnContext:
-    """Auto-positions objects top-to-bottom in a column."""
+    """Auto-positions objects top-to-bottom in a column.
+
+    v4.4.0: usable as a context manager, like _RowContext.
+    """
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
     def __init__(self, page: Page, x: float, start_y: float,
                  gap: float, default_width: float):

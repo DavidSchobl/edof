@@ -288,6 +288,16 @@ class DocumentBody:
     header_style_even: Optional[dict]           = None
     footer_style_even: Optional[dict]           = None
 
+    # v4.4.0 (format 4.3): header/footer as a CONTAINER of objects. These lists
+    # hold TEMPLATE objects (any page object type: TextBox, ImageBox, Shape,
+    # ...). At pagination every page gets a literal clone of each template with
+    # the SAME id, so rendering, selection, batch refs and variable rids work
+    # per page while the single source of truth stays here. {page_number}
+    # tokens belong to the header/footer band TEXT (header_runs), not to
+    # container objects (their clones are literal copies).
+    header_objects:    List                     = field(default_factory=list)
+    footer_objects:    List                     = field(default_factory=list)
+
     # Deprecated paragraph-style header/footer — kept for backward compat
     # with files saved by v4.1.22.x and earlier. New code reads/writes
     # *_runs above.
@@ -313,6 +323,8 @@ class DocumentBody:
             "footer_runs_even":  [r.to_dict() for r in (self.footer_runs_even or [])],
             "header_style_even": self.header_style_even,
             "footer_style_even": self.footer_style_even,
+            "header_objects":    [o.to_dict() for o in (self.header_objects or [])],
+            "footer_objects":    [o.to_dict() for o in (self.footer_objects or [])],
         }
 
     @classmethod
@@ -343,6 +355,13 @@ class DocumentBody:
         footer_runs_even = [TextRun.from_dict(rd) for rd in d.get("footer_runs_even", [])]
         header_style_even = d.get("header_style_even") or None
         footer_style_even = d.get("footer_style_even") or None
+        # v4.4.0: header/footer container objects (lazy import, objects.py
+        # imports styles which this module also uses)
+        from edof.format.objects import EdofObject
+        header_objects = [EdofObject.from_dict(od)
+                          for od in d.get("header_objects", [])]
+        footer_objects = [EdofObject.from_dict(od)
+                          for od in d.get("footer_objects", [])]
         return cls(
             paragraphs=paragraphs,
             styles=styles,
@@ -361,4 +380,6 @@ class DocumentBody:
             footer_runs_even=footer_runs_even,
             header_style_even=header_style_even,
             footer_style_even=footer_style_even,
+            header_objects=header_objects,
+            footer_objects=footer_objects,
         )

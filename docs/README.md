@@ -2,6 +2,8 @@
 
 Reference documentation for the **edof** Python library — a tool for programmatic document creation, template filling, and high-quality export. Documents are described in code or in a small ZIP-based file format, then rendered to PNG, JPEG, TIFF, BMP, PDF, or SVG.
 
+**edof makes documents from data**: design a template once (in code or in the WYSIWYG editor), plug in your data, and the 3D Batch renders hundreds of personalized PDFs, PNGs or editable documents in one shot. Invoices, card decks, certificates, catalogs, posters.
+
 This documentation covers every public function, class, and method, plus practical recipes for common tasks.
 
 ## Where to start
@@ -21,7 +23,7 @@ If you have a specific task in mind, jump straight to:
 - [Cookbook: Import a PDF, edit, and re-export](cookbook/pdf-import-edit.md)
 - [Cookbook: Flat-design poster with layer effects](cookbook/effects-poster.md)
 
-Runnable end-to-end scripts live in [`examples/`](../examples/README.md).
+Runnable end-to-end scripts live in [`examples/`](https://github.com/DavidSchobl/edof/tree/main/examples).
 
 ## Reference
 
@@ -32,8 +34,11 @@ Complete API reference, organized by topic:
 | [01 — Document & Page](reference/01-document.md) | `edof.new`, `Document`, `Page`, persistence, validation |
 | [02 — Objects](reference/02-objects.md) | `TextBox`, `ImageBox`, `Shape`, `QRCode`, `Table`, `Group`, common fields |
 | [03 — Styles](reference/03-styles.md) | `TextStyle`, `FillStyle`, `StrokeStyle`, `Gradient`, `ShadowStyle`, `CellBorder`, `Transform` |
-| [04 — Variables & Templates](reference/04-variables.md) | Variable types, `define_variable`, `fill_variables`, placeholders, `repeat_objects` |
+| [04 — Variables & Templates](reference/04-variables.md) | Variable types, `define_variable`, `fill_variables`, placeholders, `repeat_objects`, text (run) variables and linking |
 | [05 — Export](reference/05-export.md) | PDF (vector / raster), bitmap formats, SVG, multi-page, printing |
+| [13 — Hyperlinks](reference/13-hyperlinks.md) | External and in-document links, link targets, link style, PDF/SVG link export |
+| [14 — Header & Footer](reference/14-header-footer.md) | Bands, page-number tokens, header/footer object containers, batch variables in bands |
+| [15 — 3D Batch](reference/15-batch.md) | Columns, rows, run variables, attribute registry, batch export engine |
 | [06 — Import](reference/06-import.md) | `import_pdf`, EDOF 2 legacy import, version migration |
 | [07 — Encryption](reference/07-encryption.md) | Passwords, permission levels, `set_password`, `unlock`, recovery keys, per-object locks |
 | [08 — Editor](reference/08-editor.md) | The PyQt6 desktop editor — features, shortcuts, dialogs |
@@ -62,4 +67,4 @@ Complete API reference, organized by topic:
 
 ## Version
 
-This documentation is for **edof 4.3.0.4**.
+This documentation is for **edof 4.4.0**.

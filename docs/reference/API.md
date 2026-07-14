@@ -1,6 +1,6 @@
 # API reference
 
-_Generated from `edof` 4.3.0.4 (format 4.2.19)._
+_Generated from `edof` 4.4.0 (format 4.3.0)._
 
 
 This page documents the complete public API exported by `import edof`. It is generated directly from the code with `docs/_gen_api.py`, so the signatures and descriptions match the installed version exactly.
@@ -60,6 +60,9 @@ new(width: float = 210.0, height: float = 297.0, **kwargs) -> edof.format.docume
 ```
 
 Create a new blank Document.
+
+The document starts EMPTY (0 pages) by design; call ``doc.add_page(...)``
+to add the first page before placing content or rendering.
 
 Args:
     width, height: page size in millimetres (default A4 portrait).
@@ -410,6 +413,15 @@ Get and clear the pending recovery key.
 #### `Document.duplicate_page(self, index: 'int') -> 'Page'`
 
 
+#### `Document.embed_used_fonts(self) -> 'int'`
+
+v4.4.0 (BUG #11a): embed the font files for every family+weight
+combination used by this document's text into the resources. Returns
+the number of files added. Families that already have an embedded
+match, and families that don't resolve to a file on this system, are
+skipped.
+
+
 #### `Document.export_3x(self, path: 'str') -> 'None'`
 
 Save a downgraded copy of the document as a v3.x .edof file.
@@ -440,7 +452,7 @@ Returns list of written file paths.
 #### `Document.export_bitmap(self, path: 'str', page: 'int' = 0, dpi: 'Optional[int]' = None, color_space: 'Optional[str]' = None, bit_depth: 'Optional[int]' = None, format: 'str' = 'PNG') -> 'None'`
 
 
-#### `Document.export_pdf(self, path: 'str', vector: 'bool' = True, dpi: 'Optional[int]' = None) -> 'None'`
+#### `Document.export_pdf(self, path: 'str', vector: 'bool' = True, dpi: 'Optional[int]' = None, embed_source: 'bool' = True, image_format: 'Optional[str]' = None, image_quality: 'int' = 80) -> 'None'`
 
 Export to PDF.
 
@@ -491,6 +503,21 @@ Forget the cached content key for this session.
 #### `Document.print_document(self, printer: 'Optional[str]' = None, pages: 'Optional[List[int]]' = None) -> 'None'`
 
 
+#### `Document.recompress_images(self, image_format: 'str' = 'jpeg', quality: 'int' = 75) -> 'tuple'`
+
+re-encode embedded image resources to shrink the file.
+
+image_format "png": lossless PNG re-encode (optimize=True).
+image_format "jpeg": lossy JPEG at the given quality (1-100) for
+images WITHOUT real transparency; images with an alpha channel in
+use are kept lossless (PNG), because JPEG cannot store alpha.
+
+A resource is only replaced when the re-encoded bytes are SMALLER,
+so the call never inflates a file. Non-image resources (fonts, ...)
+are untouched. Returns (n_changed, bytes_before, bytes_after) where
+the byte counts cover every image resource looked at.
+
+
 #### `Document.remove_page(self, index: 'int') -> 'None'`
 
 
@@ -504,7 +531,12 @@ Remove a password slot. Requires ADMIN permission.
 Raise PermissionError if the current session lacks the permission.
 
 
-#### `Document.save(self, path: 'str') -> 'None'`
+#### `Document.save(self, path: 'str', embed_fonts: 'bool' = False) -> 'None'`
+
+Save the document. embed_fonts=True embeds every font
+family the document's text actually uses (resolved from the system
+font registry, weight variants included) into the resources, so the
+file renders identically on a machine without those fonts.
 
 
 #### `Document.set_password(self, level: 'str', password: 'str') -> 'Optional[str]'`
@@ -708,10 +740,10 @@ Serialise metadata index (not the raw bytes).
 ### `EdofObject`
 
 ```python
-EdofObject(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False) -> None
+EdofObject(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False) -> None
 ```
 
-EdofObject(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False)
+EdofObject(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False)
 
 
 **Methods**
@@ -766,10 +798,10 @@ Return True if this object's text/runs can be modified.
 ### `TextBox`
 
 ```python
-TextBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, text: 'str' = '', style: 'TextStyle' = <factory>, runs: "List['TextRun']" = <factory>, padding: 'float' = 2.0, padding_left: 'Optional[float]' = None, padding_right: 'Optional[float]' = None, padding_top: 'Optional[float]' = None, padding_bot: 'Optional[float]' = None, border: 'Optional[StrokeStyle]' = None, fill: 'FillStyle' = <factory>, paragraph_alignments: 'Dict[str, str]' = <factory>) -> None
+TextBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, text: 'str' = '', style: 'TextStyle' = <factory>, runs: "List['TextRun']" = <factory>, padding: 'float' = 2.0, padding_left: 'Optional[float]' = None, padding_right: 'Optional[float]' = None, padding_top: 'Optional[float]' = None, padding_bot: 'Optional[float]' = None, border: 'Optional[StrokeStyle]' = None, fill: 'FillStyle' = <factory>, paragraph_alignments: 'Dict[str, str]' = <factory>) -> None
 ```
 
-TextBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, text: 'str' = '', style: 'TextStyle' = <factory>, runs: "List['TextRun']" = <factory>, padding: 'float' = 2.0, padding_left: 'Optional[float]' = None, padding_right: 'Optional[float]' = None, padding_top: 'Optional[float]' = None, padding_bot: 'Optional[float]' = None, border: 'Optional[StrokeStyle]' = None, fill: 'FillStyle' = <factory>, paragraph_alignments: 'Dict[str, str]' = <factory>)
+TextBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, text: 'str' = '', style: 'TextStyle' = <factory>, runs: "List['TextRun']" = <factory>, padding: 'float' = 2.0, padding_left: 'Optional[float]' = None, padding_right: 'Optional[float]' = None, padding_top: 'Optional[float]' = None, padding_bot: 'Optional[float]' = None, border: 'Optional[StrokeStyle]' = None, fill: 'FillStyle' = <factory>, paragraph_alignments: 'Dict[str, str]' = <factory>)
 
 
 **Methods**
@@ -838,10 +870,10 @@ plain rendering left them as literals.
 ### `ImageBox`
 
 ```python
-ImageBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, resource_id: 'Optional[str]' = None, fit_mode: 'str' = 'stretch', border: 'Optional[StrokeStyle]' = None, corner_radius: 'float' = 0.0) -> None
+ImageBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, resource_id: 'Optional[str]' = None, fit_mode: 'str' = 'stretch', border: 'Optional[StrokeStyle]' = None, corner_radius: 'float' = 0.0) -> None
 ```
 
-ImageBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, resource_id: 'Optional[str]' = None, fit_mode: 'str' = 'stretch', border: 'Optional[StrokeStyle]' = None, corner_radius: 'float' = 0.0)
+ImageBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, resource_id: 'Optional[str]' = None, fit_mode: 'str' = 'stretch', border: 'Optional[StrokeStyle]' = None, corner_radius: 'float' = 0.0)
 
 
 **Methods**
@@ -896,10 +928,10 @@ Return True if this object's text/runs can be modified.
 ### `Shape`
 
 ```python
-Shape(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, shape_type: 'str' = 'rect', fill: 'FillStyle' = <factory>, stroke: 'StrokeStyle' = <factory>, corner_radius: 'float' = 0.0, corner_radii: 'List[float]' = <factory>, points: 'List[Any]' = <factory>, path_data: 'List[Any]' = <factory>, path_point_types: 'List[str]' = <factory>) -> None
+Shape(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, shape_type: 'str' = 'rect', fill: 'FillStyle' = <factory>, stroke: 'StrokeStyle' = <factory>, corner_radius: 'float' = 0.0, corner_radii: 'List[float]' = <factory>, points: 'List[Any]' = <factory>, path_data: 'List[Any]' = <factory>, path_point_types: 'List[str]' = <factory>) -> None
 ```
 
-Shape(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, shape_type: 'str' = 'rect', fill: 'FillStyle' = <factory>, stroke: 'StrokeStyle' = <factory>, corner_radius: 'float' = 0.0, corner_radii: 'List[float]' = <factory>, points: 'List[Any]' = <factory>, path_data: 'List[Any]' = <factory>, path_point_types: 'List[str]' = <factory>)
+Shape(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, shape_type: 'str' = 'rect', fill: 'FillStyle' = <factory>, stroke: 'StrokeStyle' = <factory>, corner_radius: 'float' = 0.0, corner_radii: 'List[float]' = <factory>, points: 'List[Any]' = <factory>, path_data: 'List[Any]' = <factory>, path_point_types: 'List[str]' = <factory>)
 
 
 **Methods**
@@ -933,13 +965,26 @@ Return True if this object's text/runs can be modified.
 Create a Shape with shape_type='path' from an SVG path 'd' string.
 
 Supports M, L, H, V, C, Q, Z (absolute and relative).
-Coordinates are in mm, relative to the shape's transform origin.
+
+the transform is now derived from the path's own bounding box
+and the path is re-origined to a local (0,0), so an absolutely-positioned
+path (e.g. a heart drawn around 100,100) renders where its coordinates
+say instead of being clipped to the default 50x30 box. The visual result
+is identical whether you feed absolute or local coordinates.
 
 
 #### `Shape.move(self, dx: 'float', dy: 'float', unit: 'str' = 'mm') -> "'EdofObject'"`
 
 
 #### `Shape.move_to(self, x: 'float', y: 'float', unit: 'str' = 'mm') -> "'EdofObject'"`
+
+
+#### `Shape.normalize_line(self)`
+
+keep a line's invariant — points are LOCAL (relative to
+transform.x/y) and the transform IS their bounding box. Call after the
+endpoints change (create / endpoint drag) so the box and points stay in
+sync, exactly like a path. World position is preserved.
 
 
 #### `Shape.resize(self, w: 'float', h: 'float', unit: 'str' = 'mm', anchor: 'str' = 'top-left') -> "'EdofObject'"`
@@ -968,10 +1013,10 @@ Uses absolute coordinates only.
 ### `QRCode`
 
 ```python
-QRCode(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, data: 'str' = '', error_correction: 'str' = 'M', border_modules: 'int' = 4, fg_color: 'tuple' = (0, 0, 0), bg_color: 'tuple' = (255, 255, 255)) -> None
+QRCode(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, data: 'str' = '', error_correction: 'str' = 'M', border_modules: 'int' = 4, fg_color: 'tuple' = (0, 0, 0), bg_color: 'tuple' = (255, 255, 255)) -> None
 ```
 
-QRCode(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, data: 'str' = '', error_correction: 'str' = 'M', border_modules: 'int' = 4, fg_color: 'tuple' = (0, 0, 0), bg_color: 'tuple' = (255, 255, 255))
+QRCode(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, data: 'str' = '', error_correction: 'str' = 'M', border_modules: 'int' = 4, fg_color: 'tuple' = (0, 0, 0), bg_color: 'tuple' = (255, 255, 255))
 
 
 **Methods**
@@ -1029,10 +1074,10 @@ Return True if this object's text/runs can be modified.
 ### `Group`
 
 ```python
-Group(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, children: 'List[EdofObject]' = <factory>) -> None
+Group(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, children: 'List[EdofObject]' = <factory>) -> None
 ```
 
-Group(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, children: 'List[EdofObject]' = <factory>)
+Group(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, children: 'List[EdofObject]' = <factory>)
 
 
 **Methods**
@@ -1050,6 +1095,16 @@ session permission. Honors per-object lock_level.
 #### `Group.can_modify_text(self, doc) -> 'bool'`
 
 Return True if this object's text/runs can be modified.
+
+
+#### `Group.compute_bounds(self)`
+
+axis-aligned (x,y,w,h) bounding box in mm of all children,
+accounting for child rotation AND shear. Also stored on self.transform so
+the group has a meaningful box for selection/handles. shear was
+ignored, so the box didn't fit sheared children (e.g. rotated rects that
+gained shear from a non-uniform group resize); each corner is now sheared
+about the child center before rotation, matching the renderer.
 
 
 #### `Group.copy(self) -> "'EdofObject'"`
@@ -1098,7 +1153,7 @@ Return True if this object's text/runs can be modified.
 > **Experimental / TBD.** This is a work in progress and not yet complete. The API and behaviour may change; avoid relying on it in production.
 
 ```python
-Table(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, cells: 'List[List[Any]]' = <factory>, row_heights: 'List[float]' = <factory>, col_widths: 'List[float]' = <factory>, table_border: 'Optional[StrokeStyle]' = None) -> None
+Table(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, cells: 'List[List[Any]]' = <factory>, row_heights: 'List[float]' = <factory>, col_widths: 'List[float]' = <factory>, table_border: 'Optional[StrokeStyle]' = None) -> None
 ```
 
 Formatted table with per-cell styling.
@@ -1209,7 +1264,7 @@ Per-side border of a TableCell.
 ### `SubDocumentBox`
 
 ```python
-SubDocumentBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, resource_id: 'Optional[str]' = None, source_path: 'Optional[str]' = None, page_index: 'int' = 0, fit_mode: 'str' = 'contain') -> None
+SubDocumentBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, resource_id: 'Optional[str]' = None, source_path: 'Optional[str]' = None, page_index: 'int' = 0, fit_mode: 'str' = 'contain') -> None
 ```
 
 A box that embeds another EDOF document (or a reference to one).
@@ -1274,7 +1329,7 @@ Return True if this object's text/runs can be modified.
 ### `SvgBox`
 
 ```python
-SvgBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, svg_xml: 'str' = '', fit_mode: 'str' = 'contain', border: 'Optional[StrokeStyle]' = None, corner_radius: 'float' = 0.0) -> None
+SvgBox(id: 'str' = <factory>, name: 'str' = '', variable: 'Optional[str]' = None, transform: 'Transform' = <factory>, locked: 'bool' = False, visible: 'bool' = True, layer: 'int' = 0, tags: 'List[str]' = <factory>, shadow: 'ShadowStyle' = <factory>, opacity: 'float' = 1.0, fill_opacity: 'float' = 1.0, effects: "List['LayerEffect']" = <factory>, effects_enabled: 'bool' = False, visible_if: 'str' = '', blend_mode: 'str' = 'normal', lock_level: 'str' = '', lock_text: 'bool' = False, lock_position: 'bool' = False, svg_xml: 'str' = '', fit_mode: 'str' = 'contain', border: 'Optional[StrokeStyle]' = None, corner_radius: 'float' = 0.0) -> None
 ```
 
 An SVG file embedded as a rastered image. Stores the original
@@ -1372,7 +1427,7 @@ Per-side fields override the uniform `padding` if set.
 ### `TextRun`
 
 ```python
-TextRun(text: 'str' = '', font_family: 'Optional[str]' = None, font_size: 'Optional[float]' = None, bold: 'Optional[bool]' = None, italic: 'Optional[bool]' = None, underline: 'Optional[bool]' = None, strikethrough: 'Optional[bool]' = None, color: 'Optional[Color]' = None, background: 'Optional[Color]' = None, line_height: 'Optional[float]' = None, letter_spacing: 'Optional[float]' = None, alignment: 'Optional[str]' = None) -> None
+TextRun(text: 'str' = '', font_family: 'Optional[str]' = None, font_size: 'Optional[float]' = None, bold: 'Optional[bool]' = None, italic: 'Optional[bool]' = None, underline: 'Optional[bool]' = None, strikethrough: 'Optional[bool]' = None, color: 'Optional[Color]' = None, background: 'Optional[Color]' = None, line_height: 'Optional[float]' = None, letter_spacing: 'Optional[float]' = None, alignment: 'Optional[str]' = None, rid: 'Optional[str]' = None, var_name: 'Optional[str]' = None, link: 'Optional[str]' = None, anchor: 'Optional[str]' = None, anchor_name: 'Optional[str]' = None) -> None
 ```
 
 A styled segment of text within a TextBox.runs list. v4.0 feature.
@@ -1484,7 +1539,7 @@ Multi-stop gradient for FillStyle. v4.0 feature.
 ### `LayerEffect`
 
 ```python
-LayerEffect(type: 'str' = 'drop_shadow', enabled: 'bool' = True, color: 'Color' = (0, 0, 0, 200), color2: 'Color' = (255, 255, 255, 200), blend_mode: 'str' = 'normal', blend_mode2: 'str' = 'normal', opacity: 'float' = 1.0, size: 'float' = 2.0, distance: 'float' = 2.0, direction: 'float' = 135.0, spread: 'float' = 0.0, stroke_position: 'str' = 'outside', bevel_kind: 'str' = 'outer', bevel_technique: 'str' = 'smooth', bevel_depth: 'float' = 100.0, bevel_dir: 'str' = 'up', soften: 'float' = 0.0, altitude: 'float' = 45.0, highlight_opacity: 'float' = 0.75, shadow_opacity: 'float' = 0.75, ls_length: 'float' = 10.0, ls_fade: 'bool' = True, ls_taper: 'float' = 1.0, ls_mode: 'str' = 'solid', ls_blur_mode: 'str' = 'linear', ls_color_grad: 'bool' = False, ls_light_angle: 'float' = 45.0, ls_light_size: 'float' = 0.0, ls_grad_colors: 'List[List[float]]' = <factory>, ls_grad_alphas: 'List[List[float]]' = <factory>, ls_grad_blurs: 'List[List[float]]' = <factory>, ls_alpha_mode: 'str' = '', ls_color_mode: 'str' = '', ca_offset: 'float' = 0.5, ca_angle: 'float' = 0.0, ca_mode: 'str' = 'linear', ca_r_color: 'Color' = (255, 0, 0, 255), ca_g_color: 'Color' = (0, 255, 0, 255), ca_b_color: 'Color' = (0, 0, 255, 255), ca_r_offset: 'float' = 0.5, ca_r_angle: 'float' = 0.0, ca_g_offset: 'float' = 0.0, ca_g_angle: 'float' = 0.0, ca_b_offset: 'float' = 0.5, ca_b_angle: 'float' = 180.0, ca_r_distort: 'float' = 2.0, ca_g_distort: 'float' = 0.0, ca_b_distort: 'float' = -2.0, ht_dot: 'float' = 1.5, ht_angle: 'float' = 72.0, ht_shape: 'str' = 'circle', ht_color_mode: 'str' = 'cmyk', ht_render_mode: 'str' = 'size', ht_size_factor: 'float' = 115.0, ht_overlay_scale: 'float' = 1.5, ht_decentralization: 'float' = 0.0, ht_hex: 'bool' = True, ht_random_rotate: 'bool' = False, ht_pattern_mode: 'str' = 'shape', ht_patterns: 'List[str]' = <factory>, ht_keep_background: 'bool' = False, ht_background: 'str' = 'transparent', ht_clip: 'str' = 'whole', ht_extra_channel: 'bool' = False, ht_extra_color: 'str' = 'auto', ht_channels_enabled: 'List[bool]' = <factory>, lsw_pos: 'float' = 0.5, lsw_width: 'float' = 0.3, lsw_angle: 'float' = 45.0, gradient_start: 'Color' = (0, 0, 0, 255), gradient_end: 'Color' = (255, 255, 255, 255), gradient_angle: 'float' = 90.0, texture_path: 'Optional[str]' = None, texture_scale: 'float' = 100.0, texture_data: 'Optional[bytes]' = None, texture_fit: 'str' = 'tile', texture_anchor: 'str' = 'top-left') -> None
+LayerEffect(type: 'str' = 'drop_shadow', enabled: 'bool' = True, eid: 'str' = '', color: 'Color' = (0, 0, 0, 200), color2: 'Color' = (255, 255, 255, 200), blend_mode: 'str' = 'normal', blend_mode2: 'str' = 'normal', opacity: 'float' = 1.0, size: 'float' = 2.0, distance: 'float' = 2.0, direction: 'float' = 135.0, spread: 'float' = 0.0, stroke_position: 'str' = 'outside', bevel_kind: 'str' = 'outer', bevel_technique: 'str' = 'smooth', bevel_depth: 'float' = 100.0, bevel_dir: 'str' = 'up', soften: 'float' = 0.0, altitude: 'float' = 45.0, highlight_opacity: 'float' = 0.75, shadow_opacity: 'float' = 0.75, ls_length: 'float' = 10.0, ls_fade: 'bool' = True, ls_taper: 'float' = 1.0, ls_mode: 'str' = 'solid', ls_blur_mode: 'str' = 'linear', ls_color_grad: 'bool' = False, ls_light_angle: 'float' = 45.0, ls_light_size: 'float' = 0.0, ls_grad_colors: 'List[List[float]]' = <factory>, ls_grad_alphas: 'List[List[float]]' = <factory>, ls_grad_blurs: 'List[List[float]]' = <factory>, ls_alpha_mode: 'str' = '', ls_color_mode: 'str' = '', ca_offset: 'float' = 0.5, ca_angle: 'float' = 0.0, ca_mode: 'str' = 'linear', ca_r_color: 'Color' = (255, 0, 0, 255), ca_g_color: 'Color' = (0, 255, 0, 255), ca_b_color: 'Color' = (0, 0, 255, 255), ca_r_offset: 'float' = 0.5, ca_r_angle: 'float' = 0.0, ca_g_offset: 'float' = 0.0, ca_g_angle: 'float' = 0.0, ca_b_offset: 'float' = 0.5, ca_b_angle: 'float' = 180.0, ca_r_distort: 'float' = 2.0, ca_g_distort: 'float' = 0.0, ca_b_distort: 'float' = -2.0, ht_dot: 'float' = 1.5, ht_angle: 'float' = 72.0, ht_shape: 'str' = 'circle', ht_color_mode: 'str' = 'cmyk', ht_render_mode: 'str' = 'size', ht_size_factor: 'float' = 115.0, ht_overlay_scale: 'float' = 1.5, ht_decentralization: 'float' = 0.0, ht_hex: 'bool' = True, ht_random_rotate: 'bool' = False, ht_pattern_mode: 'str' = 'shape', ht_patterns: 'List[str]' = <factory>, ht_pattern_paths: 'List[str]' = <factory>, ht_keep_background: 'bool' = False, ht_background: 'str' = 'transparent', ht_clip: 'str' = 'whole', ht_extra_channel: 'bool' = False, ht_extra_color: 'str' = 'auto', ht_channels_enabled: 'List[bool]' = <factory>, lsw_pos: 'float' = 0.5, lsw_width: 'float' = 0.3, lsw_angle: 'float' = 45.0, gradient_start: 'Color' = (0, 0, 0, 255), gradient_end: 'Color' = (255, 255, 255, 255), gradient_angle: 'float' = 90.0, texture_path: 'Optional[str]' = None, texture_scale: 'float' = 100.0, texture_data: 'Optional[bytes]' = None, texture_fit: 'str' = 'tile', texture_anchor: 'str' = 'top-left') -> None
 ```
 
 A Photoshop-style layer effect.
@@ -1626,7 +1681,7 @@ None if no preview is present (older files / encrypted full mode).
 ### `Transform`
 
 ```python
-Transform(x: 'float' = 0.0, y: 'float' = 0.0, width: 'float' = 50.0, height: 'float' = 30.0, rotation: 'float' = 0.0, flip_h: 'bool' = False, flip_v: 'bool' = False) -> None
+Transform(x: 'float' = 0.0, y: 'float' = 0.0, width: 'float' = 50.0, height: 'float' = 30.0, rotation: 'float' = 0.0, flip_h: 'bool' = False, flip_v: 'bool' = False, shear_x: 'float' = 0.0) -> None
 ```
 
 Represents the full spatial state of a document object.
@@ -1865,9 +1920,9 @@ and a fallback font is used instead.
 | Name | Value |
 |------|-------|
 
-| `__version__` | `'4.3.0.4'` |
+| `__version__` | `'4.4.0'` |
 
-| `FORMAT_VERSION_STR` | `'4.2.19'` |
+| `FORMAT_VERSION_STR` | `'4.3.0'` |
 
 
 ---

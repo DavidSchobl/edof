@@ -172,8 +172,15 @@ def create_slot(password: str, content_key: bytes,
 
 
 def create_recovery_slot(recovery_key: str, content_key: bytes) -> Dict[str, Any]:
-    """A recovery slot is just an ADMIN slot keyed by the recovery key string."""
-    return create_slot(recovery_key, content_key, permission_level="admin") | {"recovery": True}
+    """A recovery slot is just an ADMIN slot keyed by the recovery key string.
+
+    v4.4.0: the slot is keyed by the NORMALIZED form (no dashes/spaces,
+    uppercase), so unlocking works no matter how the user types the key
+    (with or without dashes, any case). Before, the slot was keyed by the
+    dashed display form and the normalized attempt could never match."""
+    return (create_slot(normalize_recovery_key(recovery_key), content_key,
+                        permission_level="admin")
+            | {"recovery": True})
 
 
 def try_unwrap_slot(slot: Dict[str, Any], password: str) -> Optional[bytes]:
@@ -204,12 +211,15 @@ def unwrap_with_any_password(slots: list, password: str) -> Tuple[Optional[bytes
 
 
 def unwrap_with_recovery_key(slots: list, recovery_key: str) -> Optional[bytes]:
-    """Try the recovery key against any slot marked recovery."""
+    """Try the recovery key against any slot marked recovery.
+
+    v4.4.0: slots are keyed by the normalized key form; the raw form is still
+    tried for files whose recovery slot was written by an older build (those
+    were keyed by the dashed display form)."""
     normalized = normalize_recovery_key(recovery_key)
-    # Recovery slots need to handle both the formatted and normalized form
     for slot in slots:
         if not slot.get("recovery"): continue
-        for candidate in (recovery_key, normalized):
+        for candidate in (normalized, recovery_key):
             ck = try_unwrap_slot(slot, candidate)
             if ck is not None:
                 return ck

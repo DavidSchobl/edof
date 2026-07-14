@@ -219,6 +219,10 @@ class PdfWriter:
         self._page_size_pt: List[Tuple[float, float]] = []
         self._page_streams: List[bytes] = []
         self._page_resources: List[dict] = []   # {fonts:{name:obj_num}, xobjects:{name:obj_num}}
+        # v4.4.0: per-page link annotations. Each entry is a list of dicts:
+        # {"rect": (llx, lly, urx, ury) in pt, "target": url_or_#anchor,
+        #  "dest_page": int page index for internal targets}
+        self._page_annots: List[list] = []
         self._fonts: Dict[str, int]   = {}      # font_name → obj_num
         self._images: Dict[str, int]  = {}      # image_id  → obj_num
         # v4.1.17.4: attached files (PDF embedded files / file attachments)
@@ -262,6 +266,7 @@ class PdfWriter:
         self._page_size_pt.append((w_pt, h_pt))
         self._page_streams.append(b"")
         self._page_resources.append({"fonts": {}, "xobjects": {}})
+        self._page_annots.append([])
         return page
 
     # ── Fonts ────────────────────────────────────────────────────────────────
@@ -303,6 +308,24 @@ class PdfWriter:
         if image_id in self._images:
             return self._images[image_id]
 
+        # v4.4.0: transparency support. When the caller provides an alpha
+        # channel, emit a grayscale /SMask XObject and reference it from the
+        # image dict. Before, has_alpha/alpha_mask were accepted but IGNORED,
+        # so transparent PNGs exported opaque.
+        smask_part = b""
+        if has_alpha and alpha_mask:
+            a_data = zlib.compress(alpha_mask, 9)
+            a_body = (
+                b"<< /Type /XObject /Subtype /Image " +
+                f"/Width {width_px} /Height {height_px} ".encode() +
+                b"/ColorSpace /DeviceGray /BitsPerComponent 8 " +
+                b"/Filter /FlateDecode " +
+                f"/Length {len(a_data)} >>\nstream\n".encode() +
+                a_data + b"\nendstream"
+            )
+            smask_num = self._add_object(a_body)
+            smask_part = f"/SMask {smask_num} 0 R ".encode()
+
         if jpeg_data is not None:
             # JPEG passthrough: no FlateDecode, just DCTDecode
             data = jpeg_data
@@ -310,6 +333,7 @@ class PdfWriter:
                 b"<< /Type /XObject /Subtype /Image " +
                 f"/Width {width_px} /Height {height_px} ".encode() +
                 b"/ColorSpace /DeviceRGB /BitsPerComponent 8 " +
+                smask_part +
                 b"/Filter /DCTDecode " +
                 f"/Length {len(data)} >>\nstream\n".encode() +
                 data + b"\nendstream"
@@ -320,6 +344,7 @@ class PdfWriter:
                 b"<< /Type /XObject /Subtype /Image " +
                 f"/Width {width_px} /Height {height_px} ".encode() +
                 b"/ColorSpace /DeviceRGB /BitsPerComponent 8 " +
+                smask_part +
                 b"/Filter /FlateDecode " +
                 f"/Length {len(data)} >>\nstream\n".encode() +
                 data + b"\nendstream"
@@ -348,6 +373,18 @@ class PdfWriter:
     # ── Save ─────────────────────────────────────────────────────────────────
 
     def save(self, path: str):
+        # v4.4.0: save() appends finalisation objects (page contents, /Pages,
+        # page objects, /Info, /Catalog) to self._objects. A SECOND save() on
+        # the same writer used to append them all AGAIN, producing duplicate
+        # catalogs and a wrong /Size (an unreadable file). Snapshot the object
+        # list here and restore it at the end, so save() is idempotent.
+        _n_before_save = len(self._objects)
+        try:
+            self._save_impl(path)
+        finally:
+            del self._objects[_n_before_save:]
+
+    def _save_impl(self, path: str):
         # 1. Create page content stream objects
         page_content_nums = []
         for stream in self._page_streams:
@@ -362,8 +399,41 @@ class PdfWriter:
         # Reserve the slot:
         self._objects.append(_Obj(pages_obj_num, b""))
 
-        # 3. Page objects
+        # 3. Page objects. v4.4.0: RESERVE the page object numbers first so
+        # link annotations can reference target pages (/Dest) in any order;
+        # the page bodies are filled below with their /Annots arrays.
         page_obj_nums = []
+        for _ in self._page_size_pt:
+            _n = self._next_obj_num()
+            self._objects.append(_Obj(_n, b""))
+            page_obj_nums.append(_n)
+
+        # 3b. Link annotations (v4.4.0): /Subtype /Link with /A URI for
+        # external targets and /Dest [page /Fit] for in-document anchors.
+        page_annot_refs: List[list] = []
+        _annots_src = getattr(self, "_page_annots", None) or []
+        for _pi in range(len(self._page_size_pt)):
+            _refs = []
+            for _a in (_annots_src[_pi] if _pi < len(_annots_src) else []):
+                llx, lly, urx, ury = _a["rect"]
+                _target = str(_a.get("target") or "")
+                if not _target:
+                    continue
+                if _target.startswith("#"):
+                    _dp = _a.get("dest_page")
+                    if _dp is None or not (0 <= int(_dp) < len(page_obj_nums)):
+                        continue
+                    _action = (b"/Dest [" + str(page_obj_nums[int(_dp)]).encode()
+                               + b" 0 R /Fit]")
+                else:
+                    _action = b"/A << /S /URI /URI " + _pdf_string(_target) + b" >>"
+                _body = (b"<< /Type /Annot /Subtype /Link /Rect ["
+                         + (f"{llx:.2f} {lly:.2f} {urx:.2f} {ury:.2f}").encode()
+                         + b"] /Border [0 0 0] " + _action + b" >>")
+                _refs.append(self._add_object(_body))
+            page_annot_refs.append(_refs)
+
+        # 3c. Fill the reserved page bodies
         for i, ((w_pt, h_pt), content_num, resources) in enumerate(
                 zip(self._page_size_pt, page_content_nums, self._page_resources)):
             res_parts = []
@@ -380,14 +450,25 @@ class PdfWriter:
             res_parts.append(b"/ProcSet [/PDF /Text /ImageC /ImageB /ImageI]")
             res = b"<< " + b" ".join(res_parts) + b" >>"
 
+            _annots_part = b""
+            if i < len(page_annot_refs) and page_annot_refs[i]:
+                _annots_part = (b"/Annots ["
+                                + b" ".join(str(r).encode() + b" 0 R"
+                                            for r in page_annot_refs[i])
+                                + b"] ")
             body = (
                 b"<< /Type /Page " +
                 b"/Parent " + str(pages_obj_num).encode() + b" 0 R " +
                 b"/MediaBox [0 0 " + f"{w_pt:.4f} {h_pt:.4f}".encode() + b"] " +
                 b"/Contents " + str(content_num).encode() + b" 0 R " +
+                _annots_part +
                 b"/Resources " + res + b" >>"
             )
-            page_obj_nums.append(self._add_object(body))
+            # fill the reserved placeholder
+            for _j, _obj in enumerate(self._objects):
+                if _obj.obj_num == page_obj_nums[i]:
+                    self._objects[_j] = _Obj(page_obj_nums[i], body)
+                    break
 
         # 4. Fill in /Pages object body
         kids = b" ".join(str(n).encode() + b" 0 R" for n in page_obj_nums)
@@ -470,6 +551,14 @@ class PdfWriter:
         # 7. Build the file
         buf = io.BytesIO()
         buf.write(b"%PDF-1.4\n%\xff\xff\xff\xff\n")
+        # v4.4.0: fail LOUDLY on an unfilled placeholder object. A reserved
+        # object whose body was never written would produce a structurally
+        # broken (unopenable) PDF; raising here turns a silent corruption
+        # into a reproducible error.
+        _empty = [o.obj_num for o in self._objects if not o.body]
+        if _empty:
+            raise RuntimeError(
+                "PDF writer: unfilled object placeholder(s) %r" % _empty)
         offsets = [0] * (len(self._objects) + 1)   # 1-indexed
         for obj in self._objects:
             offsets[obj.obj_num] = buf.tell()
@@ -559,6 +648,22 @@ class PdfPage:
         self._buf.write(f"{c:.6f} {s:.6f} {-s:.6f} {c:.6f} {e:.6f} {f:.6f} cm\n".encode())
         self._save_to_writer()
 
+    def shear_at(self, shear_x: float, cx_mm: float, cy_mm: float):
+        """v4.3.5.54: apply a horizontal shear (x' = x + shear_x*y) about the
+        given centre, matching Transform.shear_x. Affects subsequent draws until
+        restore_state(). In top-left mm coords the shear is x += shx*y; PDF y is
+        flipped, so the off-diagonal sign is negated to keep the same visual skew."""
+        cx_pt = self._mm_to_pt(cx_mm)
+        cy_pt = self._y_pdf(cy_mm)
+        # Combined matrix: T(cx,cy) × Shear × T(-cx,-cy), with the shear term
+        # negated for the flipped PDF y axis. Shear matrix [[1, -shx],[0,1]].
+        shx = -float(shear_x)
+        # [1  shx  -shx*cy]
+        # [0   1     0    ]
+        e = -shx * cy_pt
+        self._buf.write(f"1 0 {shx:.6f} 1 {e:.6f} 0 cm\n".encode())
+        self._save_to_writer()
+
     def _color_op(self, color, op_fill: bool) -> bytes:
         """Generate PDF color operator. color = (r,g,b) or (r,g,b,a) 0-255."""
         if not color: return b""
@@ -599,6 +704,21 @@ class PdfPage:
                   color=color, width_pt=max(0.5, font_size_pt * 0.05))
 
     # ── Shapes ──────────────────────────────────────────────────────────────
+
+    def link(self, x_mm: float, y_mm: float, w_mm: float, h_mm: float,
+             target: str, dest_page: Optional[int] = None):
+        """v4.4.0: register a clickable link annotation over the given mm
+        rect. target is an external URL (http/https/mailto) or an in-document
+        '#<anchor_id>' (dest_page = 0-based target page index then)."""
+        if not target:
+            return
+        llx = self._mm_to_pt(x_mm)
+        urx = self._mm_to_pt(x_mm + w_mm)
+        ury = self._y_pdf(y_mm)
+        lly = self._y_pdf(y_mm + h_mm)
+        self.writer._page_annots[self._idx].append(
+            {"rect": (llx, lly, urx, ury), "target": str(target),
+             "dest_page": dest_page})
 
     def rect(self, x_mm: float, y_mm: float, w_mm: float, h_mm: float,
              fill=None, stroke=(0, 0, 0), width_pt: float = 1.0,
@@ -669,28 +789,49 @@ class PdfPage:
 
     def path(self, path_data: list,
              fill=None, stroke=(0, 0, 0), width_pt: float = 1.0):
-        """Render an SVG-style path. Coordinates in mm."""
+        """Render an SVG-style path. Coordinates in mm.
+
+        v4.4.0: quadratic segments (Q) use the proper degree elevation
+        C1 = P0 + 2/3 (Q - P0), C2 = P2 + 2/3 (Q - P2), which needs the
+        CURRENT POINT (P0). The old code used the quadratic control point as
+        both cubic control points, so exported Q segments rendered visibly
+        differently from the PNG renderer (whose _quad_bezier is correct).
+        The current point is tracked across M/L/C/Q; Z restores the subpath
+        start."""
+        cur = None          # current point, pt coordinates
+        sub_start = None    # subpath start (for Z)
         for cmd in path_data:
             if not cmd: continue
             op = cmd[0]
             if op == "M":
                 x, y = self._mm_to_pt(cmd[1]), self._y_pdf(cmd[2])
                 self._buf.write(f"{x:.4f} {y:.4f} m\n".encode())
+                cur = (x, y); sub_start = (x, y)
             elif op == "L":
                 x, y = self._mm_to_pt(cmd[1]), self._y_pdf(cmd[2])
                 self._buf.write(f"{x:.4f} {y:.4f} l\n".encode())
+                cur = (x, y)
             elif op == "C":
                 x1, y1 = self._mm_to_pt(cmd[1]), self._y_pdf(cmd[2])
                 x2, y2 = self._mm_to_pt(cmd[3]), self._y_pdf(cmd[4])
                 x,  y  = self._mm_to_pt(cmd[5]), self._y_pdf(cmd[6])
                 self._buf.write(f"{x1:.4f} {y1:.4f} {x2:.4f} {y2:.4f} {x:.4f} {y:.4f} c\n".encode())
+                cur = (x, y)
             elif op == "Q":
-                x1, y1 = self._mm_to_pt(cmd[1]), self._y_pdf(cmd[2])
+                qx, qy = self._mm_to_pt(cmd[1]), self._y_pdf(cmd[2])
                 x,  y  = self._mm_to_pt(cmd[3]), self._y_pdf(cmd[4])
-                # Convert Q to C (cubic Bezier from quadratic)
-                self._buf.write(f"{x1:.4f} {y1:.4f} {x1:.4f} {y1:.4f} {x:.4f} {y:.4f} c\n".encode())
+                if cur is None:
+                    cur = (qx, qy)      # degenerate: no current point yet
+                c1x = cur[0] + 2.0 / 3.0 * (qx - cur[0])
+                c1y = cur[1] + 2.0 / 3.0 * (qy - cur[1])
+                c2x = x + 2.0 / 3.0 * (qx - x)
+                c2y = y + 2.0 / 3.0 * (qy - y)
+                self._buf.write(
+                    f"{c1x:.4f} {c1y:.4f} {c2x:.4f} {c2y:.4f} {x:.4f} {y:.4f} c\n".encode())
+                cur = (x, y)
             elif op == "Z":
                 self._buf.write(b"h\n")
+                cur = sub_start
         self._fill_stroke(fill, stroke, width_pt)
         self._save_to_writer()
 

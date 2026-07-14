@@ -1,7 +1,7 @@
 # edof/engine/document_paginate.py
 """v4.1.23: Clean document-mode pagination.
 
-Replaces edof.engine.textbox_flow.repaginate_doc and all its helpers.
+Replaces the old edof.engine.textbox_flow.repaginate_doc engine (removed in v4.4.0 as a dead duplicate).
 
 Core principle: doc.body.paragraphs is the canonical content. Pages are
 PURE VIEWPORTS regenerated from that content on every change. Each page
@@ -331,9 +331,94 @@ def _make_body_textbox(doc, ref_style=None) -> DocumentTextBox:
     return tb
 
 
+# v4.4.0: canonical, page-independent ids for the header/footer band boxes.
+# The SAME id on every page makes the band addressable by a single batch
+# ObjectRef (resolve_ref finds the page's box wherever the row applies) and
+# lets a variable rid in the band template drive every page.
+HF_HEADER_ID = "hf_header"
+HF_FOOTER_ID = "hf_footer"
+
+
+def _sync_hf_objects(doc, pg, page_idx: int, page_count: int) -> None:
+    """v4.4.0: header/footer as a CONTAINER of objects. Template objects live
+    in doc.body.header_objects / footer_objects; every page gets a LITERAL
+    clone of each template with the SAME id (replace-in-place keeps z-order).
+    Clones are derived state, rebuilt on each pagination; a template removed
+    from the container removes its clones. Container clones do NOT resolve
+    {page_number} tokens (that is the band text's job) so an edited clone can
+    be written back to the template losslessly."""
+    body = doc.body
+    for role, enabled in (("header", bool(body.header_enabled)),
+                          ("footer", bool(body.footer_enabled))):
+        templates = list(getattr(body, role + "_objects", None) or [])
+        tmpl_ids = {getattr(t, "id", None) for t in templates}
+        keep = []
+        for o in pg.objects:
+            if (getattr(o, "_hf_container", None) == role
+                    and (not enabled or getattr(o, "id", None) not in tmpl_ids)):
+                continue                     # stale clone: template gone/off
+            keep.append(o)
+        if len(keep) != len(pg.objects):
+            pg.objects[:] = keep
+        if not enabled or not templates:
+            continue
+        for tmpl in templates:
+            clone = _copy.deepcopy(tmpl)
+            clone._hf_container = role
+            replaced = False
+            for i, o in enumerate(pg.objects):
+                if getattr(o, "id", None) == getattr(clone, "id", None):
+                    pg.objects[i] = clone
+                    replaced = True
+                    break
+            if not replaced:
+                if role == "header":
+                    hb = find_document_header_on_page(pg)
+                    at = (pg.objects.index(hb) + 1
+                          if hb is not None and hb in pg.objects else 0)
+                    pg.objects.insert(at, clone)
+                else:
+                    pg.objects.append(clone)
+
+
+def sync_hf_objects_all(doc) -> None:
+    """v4.4.0: refresh header/footer container clones on EVERY page (used by
+    the editor after a container edit; pagination itself calls the per-page
+    sync)."""
+    if doc is None or getattr(doc, "body", None) is None:
+        return
+    pages = list(getattr(doc, "pages", None) or [])
+    for i, pg in enumerate(pages):
+        _sync_hf_objects(doc, pg, i, len(pages))
+
+
+def writeback_hf_clone(doc, obj) -> bool:
+    """v4.4.0: if obj is a header/footer container CLONE (its id matches a
+    template), copy its edited state back into the template and refresh the
+    clones on every page. Returns True when a writeback happened."""
+    body = getattr(doc, "body", None) if doc is not None else None
+    if body is None or obj is None:
+        return False
+    oid = getattr(obj, "id", None)
+    if oid is None:
+        return False
+    for role in ("header", "footer"):
+        templates = getattr(body, role + "_objects", None) or []
+        for i, t in enumerate(templates):
+            if getattr(t, "id", None) == oid:
+                tmpl = _copy.deepcopy(obj)
+                try: del tmpl._hf_container
+                except Exception: pass
+                templates[i] = tmpl
+                sync_hf_objects_all(doc)
+                return True
+    return False
+
+
 def _make_header_textbox(doc, ref_style=None) -> DocumentHeaderBox:
     bx, by, bw, bh = _header_rect_mm(doc)
     tb = DocumentHeaderBox()
+    tb.id = HF_HEADER_ID          # v4.4.0: canonical id, same on every page
     tb.transform.x = bx; tb.transform.y = by
     tb.transform.width = bw; tb.transform.height = bh
     if ref_style is not None:
@@ -348,6 +433,7 @@ def _make_header_textbox(doc, ref_style=None) -> DocumentHeaderBox:
 def _make_footer_textbox(doc, ref_style=None) -> DocumentFooterBox:
     bx, by, bw, bh = _footer_rect_mm(doc)
     tb = DocumentFooterBox()
+    tb.id = HF_FOOTER_ID          # v4.4.0: canonical id, same on every page
     tb.transform.x = bx; tb.transform.y = by
     tb.transform.width = bw; tb.transform.height = bh
     if ref_style is not None:
@@ -985,6 +1071,16 @@ def _apply_hf_style(box, style_dict):
     try:
         from edof.format.styles import TextStyle
         box.style = TextStyle.from_dict(dict(style_dict))
+        # v4.4.0 CRITICAL: band styles NEVER carry padding (same rule as the
+        # body boxes; migrate_legacy_doc_boxes zeroes it). A stored template
+        # style with non-zero padding re-armed an endless zero -> restore ->
+        # zero cycle across paginations, so EVERY idle repagination reported
+        # changed=True and the whole UI (batch panel included) flickered
+        # whenever a header/footer was enabled.
+        for _pad in ('padding', 'padding_top', 'padding_bot',
+                     'padding_left', 'padding_right'):
+            try: setattr(box.style, _pad, 0.0)
+            except Exception: pass
     except Exception:
         pass
 
@@ -1007,6 +1103,9 @@ def _ensure_header_footer(doc, pg, page_idx: int, page_count: int,
             existing_h = _make_header_textbox(doc, ref_style=ref_style)
             pg.objects.insert(0, existing_h)
         else:
+            # v4.4.0: migrate pre-4.4 random ids to the canonical one so a
+            # single batch ObjectRef addresses the band on every page
+            existing_h.id = HF_HEADER_ID
             # Ensure geometry up to date
             hx, hy, hw, hh = _header_rect_mm(doc)
             existing_h.transform.x = hx; existing_h.transform.y = hy
@@ -1025,6 +1124,7 @@ def _ensure_header_footer(doc, pg, page_idx: int, page_count: int,
             existing_f = _make_footer_textbox(doc, ref_style=ref_style)
             pg.objects.append(existing_f)
         else:
+            existing_f.id = HF_FOOTER_ID   # v4.4.0: canonical id migration
             fx, fy, fw, fh = _footer_rect_mm(doc)
             existing_f.transform.x = fx; existing_f.transform.y = fy
             existing_f.transform.width = fw; existing_f.transform.height = fh
@@ -1034,6 +1134,9 @@ def _ensure_header_footer(doc, pg, page_idx: int, page_count: int,
         existing_f.text = runs_text(resolved)
     elif existing_f is not None:
         pg.objects.remove(existing_f)
+
+    # v4.4.0: header/footer container objects (clones per page)
+    _sync_hf_objects(doc, pg, page_idx, page_count)
 
 
 # ────────────────────────────────────────────────────────────────────────

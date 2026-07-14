@@ -180,12 +180,41 @@ class Layout:
 
 # ── Layout function ────────────────────────────────────────────────────────────
 
+# v4.4.0 (BUG #12, zoom drift): the WYSIWYG canvas renders at a
+# zoom-dependent DPI, and font metrics measured at different pixel sizes do
+# not scale exactly linearly -- so line breaks and positions crept between
+# zoom levels ("text jumps"). Layout GEOMETRY is therefore always computed at
+# one fixed REFERENCE DPI and scaled to the requested DPI; glyphs are still
+# rasterised at the target DPI (crisp), only their positions come from the
+# reference metrics. Side benefit: the measurement caches stop re-measuring
+# on every zoom level, which speeds the interactive canvas up.
+LAYOUT_REF_DPI = 300.0
+
+
+def _scale_layout_geometry(lay: "Layout", k: float) -> "Layout":
+    """Scale every geometric field of a layout by k (in place)."""
+    if abs(k - 1.0) < 1e-9:
+        return lay
+    for c in lay.chars:
+        c.x *= k; c.y *= k; c.w *= k
+        c.in_line_x *= k; c.line_top *= k
+        c.line_h *= k; c.ascender *= k
+    for ln in lay.lines:
+        ln.width *= k; ln.height *= k
+        ln.ascender *= k; ln.top *= k; ln.left *= k
+    lay.total_w *= k; lay.total_h *= k
+    lay.inner_x *= k; lay.inner_y *= k
+    lay.inner_w *= k; lay.inner_h *= k
+    return lay
+
+
 def layout_runs(runs, parent_style,
                 box_x_px: float, box_y_px: float,
                 box_w_px: float, box_h_px: float,
                 dpi: float, scale: float = 1.0,
                 paragraph_alignments: dict = None,
-                add_trailing_virtual: bool = True) -> Layout:
+                add_trailing_virtual: bool = True,
+                _ref_pass: bool = False) -> Layout:
     """Produce a complete layout for the given runs inside the given box.
 
     v4.1.21: paragraph_alignments is an optional dict mapping paragraph
@@ -200,6 +229,17 @@ def layout_runs(runs, parent_style,
     would otherwise sit in the bottom margin, where the caret must never
     rest. The last page of the flow keeps the trailing virtual (True).
     """
+    # v4.4.0: zoom-stable geometry -- lay out at the reference DPI, scale.
+    if not _ref_pass and abs(float(dpi) - LAYOUT_REF_DPI) > 0.01:
+        k = float(dpi) / LAYOUT_REF_DPI
+        ref = layout_runs(runs, parent_style,
+                          box_x_px / k, box_y_px / k,
+                          box_w_px / k, box_h_px / k,
+                          LAYOUT_REF_DPI, scale=scale,
+                          paragraph_alignments=paragraph_alignments,
+                          add_trailing_virtual=add_trailing_virtual,
+                          _ref_pass=True)
+        return _scale_layout_geometry(ref, k)
     paragraph_alignments = paragraph_alignments or {}
     # Padding (per-side if available)
     if hasattr(parent_style, 'get_padding'):
@@ -714,8 +754,13 @@ def _glyph_fast_ok():
 
 def render_layout_onto(draw, layout: Layout, runs, parent_style,
                        dpi: float, scale: float = 1.0,
-                       clip_to_inner: bool = True) -> None:
-    """Draw a previously-computed layout onto a PIL ImageDraw."""
+                       clip_to_inner: bool = True, force_var_rids=None,
+                       hover_link=None) -> None:
+    """Draw a previously-computed layout onto a PIL ImageDraw.
+
+    v4.3.7.0: force_var_rids highlights the runs whose rid is in this set with
+    the rainbow marker even when Show Variables is off (used to flag the
+    variable(s) focused / multi-selected from the Objects panel)."""
     # v4.2.11.36: resolve each RUN once instead of once per character.
     # run.resolve + font lookup + colour unpacking were executed for every
     # glyph (thousands of times on a document page) although they only depend
@@ -732,12 +777,41 @@ def render_layout_onto(draw, layout: Layout, runs, parent_style,
                 rs = run.resolve(parent_style, scale)
                 font, _ = _run_to_font(rs, dpi)
                 color = tuple(rs["color"][:3]) if rs["color"] else (0, 0, 0)
+                # v4.4.1: hovered hyperlink tints with the hover colour
+                # (only when the run has no explicit colour override)
+                if (hover_link is not None
+                        and getattr(run, "link", None) == hover_link
+                        and getattr(run, "color", None) is None):
+                    try:
+                        from edof.format.styles import active_link_style
+                        hc = active_link_style().get("hover_color")
+                        if hc:
+                            color = tuple(hc[:3])
+                    except Exception:
+                        pass
                 bg = rs.get("background")
                 sw = max(1, int(rs["font_size"] * dpi / 25.4) // 14)
-                ctx = (rs, font, color, bg, sw)
+                is_var = bool(getattr(run, "var_name", None))
+                var_rid = getattr(run, "rid", None) if is_var else None
+                ctx = (rs, font, color, bg, sw, is_var, var_rid)
             _rcache[run_idx] = ctx
         return ctx
 
+    try:
+        from edof.engine.text_engine import (show_variables as _show_vars,
+                                             focus_var_rids as _focus_rids,
+                                             show_anchors as _show_anch,
+                                             _draw_anchor_gradient,
+                                             _draw_var_rainbow)
+        _showv = _show_vars()
+        _focusv = _focus_rids()
+        _showa = _show_anch()
+    except Exception:
+        _showv = False
+        _focusv = None
+        _showa = False
+        _draw_var_rainbow = None
+        _draw_anchor_gradient = None
     _fast = _glyph_fast_ok()
     for line in layout.lines:
         for c in line.chars:
@@ -746,12 +820,29 @@ def render_layout_onto(draw, layout: Layout, runs, parent_style,
             ctx = _run_ctx(c.run_idx)
             if ctx is None:
                 continue
-            rs, font, color, bg, sw = ctx
+            rs, font, color, bg, sw, is_var, var_rid = ctx
             # baseline draw position: line_top + (line_ascender - char_asc)
             draw_y = c.line_top + (line.ascender - c.ascender)
             # background highlight
             if bg and len(bg) >= 4 and bg[3] > 0:
                 draw.rectangle([c.x, c.line_top, c.x + c.w, c.line_top + c.line_h], fill=bg)
+            # v4.3.6.4: variable-text marker (view-only) — rainbow gradient under
+            # the span, one full hue sweep per 3.5mm, flowing across glyphs.
+            # v4.3.7.0: also drawn for the panel-focused / multi-selected
+            # variable(s) (force_var_rids) even when Show Variables is off.
+            _mark = (_showv and is_var) or (
+                force_var_rids and var_rid in force_var_rids) or (
+                _focusv and var_rid in _focusv)
+            if _mark and is_var and _draw_var_rainbow is not None:
+                _draw_var_rainbow(draw, c.x, c.line_top, c.x + c.w,
+                                  c.line_top + c.line_h, dpi)
+            # v4.4.0: link-target (anchor) mark, translucent red -> blue
+            # gradient; view-only, default OFF (View menu toggle)
+            if (_showa and _draw_anchor_gradient is not None
+                    and c.run_idx < len(runs)
+                    and getattr(runs[c.run_idx], "anchor", None)):
+                _draw_anchor_gradient(draw, c.x, c.line_top, c.x + c.w,
+                                      c.line_top + c.line_h)
             # draw char (cached FreeType mask when the self-check passed;
             # bit-identical -- otherwise plain draw.text)
             if _fast:

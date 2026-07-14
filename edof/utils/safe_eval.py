@@ -26,14 +26,53 @@ import operator
 from typing import Optional
 
 
+class _UnsafeExpression(Exception):
+    pass
+
+
+# v4.4.0 security: visible_if comes straight from the (untrusted) file, so the
+# evaluator must be DoS-proof. Guarded operations below: ** is capped (a
+# 9**9**9 in a document froze the process before), sequence repetition and
+# addition are size-capped.
+_MAX_POW_EXP    = 64        # |exponent| cap for **
+_MAX_NUM_BITS   = 4096      # cap on integer magnitude for ** results
+_MAX_SEQ_LEN    = 10000     # cap on len(str/list/tuple) from * and +
+
+
+def _safe_pow(a, b):
+    if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+        raise _UnsafeExpression("** needs numbers")
+    if abs(b) > _MAX_POW_EXP:
+        raise _UnsafeExpression("** exponent too large")
+    if isinstance(a, int) and isinstance(b, int) and b > 0:
+        if a != 0 and abs(a).bit_length() * b > _MAX_NUM_BITS:
+            raise _UnsafeExpression("** result too large")
+    return operator.pow(a, b)
+
+
+def _safe_mult(a, b):
+    for seq, n in ((a, b), (b, a)):
+        if isinstance(seq, (str, list, tuple)) and isinstance(n, (int, float)):
+            if n * len(seq) > _MAX_SEQ_LEN:
+                raise _UnsafeExpression("* repetition too large")
+    return operator.mul(a, b)
+
+
+def _safe_add(a, b):
+    if isinstance(a, (str, list, tuple)) and isinstance(b, (str, list, tuple)):
+        if len(a) + len(b) > _MAX_SEQ_LEN:
+            raise _UnsafeExpression("+ result too large")
+    return operator.add(a, b)
+
+
 _BIN_OPS = {
-    ast.Add:     operator.add,
+    ast.Add:     _safe_add,
     ast.Sub:     operator.sub,
-    ast.Mult:    operator.mul,
+    ast.Mult:    _safe_mult,
     ast.Div:     operator.truediv,
     ast.FloorDiv:operator.floordiv,
     ast.Mod:     operator.mod,
-    ast.Pow:     operator.pow,
+    ast.Pow:     _safe_pow,
 }
 
 _CMP_OPS = {
@@ -49,10 +88,6 @@ _UNARY_OPS = {
     ast.UAdd: operator.pos,
     ast.Not:  operator.not_,
 }
-
-
-class _UnsafeExpression(Exception):
-    pass
 
 
 def _coerce_number(v):
@@ -129,7 +164,8 @@ def evaluate(expression: str, context: dict) -> Optional[bool]:
     try:
         tree = ast.parse(expression, mode="eval")
         return bool(_eval(tree.body, context))
-    except (_UnsafeExpression, SyntaxError, ValueError, TypeError, ZeroDivisionError):
+    except (_UnsafeExpression, SyntaxError, ValueError, TypeError,
+            ZeroDivisionError, OverflowError, MemoryError, RecursionError):
         return None
 
 

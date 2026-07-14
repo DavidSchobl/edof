@@ -74,20 +74,52 @@ def _color(c):
 
 def _emit(obj, ctx):
     from edof.format.objects import (TextBox, ImageBox, Shape, QRCode, Group, Table, SvgBox)
-    if isinstance(obj, TextBox):  return _emit_textbox(obj, ctx)
-    if isinstance(obj, ImageBox): return _emit_imagebox(obj, ctx)
-    if isinstance(obj, SvgBox):   return _emit_svgbox(obj, ctx)
-    if isinstance(obj, Shape):    return _emit_shape(obj, ctx)
-    if isinstance(obj, QRCode):   return _emit_qrcode(obj, ctx)
-    if isinstance(obj, Table):    return _emit_table(obj, ctx)
     if isinstance(obj, Group):
         from edof.utils.safe_eval import is_visible
         out = []
         for child in obj.flatten():
             if is_visible(child, ctx["doc"].variables):
                 out.extend(_emit(child, ctx))
-        return out
-    return []
+        # v4.3.5.54: a rotated group wraps its children in a rotation about the
+        # group center (children are in the group's local, un-rotated space).
+        return _wrap_transform(obj, out)
+    if isinstance(obj, TextBox):  inner = _emit_textbox(obj, ctx)
+    elif isinstance(obj, ImageBox): inner = _emit_imagebox(obj, ctx)
+    elif isinstance(obj, SvgBox):   inner = _emit_svgbox(obj, ctx)
+    elif isinstance(obj, Shape):    inner = _emit_shape(obj, ctx)
+    elif isinstance(obj, QRCode):   inner = _emit_qrcode(obj, ctx)
+    elif isinstance(obj, Table):    inner = _emit_table(obj, ctx)
+    else: return []
+    # v4.3.5.54: apply the object's rotation and shear (previously ignored on
+    # export) as an SVG transform about the object's center.
+    return _wrap_transform(obj, inner)
+
+
+def _wrap_transform(obj, inner):
+    """v4.3.5.54: wrap an object's SVG output in a <g> that applies its rotation
+    and horizontal shear about the object's center, matching the renderer
+    (local -> shear -> rotate). No-op when there's no rotation/shear/flip."""
+    t = obj.transform
+    rot = getattr(t, "rotation", 0) or 0
+    shx = getattr(t, "shear_x", 0.0) or 0.0
+    fh = getattr(t, "flip_h", False)
+    fv = getattr(t, "flip_v", False)
+    if rot % 360 == 0 and not shx and not fh and not fv:
+        return inner
+    cx = t.x + t.width / 2.0
+    cy = t.y + t.height / 2.0
+    # SVG transforms apply right-to-left: move to center, rotate, shear, flip,
+    # move back -- so a local point is flipped, sheared, then rotated (== render).
+    parts = [f"translate({cx},{cy})"]
+    if rot % 360 != 0:
+        parts.append(f"rotate({rot})")
+    if shx:
+        parts.append(f"matrix(1,0,{shx},1,0,0)")     # x' = x + shx*y
+    if fh or fv:
+        parts.append(f"scale({-1 if fh else 1},{-1 if fv else 1})")
+    parts.append(f"translate({-cx},{-cy})")
+    g_open = '<g transform="' + " ".join(parts) + '">'
+    return [g_open] + list(inner) + ["</g>"]
 
 
 def _emit_svgbox(obj, ctx):
@@ -207,6 +239,18 @@ def _emit_runs(obj, x_mm, y_mm, w_mm, h_mm):
                 f'font-weight="{weight}" font-style="{style}"'
                 f'{deco_attr} '
                 f'fill="{_color(color)}">{_xml.escape(run.text)}</tspan>')
+        # v4.4.0: a link run becomes a clickable <a> (SVG allows <a> inside
+        # <text>). Only whitelisted targets are emitted; in-document anchors
+        # become fragment refs (viewers may ignore them, harmless).
+        _lnk = getattr(run, "link", None)
+        if _lnk:
+            from edof.utils.links import validate_link
+            _safe = validate_link(_lnk)
+            if _safe is not None:
+                _href = _xml.escape(_safe, {'"': "&quot;"})
+                _tgt = "" if _safe.startswith("#") else ' target="_blank"'
+                span = (f'<a href="{_href}" xlink:href="{_href}"{_tgt}>'
+                        f'{span}</a>')
         spans.append(span)
 
     out.append(f'<text x="{x_mm}" y="{base_y}">{"".join(spans)}</text>')
@@ -249,8 +293,11 @@ def _emit_shape(obj, ctx):
         )
     elif obj.shape_type == SHAPE_LINE:
         if obj.points and len(obj.points) >= 2:
+            # v4.3.5.48: line points are LOCAL -> add the transform origin
             p1, p2 = obj.points[0], obj.points[1]
-            out.append(f'<line x1="{p1[0]}" y1="{p1[1]}" x2="{p2[0]}" y2="{p2[1]}" '
+            x1, y1 = p1[0] + t.x, p1[1] + t.y
+            x2, y2 = p2[0] + t.x, p2[1] + t.y
+            out.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
                        f'stroke="{stroke_str}" stroke-width="{sw}" />')
         else:
             out.append(f'<line x1="{t.x}" y1="{t.y}" x2="{t.x + t.width}" y2="{t.y + t.height}" '
@@ -309,12 +356,32 @@ def _emit_gradient_def(gradient, gid):
 
 
 def _emit_imagebox(obj, ctx):
-    if not obj.resource_id or obj.resource_id not in ctx["doc"].resources:
+    # v4.4.0 (BUG #10 regression): resource_id may be a FILE PATH (that is
+    # how a batch fills an image column). The raster renderer resolved paths
+    # since 4.3.6.27, but the SVG/PDF exports still required a resource-store
+    # key, so batch-filled images silently vanished from exports.
+    data = None
+    mime = "image/png"
+    if obj.resource_id and obj.resource_id in ctx["doc"].resources:
+        entry = ctx["doc"].resources.get(obj.resource_id)
+        if not entry: return []
+        data = entry.data
+        mime = entry.mime_type or "image/png"
+    else:
+        import os as _os
+        rid = obj.resource_id
+        if rid and isinstance(rid, str) and _os.path.isfile(rid):
+            try:
+                with open(rid, "rb") as _f:
+                    data = _f.read()
+                _ext = _os.path.splitext(rid)[1].lower().lstrip(".")
+                mime = ("image/jpeg" if _ext in ("jpg", "jpeg")
+                        else "image/%s" % (_ext or "png"))
+            except Exception:
+                return []
+    if data is None:
         return []
-    entry = ctx["doc"].resources.get(obj.resource_id)
-    if not entry: return []
-    mime = entry.mime_type or "image/png"
-    b64  = base64.b64encode(entry.data).decode("ascii")
+    b64  = base64.b64encode(data).decode("ascii")
     t    = obj.transform
     return [
         f'<image x="{t.x}" y="{t.y}" width="{t.width}" height="{t.height}" '
@@ -378,6 +445,15 @@ def _emit_table(obj, ctx):
     for h in row_h_mm[:-1]: y_off.append(y_off[-1] + h)
 
     out = []
+    # v4.4.0 perf: precompute the {variable} replacement pairs once per table
+    _var_repl = None
+    try:
+        _vars = ctx["doc"].variables
+        if _vars:
+            _var_repl = [("{" + n + "}", str(_vars.get(n)))
+                         for n in _vars.names() if _vars.get(n) is not None]
+    except Exception:
+        _var_repl = None
     for ri in range(n_rows):
         for ci in range(n_cols):
             cell = obj.cells[ri][ci]
@@ -389,11 +465,10 @@ def _emit_table(obj, ctx):
                 out.append(f'<rect x="{cx}" y="{cy}" width="{cw}" height="{ch}" '
                            f'fill="{_color(bg)}" />')
             cell_text = cell.text
-            if ctx["doc"].variables and "{" in cell_text:
-                for name in ctx["doc"].variables.names():
-                    v = ctx["doc"].variables.get(name)
-                    if v is not None:
-                        cell_text = cell_text.replace("{" + name + "}", str(v))
+            if _var_repl and "{" in cell_text:
+                for k, v in _var_repl:
+                    if k in cell_text:
+                        cell_text = cell_text.replace(k, v)
             if cell_text:
                 font_size_mm = cell.style.font_size  # v4.1.17: already mm
                 ty = cy + ch/2 + font_size_mm * 0.35
