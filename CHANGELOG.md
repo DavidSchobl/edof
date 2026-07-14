@@ -403,6 +403,14 @@ batch variables inside) and hyperlinks. File format bumped once, to 4.3.0
   the kwarg, so the export died with a TypeError into the generic error
   dialog. The wrapper now accepts and forwards embed_source.
 
+### Fixed, CI workflow
+- **GitHub Actions test job could not run the suite.** It installed only
+  [dev,qr], but the suite includes the PyQt6 editor/panel tests, so the
+  3.11 job died at collection and cancelled the matrix, which blocked the
+  PyPI publish job. The workflow now installs [all,dev] + pypdf, installs
+  the Qt system libraries (libegl1 and friends) on the runner and runs
+  pytest with QT_QPA_PLATFORM=offscreen.
+
 ### Fixed, release deploy
 - **numpy is now a declared core dependency.** The deploy test gate (fresh
   venv) exposed that numpy was a silent hard requirement all along: the
