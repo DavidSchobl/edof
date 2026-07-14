@@ -99,7 +99,7 @@ Each version's venv is independent. Removing a version is just deleting its fold
 
 ## Compatibility
 
-- **Python:** 3.9 or newer
+- **Python:** 3.10 or newer (since 4.4.0; 3.9 is EOL)
 - **Operating systems:** Windows, Linux, macOS — all features work cross-platform
 - **Pillow:** any version >= 9.0
 - **numpy:** any version >= 1.24 (core since 4.4.0)

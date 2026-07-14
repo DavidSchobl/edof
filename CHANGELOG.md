@@ -403,6 +403,12 @@ batch variables inside) and hyperlinks. File format bumped once, to 4.3.0
   the kwarg, so the export died with a TypeError into the generic error
   dialog. The wrapper now accepts and forwards embed_source.
 
+### Changed, Python floor
+- **Minimum Python is 3.10.** Python 3.9 reached end of life in October
+  2025 and the PyQt6 editor tests segfault on it in CI (exit 139) while
+  3.10+ passes cleanly. requires-python is >=3.10, classifiers and the CI
+  matrix (3.10 / 3.11 / 3.13) updated, README and INSTALL adjusted.
+
 ### Fixed, CI workflow
 - **GitHub Actions test job could not run the suite.** It installed only
   [dev,qr], but the suite includes the PyQt6 editor/panel tests, so the

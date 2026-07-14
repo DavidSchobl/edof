@@ -726,7 +726,7 @@ Each version's venv is independent. Removing a version is `rmdir /s /q <folder>`
 
 ## Compatibility
 
-- Python 3.9+
+- Python 3.10+ (3.9 reached end of life in October 2025)
 - All exports work with the core install (Pillow + numpy); everything else is optional
 - Cross-platform (tested on Windows, Linux, macOS)
 
